@@ -1,31 +1,5 @@
 """
 evidencias.py — formateo de respuesta + panel de FUENTES para el RAG de VIH.
-
-Reemplaza a tu format_answer / _norm / clase C originales. Úsalo así en tu
-script (sin tocar retrieve / build_context / generate_answer):
-
-    from evidencias import format_answer
-    ...
-    answer = generate_answer(question, formatted_context)
-    print(format_answer(answer, chunk_index))
-
-QUÉ ARREGLA (el caso de la "recomendación 2" de tu ejemplo):
-
-  · Los chunks tipo RECOMENDACIONES son BLOQUES: un solo chunk con varias
-    recomendaciones numeradas, cada una con su propio grado en línea (A-I)…
-    Tu `evidence_grades` mezcla TODOS los grados del bloque -> por eso salía
-    "grades: A-I, A-II, A-III, B-I, B-III". Ahora la cita se resuelve a UNA
-    recomendación concreta y solo se muestran los grados de las cláusulas que
-    la cita realmente cubre.
-
-  · La sección salía vacía ("RECOMENDACIONES" a secas) porque section_number
-    es None y heading es genérico. Ahora se construye desde section_path el
-    contexto del padre:  "3. MANEJO DE LA MUJER GESTANTE › RECOMENDACIONES".
-
-  · La verificación literal era frágil (markdown _ * , grados en línea, comas,
-    erratas). Ahora la normalización quita énfasis, grados y puntuación, y hay
-    respaldo difuso por contención. Probado: 558/558 chunks sin fallos, sin
-    falsos positivos en citas inventadas.
 """
 import re
 import textwrap

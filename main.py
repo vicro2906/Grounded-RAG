@@ -2,14 +2,13 @@ import os
 import json
 from openai import OpenAI
 from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance, PointStruct
 from qdrant_client import models
 from evidencias import format_answer
 
 from dotenv import load_dotenv
 load_dotenv()
 
-QDRANT_URL     = os.environ.get("QDRANT_URL")        # https://....cloud.qdrant.io:6333
+QDRANT_URL     = os.environ.get("QDRANT_URL")       
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
@@ -23,7 +22,6 @@ def get_embedding(text: str):
     """
     Transforms the query into an embedding for latter comparison with the vector database
     """
-    embedding_model = "text-embedding-3-large"
     response = client.embeddings.create(model = "text-embedding-3-large", input = text)
     return response.data[0].embedding
 
