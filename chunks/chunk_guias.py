@@ -6,9 +6,13 @@ chunk_guias.py
 Trocea guías clínicas de VIH (GeSIDA/SPNS) en formato Markdown en *chunks*
 estructurados con metadatos, listos para indexar en un sistema RAG.
 
+Section (texto crudo por encabezados, tamaño irregular) → normalize ajusta el tamaño y 
+produce units (texto del tamaño bueno + metadatos estructurales heredados) → 
+build_chunks le añade los metadatos que dependen del texto final y le antepone el breadcrumb 
+al cuerpo → Chunk (el objeto definitivo que se serializa a JSONL y se sube a Qdrant).
+
 Estrategia: troceo CONSCIENTE DE LA ESTRUCTURA (header-aware) con
 normalización de tamaño.
-
   1. Parsea cada .md en un árbol de secciones según los encabezados ##, ###,
      ####, #####  conservando la ruta jerárquica completa (breadcrumb).
   2. Cada sección "hoja" (texto hasta el siguiente encabezado) es la unidad base.
@@ -31,7 +35,6 @@ Uso:
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
 from dataclasses import dataclass, field, asdict
