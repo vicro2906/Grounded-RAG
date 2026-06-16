@@ -1,0 +1,2977 @@
+  DOCUMENTO DE CONSENSO
+     SOBRE LA PROFILAXIS
+POSEXPOSICIÓN OCUPACIONAL
+Y NO OCUPACIONAL AL VIH, VHB
+  Y VHC EN ADULTOS Y NIÑOS.
+
+
+       ACTUALIZACIÓN 2025
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        ÍNDICE DE CONTENIDOS
+
+           COMITÉ DE REDACCIÓN (por orden alfabético):. ............................................ 3
+
+           ABREVIATURAS........................................................................................................ 5
+
+           DECLARACIÓN DE TRANSPARENCIA (Conﬂictos de interés)..................... 8
+
+           1. INTRODUCCIÓN. .................................................................................................. 11
+
+           2. DEFINICIONES Y CONCEPTOS....................................................................... 14
+
+           3. NOVEDADES RESPECTO A LAS GUÍAS PREVIAS.....................................17
+
+           4. EVALUACIÓN DEL RIESGO DE TRANSMISIÓN AL VIH, VHB Y VHC E
+           INDICACIONES DE PPE......................................................................................... 19
+
+           5. PROFILAXIS POSEXPOSICIÓN EN SITUACIONES ESPECIALES. .......34
+
+           6. PAUTAS DE PROFILAXIS POSEXPOSICIÓN. .............................................40
+
+           7. SEGUIMIENTO. ....................................................................................................46
+
+           8. PROFILAXIS POSEXPOSICIÓN EN NIÑOS Y ADOLESCENTES ........... 51
+
+           9. SITUACIONES DE NO RECOMENDACIÓN DE PPE ...................................56
+
+           10. ALGORITMOS, CIRCUITOS DE ACTUACIÓN y ANEXOS. ......................60
+
+
+
+
+                                                                                                               2
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        COMITÉ DE REDACCIÓN (por orden alfabético):
+        Grupo de estudio de SIDA (GeSIDA) y grupo de estudio de hepatitis víricas (GEHEP) de la
+        sociedad española de enfermedades infecciosas y microbiología clínica (SEIMC), el grupo
+        de estudio de infectología pediátrica de la Sociedad española de Pediatría y la Sociedad
+        Española de Medicina Preventiva, Salud Pública y Gestión Sanitaria (SEMPSPGS)
+
+        Coordinadores:
+           • Pablo Bachiller Luque. Unidad de Enfermedades Infecciosas, Servicio de Medicina
+             Interna, Hospital Universitario Río Hortega, Valladolid.
+           • Carlos Galera Peñaranda. Unidad VIH e ITS, Servicio de Medicina Interna, Hospital
+             Universitario Virgen de la Arrixaca. Instituto Murciano de Investigación Biosanitaria
+             Pascual Parrilla (IMIB), Murcia.
+        Redactores/as:
+           • Jésica Abadía Otero. Unidad de Enfermedades Infecciosas, Servicio de Medicina Interna,
+             Hospital Universitario Río Hortega, Valladolid.
+           • Arantxa Berzosa Sanchez. Servicio de Pediatría, Hospital Clínico San Carlos, Madrid.
+             IdISSC. CIBERINFECC.
+           • Otilia Bisbal Pardo. Unidad de VIH. Hospital Universitario 12 de Octubre, Madrid.
+             CIBERINFECC.
+           • Anaïs Corma Gómez. Unidad de Enfermedades Infecciosas y Microbiología, Hospital
+             Universitario de Valme, Instituto de Biomedicina de Sevilla (IBiS). CIBERINFEC.
+           • Diana Corona Mata. Hospital Universitario Reina Sofía, Córdoba. IMIBIC. CIBERINFEC.
+           • Alberto Díaz Santiago. Hospital Universitario Puerta de Hierro - Majadahonda, Madrid.
+           • Julián Manuel Domínguez Fernández. Servicio de Medicina Preventiva, Hospital
+             Universitario de Ceuta.
+           • Antonio Fernández Quiroga. Servicio de Medicina Preventiva, Hospital Universitario
+             Lucus Augusti, Lugo.
+           • Juan Flores Cid. Hospital Arnau de Vilanova, Valencia.
+           • Jesús García Guerrero. Servicio de Medicina Preventiva, Complejo Hospitalario
+             Universitario de Albacete.
+           • Jorge Néstor García Pérez. Hospital Vall d'Hebron, Barcelona.
+           • Leire Gil Alonso. Hospital Universitario Donostia, San Sebastián.
+           • Alexy Inciarte Portillo. Hospital Clinic, Barcelona.
+           • Montserrat Laguno Centeno. Unidad de VIH, Hospital Clínic de Barcelona. IDIBAPS.
+             CIBERINFEC.
+           • Raquel Monsalvo Arroyo. Hospital Universitario del Tajo, Madrid.
+           • Gregorio Montes Salas. Departamento CC. Biomédicas, Facultad de Medicina y
+             CC. Salud, Universidad de Extremadura. Servicio de Medicina Preventiva, Hospital
+             Universitario de Badajoz.
+           • Marisa Navarro Gómez. Hospital Gregorio Marañón, CIBERINFEC ISCIII, IISGM, UCM
+             Madrid.
+           • María Dolores Ocete Mochón. Consorcio Hospital General Universitario, Valencia.
+
+
+                                                                                                 3
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+           • Inés Pérez Camacho. Hospital Regional Universitario de Málaga, IBIMA.
+           • Gabriel Reina González. Clínica Universidad de Navarra-Instituto de Investigación
+             Sanitaria de Navarra (IdiSNA), Pamplona.
+           • Marta Rosas Cancio-Suarez. Servicio de Enfermedades Infecciosas, Hospital
+             Universitario Ramón y Cajal, Madrid. CIBERINFEC.
+           • Francisco Rubio Osuna. Servicio de Medicina Preventiva y Salud Pública, Hospital
+             Universitario Reina Sofía. Córdoba.
+           • Alejandro Salinas Botrán. Servicio de Medicina Interna, Hospital Clínico San Carlos,
+             Madrid.
+           • Ignacio de los Santos Gil. Servicio de Medicina Interna-Infecciosas, Hospital
+             Universitario de la Princesa, Madrid. CIBERINFEC.
+           • María Velasco Arribas. Hospital Universitario Fundación Alcorcón, Madrid.
+           • María Jesús Vivancos Gallego. Unidad de VIH, Servicio de Enfermedades Infecciosas,
+             Hospital Universitario Ramón y Cajal, Madrid. CIBERINFEC.
+
+        Revisores/as:
+           • María José Galindo Puerto. Hospital Clínico Universitario, Valencia.
+           • Federico García García. Hospital Universitario San Cecilio-Instituto de Investigación
+             Biosanitaria, IBS-Granada. CIBERINFEC.
+           • Arkaitz Imaz Vacas, Hospital Universitari de Bellvitge, L´Hospitalet de Llobregat,
+             Barcelona.
+           • Luz Martín Carbonero. Hospital La Paz, Madrid.
+           • Antonio Rivero Román. Hospital Universitario Reina Sofía, Córdoba. IMIBIC.
+             CIBERINFEC.
+
+        AGRADECIMIENTOS
+
+        Raúl López Izquierdo; Julia Gómez Barquero; Javier Arroyo Fernández; Laura Melero Guijarro;
+        Jesús Álvarez Manzanares; Asunción Díaz Franco; Manuela Zaidan Rodrigues; Beatriz Pérez-
+        Monte; María Teresa Filigeddu; Hortensia Álvarez; Jesús Santos González; Rosario Palacios
+        Muñoz; Rosa María Martínez Álvarez; Fernando Chacón; Imma Clotet; Manuel Cotarelo;
+        Laura Martín, Enrique Vacas y Manuel Vélez Díaz-Pallares.
+
+
+        Cita sugerida:
+
+        Grupo de estudio de SIDA (GeSIDA) y grupo de estudio de hepatitis víricas (GEHEP) de la
+        sociedad española de enfermedades infecciosas y microbiología clínica (SEIMC), grupo de
+        estudio de infectología pediátrica de la Sociedad española de Pediatría y Sociedad Española
+        de Medicina Preventiva, Salud Pública y Gestión Sanitaria (SEMPSPGS). Documento de
+        consenso sobre la proﬁlaxis posexposición ocupacional y no ocupacional al VIH, VHB y VHC
+        en adultos y niños. Actualización 2025. [https://guiasclinicas.gesida-seimc.org/]
+
+
+
+                                                                                                 4
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        ABREVIATURAS
+        3TC            Lamivudina
+        AAD            Antivirales de acción directa
+        Ag p24         Antígeno p24
+        ANRS           l'Agence nationale de recherches sur le sida de Francia
+        anti-HBc       Anticuerpos frente a las proteínas del core del VHB
+        anti-HBe       Anticuerpos frente al antígeno e del VHB
+        anti-HBs       Anticuerpos frente al antígeno de superﬁcie del VHB
+        anti-VHC       Anticuerpos frente al VHC
+        anti-VIH       Anticuerpos frente al VIH
+        ARN            Ácido ribonucleico
+        ASHM           Australasian Society for HIV, Viral Hepatitis and Sexual Health Medicine's
+        BASHH          British Association for Sexual Health and HIV
+        BIC            Bictegravir
+        CDC            Centers for Disease Control and Prevention
+        CIS            Centro de investigaciones sociológicas
+        CNS            Conseil National du Sida et des hépatites virales de Francia
+        ClCr           Aclaramiento de creatinina
+        cp             Cápsula, comprimido
+        Cr             Creatinina
+        CROI           Conference on Retroviruses and Opportunistic Infections
+        CV             Carga viral
+        DOR            Doravirina
+        DRV            Darunavir
+        DRV / c        Darunavir / cobicistat
+        DTG            Dolutegravir
+        IDSA           Infectious Diseases Society of America
+        ELISA          Enzimoinmunoanálisis
+        ENO            Exposición no ocupacional
+
+
+
+
+                                                                                                 5
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        EO             Exposición ocupacional
+        FTC            Emtricitabina
+        GPT            ALT - Alanina aminotransferasa
+        GBHSH          Hombres gais, bisexuales y otros hombres que tienen sexo con hombres
+        GEHEP          Grupo de Estudio de las Hepatitis Víricas de la SEIMC
+        GeSIDA         Grupo de Estudio del SIDA de la SEIMC
+        HBeAg          Antígeno e del VHB
+        HBsAg          Antígeno de superﬁcie del VHB
+        HSH            Hombres que tienen sexo con hombres
+        IM             Intramuscular
+        IC             Intervalo de conﬁanza
+        IGHB           Inmunoglobulina frente al VHB
+        INE            Instituto nacional de estadística
+        ITS            Infecciones de transmisión sexual
+        LCR            Líquido cefalorraquídeo
+        MIE            Maladies infectieuses émergentes de Francia
+        OR             Odds ratio
+        p.e.           por ejemplo
+        PPE            Proﬁlaxis posexposición
+        PrEP           Proﬁlaxis pre-exposición
+        PVVIH          Personas que viven con el VIH
+        RAL            Raltegravir
+        RTV            Ritonavir
+        RPV            Rilpivirina
+        SEIMC          Sociedad Española de Enfermedades Infecciosas y Microbiología Clínica
+        SEIP           Grupo de Infectología de la Sociedad Española de Infectología Pediátrica
+        SEMPSPGS Sociedad Española de Medicina Preventiva, Salud Pública y Gestión Sanitaria
+        SIDA           Síndrome de la inmunodeﬁciencia adquirida
+        TAF            Tenofovir alafenamida
+
+
+
+
+                                                                                                 6
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        TAR            Tratamiento antirretroviral
+        TDF            Tenofovir disoproxil fumarato
+        UDI            Usuarios de drogas inyectadas
+        VHA            Virus de la hepatitis A
+        VHB            Virus de la hepatitis B
+        VHC            Virus de la hepatitis C
+        VHD            Virus de la hepatitis D
+        VIH            Virus de la inmunodeﬁciencia humana
+        ZDV            Zidovudina
+
+
+
+
+                                                                                                 7
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        DECLARACIÓN DE TRANSPARENCIA (Conﬂictos de interés)
+           • Pablo Bachiller Luque, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Ha efectuado labores de consultoría en los
+             laboratorios Janssen pharmaceuticals; ha recibido compensación económica por
+             charlas de Gilead Sciences, ViiV Healthcare, MSD y Janssen pharmaceuticals, y ayudas
+             en programas de formación o asistencias a reuniones cientíﬁcas de Gilead Sciences, ViiV
+             Healthcare, MSD y Janssen pharmaceuticals.
+
+           • Carlos Galera Peñaranda, no tiene ningún conﬂicto de interés que declarar en relación
+             con las Guías de PPE.
+
+        Redactores/as:
+           • Jésica Abadía Otero, declara no haber recibido ninguna ayuda ni subvención relacionada
+             con este documento. Declara no tener conﬂicto de intereses.
+
+           • Arantxa Berzosa Sánchez, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Declara no tener conﬂicto de intereses.
+
+           • Otilia Bisbal Pardo, ha recibido ayuda para asistencia a congresos y reuniones cientíﬁcas
+             y compensación económica por actividades formativas y docentes de Gilead Sciences,
+             Janssen-Cilag, Merck Sharp & Dohme y ViiV Healthcare.
+
+           • Anaïs Corma-Gómez, ha recibido honorarios por ponencias de ViiV Healthcare, Johnson
+             & Johnson y Gilead Sciences, y ﬁnanciación para proyectos de investigación de Gilead
+             Sciences.
+
+           • Diana Corona-Mata, declara no haber recibido ninguna ayuda ni subvención relacionada
+             con este documento. Ha recibido compensación económica por charlas de GSK-ViiV
+             Healthcare, Gilead Sciences, MSD y Janssen pharmaceuticals.
+
+           • Alberto Díaz de Santiago, ha recibido ﬁnanciación para investigación de Gilead
+             Sciences, ViiV Healthare y Janssen pharmaceuticals. Ha participado en Advisory Boards
+             para Gilead Sciences, ViiV Healthcare, MSD y Janssen pharmaceuticals. Ha recibido
+             compensación económica por charlas de Gilead Sciences, ViiV Healthcare, MSD y
+             Janssen pharmaceuticals.
+
+           • Julián Manuel Domínguez Fernández, no ha efectuado labores de consultoría alguna; ni
+             ha recibido compensación económica alguna, ni tiene conﬂicto de interés alguno.
+
+           • Antonio Fernández Quiroga, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Declara no tener conﬂicto de intereses.
+
+           • Juan Flores Cid, declara haber recibido honorarios por charlas y conferencias de Gilead
+             Sciences, ViiV Healthcare, Janssen Cilag y MSD.
+
+           • Jesús García Guerrero, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Declara no tener conﬂicto de intereses.
+
+
+
+
+                                                                                                 8
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+           • Jorge Néstor García Pérez, ha recibido remuneración por ponencias docentes por parte
+             de ViiV Healthcare, Janssen pharmaceuticals, MSD y Gilead Sciences.
+
+           • Leire Gil Alonso, declara no tener conﬂicto de intereses para el documento referido.
+
+           • Alexy Inciarte Portillo, conﬁrma que no tiene ningún conﬂicto de interés para el
+             desarrollo de la guía.
+
+           • Montserrat Laguno Centeno, ha recibido honorarios por dar charlas, participar en
+             reuniones y/o becas de investigación de las siguientes compañías farmacéuticas:
+             AbbVie, Janssen, MSD, Gilead Sciences y ViiV Healthcare.
+
+           • Raquel Monsalvo Arroyo, declara no tener conﬂicto de intereses para el documento
+             referido.
+
+           • Gregorio Montes Salas, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Ha recibido compensación económica por charlas de
+             GlaxoSmithKline y Pﬁzer.
+
+           • Marisa Navarro Gómez, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Ha efectuado labores de consultoría en los
+             laboratorios ViiV Healthcare y Pﬁzer; ha recibido compensación económica por
+             charlas de ViiV Healthcare, Pﬁzer, MSD y Abbie, así como pagos por desarrollos de
+             presentaciones educacionales para ViiV Healthcare, Pﬁzer y Abbie.
+
+           • María Dolores Ocete Mochón, declara no tener conﬂicto de intereses para el documento
+             referido.
+
+           • Inés Pérez Camacho, declara no tener conﬂicto de intereses para el documento referido.
+
+           • Gabriel Reina González, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Ha efectuado labores de consultoría en Cinfa,
+             ha recibido becas de investigación de Roche Diagnostics, ayudas para asistencia a
+             Congresos de Vircell y ha participado en actividades educativas, charlas o simposios
+             patrocinados por Qiagen, Roche Diagnostics y Gilead Sciences.
+
+           • Marta Rosas Cancio-Suárez, declara haber recibido compensación económica por
+             charlas médicas ﬁnanciadas por ViiV Healthcare, así como apoyo no ﬁnanciero de ViiV
+             Healthcare, Janssen Cilag y Gilead Sciences.
+
+           • Francisco Rubio Osuna, declara no tener conﬂictos de interés ni haber realizado labores
+             de consultoría o recibido compensación económica por charlas de ninguna entidad.
+
+           • Alejandro Salinas Botrán, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Declara no tener conﬂicto de intereses.
+
+           • Ignacio de los Santos Gil, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Ha efectuado labores de consultoría en el laboratorio
+             Janssen; ha recibido compensación económica por charlas de ViiV Healthcare, Janssen y
+             Gilead Sciences, así como pagos por desarrollos de presentaciones educacionales para
+             ViiV Healthcare, Janssen y Gilead Sciences.
+
+
+
+
+                                                                                                 9
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+           • María Velasco Arribas, ha recibido honorarios y/o ayudas para actividades con ﬁnes
+             docentes o ponencias de Gilead Sciences, Janssen Cilag, Merck Sharp & Dohme y ViiV
+             Healthcare.
+
+           • María Jesús Vivancos Gallego, declara no haber recibido ninguna ayuda ni subvención
+             relacionada con este documento. Ha impartido presentaciones con ﬁnes docentes
+             de AbbVie, Gilead Sciences y ViiV Healthcare por las que ha recibido compensación
+             económica, y ha asistido de forma esporádica a congresos con la ﬁnanciación de Gilead
+             Sciences, ViiV Healthcare y Janssen Cilag.
+
+        Revisores/as:
+           • María José Galindo Puerto, ha recibido honorarios de ViiV Healthcare, Johnson &
+             Johnson, MSD y Gilead Sciences por realizar presentaciones, materiales educativos y
+             asesorías.
+
+           • Federico García García, ha recibido ayudas para proyectos de investigación de Gilead
+             Sciences, ViiV Healthcare, MSD y Roche; honorarios por ponencias de ViiV Healthcare,
+             Gilead Sciences, AbbVie, MSD, Janssen, Roche, Biomerieux, Hologic, Qiagen; ha recibido
+             ayudas para asistencia a actividades formativas de ViiV Healthcare, Gilead Sciences,
+             AbbVie, MSD, Janssen, Roche, Biomerieux, Hologic, Qiagen; y ha realizado labores de
+             asesoramiento para ViiV Healthcare, Gilead Sciences, AbbVie, Roche y Hologic.
+
+           • Arkaitz Imaz Vacas, ha recibido compensación económica por charlas, actividades
+             formativas y/o participación en consultorías, así como becas para investigación y ayudas
+             para asistencia a congresos cientíﬁcos de Gilead Sciences, Johnson & Johnson, Merck
+             Sharp & Dohme, TheraTechnologies y ViiV Healthcare.
+
+           • Luz Martín Carbonero, ha efectuado labores de consultoría para ViiV Healthcare y Gilead
+             Sciences. Ha recibido compensaciones económicas por charlas de Gilead Sciences,
+             Janssen y ViiV Healthcare. Ha recibido igualmente ayudas económicas para asistir a
+             reuniones cientíﬁcas de Gilead Sciences.
+
+           • Antonio Rivero Román o su institución, han recibido fondos para formación,
+             investigación u honorarios profesionales de ViiV Healthcare, MSD, Janssen, AbbVie y
+             Gilead Sciences.
+
+
+
+
+                                                                                             10
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        1. INTRODUCCIÓN
+        Índice:
+           1.1. Presentación, justiﬁcación y objetivos
+           1.2. Metodología
+
+
+        1.1. Presentación, justiﬁcación y objetivos
+        La Proﬁlaxis Posexposición (PPE) al Virus de la Inmunodeﬁciencia Humana (VIH), Virus de la
+        Hepatitis B (VHB) y virus de la Hepatitis C (VHC), es una estrategia de intervención biomédica
+        dirigida a prevenir la transmisión de estos virus en personas expuestas, generalmente de
+        forma excepcional y esporádica, cuando la prevención primaria ha fallado.
+
+        Este documento es una revisión y actualización del documento previo publicado en 2015 por
+        varias sociedades cientíﬁcas y grupos de estudios coordinados desde el Plan Nacional del
+        SIDA1. El documento está dirigido tanto a profesionales sanitarios directamente implicados
+        en el manejo de la infección por VIH, como aquellos que puedan enfrentarse a esta situación
+        de forma esporádica. En los diferentes capítulos se analizan la prevalencia de estas
+        infecciones, el riesgo de transmisión en diferentes poblaciones, en qué situaciones está
+        indicado el uso de la PPE, qué pautas y recomendaciones se deben seguir de forma
+        preferente y qué seguimiento debemos realizar para alcanzar la máxima eﬁcacia y minimizar
+        los efectos secundarios. En esta nueva edición hemos incluido un capítulo sobre PPE en niños
+        y adolescentes, un capítulo sobre PPE en situaciones especiales, otro de las novedades
+        respecto a las guías anteriores, y ﬁnalmente uno que incluye aquellas situaciones donde no se
+        recomienda actualmente el uso de PPE.
+
+        Hemos querido realizar un documento práctico y de fácil manejo, incluyendo tablas y
+        algoritmos para simpliﬁcar la lectura sobre el manejo de la PPE. Sin embargo, algunos
+        capítulos, relacionados con aspectos de la PPE en los que existe un mayor grado de
+        incertidumbre o controversias, han sido elaborados de forma más extensa. Estas guías sobre
+        PPE pretenden ser un documento de apoyo en la toma de decisiones, pero en ningún caso
+        sustituye al criterio ﬁnal del clínico, en base a un análisis individualizado de cada caso. En
+        el ánimo de los promotores y redactores de este documento está la revisión continúa de
+        la evidencia para poder ofrecer nuevas actualizaciones.
+
+
+        1.2. Metodología
+        Se ha constituido un grupo de redactores, expertos en el campo de la infección por VIH y las
+        hepatitis víricas, pertenecientes al Grupo de Estudio del SIDA (GESIDA) y al Grupo de Estudio
+        de las Hepatitis Víricas (GEHEP) de la Sociedad Española de Enfermedades Infecciosas y
+        Microbiología Clínica (SEIMC), a la Sociedad Española de Infectología Pediátrica (SEIP) y a la
+        Sociedad Española de Medicina Preventiva, Salud Pública y Gestión Sanitaria (SEMPSPGS). El
+        trabajo ha sido coordinado desde SEIMC por dos coordinadores (un coordinador de GESIDA
+        y otro de GEHEP). Todos los participantes en la elaboración del documento lo han hecho
+        de forma altruista y han ﬁrmado un documento declarando sus conﬂictos de intereses.
+
+
+
+
+                                                                                                 11
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Los diferentes capítulos han sido elaborados por los redactores responsables de cada uno
+        de ellos. La elaboración de cada uno de los capítulos se ha realizado tras una búsqueda
+        bibliográﬁca en las bases de datos más habituales (Medline, Pubmed, UpToDate, Web of
+        Science, Registro Cochrane y MD Consult), hasta la fecha de 31 de octubre de 2024. Además
+        se han revisado las Guías sobre PPE publicadas por GESIDA 1 , por los CDC 2 , la British
+        Association for Sexual Health and HIV (BASHH) 3 , las Guías de la Australasian Society for HIV,
+        Viral Hepatitis and Sexual Health Medicine's (ASHM) 4 , las Guías de Tratamiento preventivo
+        postexposición al VIH elaboradas por Conseil National du Sida et des hépatites virales (CNS)
+        et l'Agence nationale de recherches sur le sida | Maladies infectieuses émergentes (ANRS
+        | MIE) de Francia 5 , y la guía Post-Exposure Prophylaxis (PEP) to Prevent HIV Infection,
+        actualizada el 3 de octubre de 2024 por el New York State Department of Health and AIDS
+        Institute Guideline 6 . Por último, también se han revisado las comunicaciones sobre PPE
+        presentadas en el congreso CROI los años 2020-2024.
+
+        Tras su elaboración, los capítulos han sido revisados por un equipo de 5 revisores.
+        Finalmente, los coordinadores han elaborado un primer borrador, que ha sido sometido a la
+        revisión, en primer lugar, de todos los miembros del panel y posteriormente, tras incorporar
+        las correcciones o sugerencias consensuadas, fue expuesto de forma pública en las web de
+        las sociedades y grupos de estudio participantes.
+        Para la graduación de las recomendaciones y la valoración de la calidad de la evidencia
+        que las sustentan se ha utilizado una modiﬁcación de los criterios de la Infectious Diseases
+        Society of America (IDSA). En la siguiente (Tabla 1.1.) se resumen los criterios.
+
+
+
+
+        Tablas:
+        Tabla 1.1. Resumen de los criterios para la graduación de las recomendaciones y la
+        valoración de la calidad de la evidencia.
+
+          Fuerza de la
+                                Calidad de la evidencia para la recomendación
+          recomendación
+
+          A: Debe ofrecerse     I: Procedente de uno o más ensayos clínicos randomizados o metaanálisis con
+          siempre.              objetivos clínicos o datos de laboratorio validados.
+
+                                II: Procedente de al menos 1 ensayo no aleatorizado, bien diseñado, o bien de
+          B: En general debe    estudios de cohortes, o de estudios de casos y controles (preferiblemente
+          ofrecerse.            de más de 1 centro), o de series temporales, o de resultados concluyentes
+                                obtenidos en estudios experimentales no controlados.
+
+          C: Debe ofrecerse     III: Opinión de expertos basadas en la experiencia clínica o en estudios
+          opcionalmente.        descriptivos.
+
+
+
+
+                                                                                                      12
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Bibliografía:
+        1. Panel de Expertos de GeSIDA. Documento de consenso sobre proﬁlaxis postexposición ocupacional y no
+        ocupacional en relación con el VIH, VHB y VHC en adultos y niños. (actualización marzo 2015). Accesible en:
+        https://seimc.org/wp-content/uploads/2025/06/gesida-guiasclinicas-2015-Profilaxispostexposicion-VIH-
+        VHC-VHB.pdf
+
+        2. Centre for Disease Control. Updated Guidelines for Antiretroviral Postexposure Prophylaxis after Sexual,
+        Injection-Drug Use, or Other Nonoccupational Exposure to HIV - United States, 2016. MMWR Morb Mortal
+        Wkly Rep. 2016 May 6;65(17):458. doi: 10.15585/mmwr.mm6517a5. PMID: 27149423. https:// stacks.cdc.
+        gov/view/cdc/38856
+
+        3. Cresswell F, Asanati K, Bhagani S, Bofﬁto M, Delpech V, Ellis J, et al. UK guideline for the use of HIV
+        postexposure prophylaxis 2021. HIV Med. 2022 May;23(5):494-545. doi: 10.1111/hiv.13208. Epub 2022 Feb
+        14. Erratum in: HIV Med. 2022 Jul;23(6):701. PMID: 35166004. Accesible en https://bhiva.org/wp-content/
+        uploads/2024/10/PEP-guidelines.pdf
+
+        4. Australasian Society for HIV, Viral Hepatitis and Sexual Health Medicine's (ASHM). National guidelines for
+        post-exposure prophylaxis after non-occupational and occupational exposure to HIV 2023. Accesible en:
+        https://pepguidelines1.wpenginepowered.com
+
+        5. Le Conseil National du Sida et des hépatites virales (CNS) et l'Agence nationale de recherches sur le
+        sida | Maladies infectieuses émergentes (ANRS | MIE). Traitement préventif post-exposition au VIH. Practice
+        guidelines - Updated on Aug 02 2024. Accesible en: https://www.has-sante.fr/jcms/p_3536535/en/
+        traitement-preventif-post-exposition-au-vih#voirAussi
+
+        6. New York State Department of Health and AIDS Institute Guideline. Post-Exposure Prophylaxis (PEP) to
+        Prevent HIV Infection. Actualización 3 de octubre de 2024. Accesible en: https://www.hivguidelines.org/
+        guideline/hiv-pep/?mycollection=pep-prep
+
+
+
+
+                                                                                                    13
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        2. DEFINICIONES Y CONCEPTOS
+        Las siguientes deﬁniciones pretenden facilitar la comprensión de los términos incluidos
+        en el presente Documento de una manera clara, concisa y concreta. En el mismo se hace
+        referencia únicamente a los siguientes virus de transmisión por vía sanguínea o sexual: VIH,
+        VHB y VHC.
+        Todos los conceptos son válidos tanto en el ámbito hospitalario como extrahospitalario y
+        son aplicables tanto a adultos como a niños.
+        Los aspectos relativos a responsabilidad legal y otras contingencias referentes a salud
+        laboral no son objeto del presente Documento, dependiendo de la normativa vigente
+        establecida en cada caso.
+        Accidente biológico: evento no deseado que se produce al contactar con un líquido
+        biológico por vía parenteral, por lesión percutánea, salpicadura sobre piel no intacta o
+        exposición a mucosas (boca, ojos, vagina o recto).
+        Chemsex1: uso intencionado de drogas para tener relaciones sexuales por un período largo
+        de tiempo (que puede durar varias horas hasta varios días) predominantemente entre
+        hombres gais, bisexuales y otros hombres que tienen sexo con hombres (GBHSH).
+
+        Exposición no ocupacional: aquella que ocurre a consecuencia del contacto con sangre
+        u otro líquido biológico potencialmente infeccioso fuera del ámbito laboral, incluyendo la
+        exposición sexual sin protección, la exposición percutánea en usuarios de drogas por vía
+        parenteral, los pinchazos accidentales y las mordeduras humanas.
+        Exposición ocupacional: aquella que ocurre a consecuencia de la realización de un trabajo
+        donde se contacta con sangre u otro líquido biológico potencialmente infeccioso, pudiendo
+        suponer un riesgo de infección para el trabajador sanitario.
+        Fluidos potencialmente infecciosos: se incluyen sangre, semen, secreciones vaginales,
+        leche materna y otros líquidos biológicos (líquido cefalorraquídeo, pericárdico, pleural,
+        peritoneal, sinovial y amniótico). No incluidos otros líquidos biológicos como: el sudor, saliva,
+        lágrimas, orina, heces, vómitos o secreciones respiratorias salvo que contengan sangre
+        visible.
+        Fuente: persona, objeto o líquido biológico desde la cual el agente infeccioso puede
+        transmitirse a la persona expuesta.
+        Persona expuesta: cualquier persona que sufre contacto con un líquido biológico
+        procedente de una fuente potencialmente infectada por un agente infeccioso.
+
+        Proﬁlaxis posexposición (PPE) 2: estrategia de prevención biomédica que se inicia después
+        de la exposición a un patógeno para evitar el desarrollo de una infección.
+
+        Proﬁlaxis preexposición (PrEP) 3: intervención biomédica basada en fármacos
+        antirretrovirales dirigida a prevenir la transmisión del VIH en personas seronegativas con
+        alto riesgo de contraer la infección.
+
+
+
+
+                                                                                             14
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Slam, slamsex o slamming1: término utilizado para referirse al consumo inyectado de
+        drogas en el contexto de chemsex.
+
+        Trabajador sanitario: profesional de la salud con los conocimientos y habilidades necesarios
+        para el desarrollo de actividades de tratamiento, cuidado de individuos o manipulación de
+        sustancias biológicas.
+        Virus de transmisión parenteral: aquellos que pueden estar presentes en la sangre humana
+        y otros líquidos biológicos capaces de producir enfermedad en humanos. Dentro de estos
+        agentes se incluyen el VIH, VHB y VHC.
+
+
+
+
+                                                                                             15
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Bibliografía:
+        1. Secretaría del Plan Nacional sobre el Sida. Ministerio de Sanidad. 2020. Documento técnico sobre
+        abordaje del fenómeno del chemsex. Accesible en: https://www.sanidad.gob.es/ca/ciudadanos/enfLesiones/
+        enfTransmisibles/sida/chemSex/docs/DocumentoDEF.pdf Consultado 03/2024
+
+        2. Panel de Expertos de GeSIDA. Documento de consenso sobre proﬁlaxis postexposición ocupacional y
+        no ocupacional en relación con el VIH, VHB y VHC en adultos y niños (marzo 2015). Accesible en: https://
+        www.sanidad.gob.es/ciudadanos/enfLesiones/enfTransmisibles/hepatitisC/informacion/docs/ Proﬁlaxis_
+        postexposicion_ocupacional_y_no_ocupacional_VIH_VHB_VHC(PPE).pdf Consultado 03/2024.
+
+        3. GeSIDA. Recomendaciones sobre la Proﬁlaxis Pre-Exposicioń para la Prevencioń de la Infeccioń por VIH en
+        Espanã (marzo 2023). Accesible en: https://gesida-seimc.org/wp-content/uploads/2023/03/Guiaproﬁlaxis.
+        pdf
+
+
+
+
+                                                                                                    16
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        3. NOVEDADES RESPECTO A LAS GUÍAS PREVIAS
+          1. Respecto a la estructura de las Guías, se ha introducido un capítulo de PPE en
+             situaciones especiales y un capítulo que recoge las situaciones donde no está
+             recomendado de forma general el uso de PPE.
+          2. En la exposición ocupacional al VIH, se considera que, tras un accidente de riesgo
+             con exposición a ﬂuidos corporales de un paciente con VIH y carga viral plasmática
+             indetectable, la posibilidad de transmisión del VIH es prácticamente nula. No obstante,
+             se debe ofrecer PPE individualizando la decisión, tras diálogo con la persona expuesta.
+          3. Existe evidencia suﬁciente para aﬁrmar que el riesgo de transmisión del VIH de una
+             PVVIH que recibe TAR y tiene carga viral menor de 200 copias/ml (al menos 6 meses
+             y con buena adherencia), a través de relaciones sexuales sin preservativo es nulo,
+             independientemente del tipo de relación sexual.
+          4. En el capítulo 4, punto 4.3.2 se realiza una aproximación a la prevalencia de VIH en
+             diferentes colectivos en España y una estimación del riesgo de transmisión según el
+             tipo de exposición, basado en datos del Ministerio y de ONUSIDA referentes al año
+             2022, y tomando como referentes el continuo de atención al VIH de 2024. Se estima
+             que la prevalencia de infección por VIH en España es de 0,2-0,3 %, y que la prevalencia
+             de personas con VIH y carga viral detectable en España es del 0,04-0,06 %.
+          5. Se aporta tabla resumen de indicaciones de uso de PPE según estado de la fuente
+             respecto al VIH, y tipo de exposición (Tema 4, tabla 4.2).
+          6. A lo largo del documento se señala de forma clara que el inicio de la PPE, cuando
+             esté indicada, debe realizarse lo antes posible, idealmente en las primeras 2 horas,
+             preferiblemente en las primeras 12 horas, y siempre antes de las 72 horas.
+          7. Se insiste en la necesidad de valorar la indicación de PPE en aquellas personas que
+             van a iniciar PrEP y hayan tenido una exposición de riesgo en las 72 horas previas.
+             También se insiste en la oportunidad de continuar con PrEP en aquellas personas que
+             se les indica la administración de PPE tras contacto sexual, descartando infección
+             aguda por el VIH mediante un ELISA de 4ª G y/o una PCR VIH al ﬁnal de la PPE.
+          8. En aquellos usuarios de PrEP con mala adherencia, se valorará ofrecer PPE tras una
+             exposición de riesgo, según el grado de adherencia a la misma. (Tema 5, tabla 5.1)
+          9. Se incluyen las recomendaciones de PPE en el contexto de Chemsex y slamsex, así
+             como en personas en tratamiento frente al VHB.
+          10. Se han actualizado las pautas de PPE consideradas como preferentes, y alternativas
+              (Tema 6, tabla 6.1). También se han ampliado las opciones de PPE en personas
+              embarazadas y en población pediátrica.
+          11. Se han simpliﬁcado los análisis de seguimiento en las personas que reciben PPE, y
+              el tiempo estimado para descartar infección por VIH tras la exposición de riesgo se
+              ha reducido a 12 semanas, siempre que se utilice un test diagnóstico de VIH 1-2 de
+              cuarta generación. El seguimiento tras exposición al VHB / VHC dependerá de la
+              situación serológica de la persona fuente y de la persona expuesta, y de la necesidad
+              o no de vacunación frente al VHB.
+
+
+
+
+                                                                                             17
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+          12. Finalmente, se ha tratado de emplear un lenguaje inclusivo, desestigmatizar la toma
+              de PPE en el contexto de relaciones sexuales, y respetar el principio de autonomía de
+              la persona expuesta a la hora de decidir si quiere tomar PPE.
+
+
+
+
+                                                                                             18
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        4. EVALUACIÓN DEL RIESGO DE TRANSMISIÓN AL VIH, VHB Y VHC E
+        INDICACIONES DE PPE
+        Índice:
+           4.1. Riesgo y fundamentos
+           4.2. Evaluación del riesgo de transmisión ocupacional del VIH, VHB y VHC
+           4.3. Evaluación del riesgo de transmisión no ocupacional del VIH, VHB y VHC
+           4.4. Evaluación de otras infecciones
+           4.5. Recomendaciones generales e indicación de PPE ante la exposición ocupacional y
+           no ocupacional frente al VIH, VHB y VHC
+
+
+        4.1. Riesgo y fundamentos
+        Las vías de transmisión del VIH, VHB y VHC incluyen la vía sexual, la exposición a sangre y/ o
+        a otros ﬂuidos. No siempre es posible prevenir la exposición de riesgo por lo que la PPE es la
+        única medida preventiva que puede adoptarse una vez que ésta se ha producido.
+        La probabilidad de que se produzca la infección depende de varios factores: la naturaleza
+        de la exposición, la fuente de exposición, el tipo y duración del contacto, la carga viral de
+        la persona fuente (en el caso del VIH), el estado de vacunación (en el caso del VHB), la
+        presencia de otras infecciones, como por ejemplo las infecciones de transmisión sexual (ITS)
+        y el tiempo transcurrido desde la exposición 1 . Con respecto al VIH, se ha demostrado que
+        una vez que el virus atraviesa la barrera mucosa, su replicación no comienza a ser efectiva
+        hasta pasadas las 48 horas. Por este motivo, la PPE frente al VIH tiene más probabilidades de
+        ser eﬁcaz si se inicia idealmente en las primeras dos horas, preferiblemente en las primeras
+        12 horas, y siempre antes de las 72 horas. La PPE frente al VHB puede iniciarse hasta una
+        semana después de la exposición, aunque lo ideal es hacerlo en las primeras 48 horas.
+        No existe PPE efectiva para prevenir la infección por el VHC por lo que su diagnóstico y
+        tratamiento precoces serán claves para erradicar la infección y prevenir la progresión de la
+        enfermedad.
+        No existen datos de ensayos clínicos controlados aleatorizados que proporcionen evidencia
+        de la eﬁcacia de la PPE en la prevención de la adquisición del VIH y VHB. En lo que concierne
+        al VIH, los datos en animales han sido especialmente informativos respecto a la importancia
+        de comenzar de forma precoz la PPE, así como acerca de su duración2. También se ha
+        extrapolado evidencia a partir de datos de transmisión vertical, donde la PPE administrada al
+        recién nacido redujo signiﬁcativamente el riesgo de adquisición de VIH de madres sin
+        supresión virológica en el momento del parto; y tras exposiciones ocupacionales (EO), donde
+        el riesgo de adquisición de VIH se redujo en general en un 81 %3. El único estudio
+        observacional en el que se evaluó la eﬁcacia de la PPE para la prevención del VIH tras una
+        exposición no ocupacional (ENO) se realizó entre 200 hombres que tenían sexo con hombres
+        (HSH) en Brasil. Se produjeron 1/68 seroconversiones frente al VIH en el grupo de PPE en
+        comparación con 10/132 en el grupo que no recibió PPE, aunque estos resultados no fueron
+        estadísticamente signiﬁcativos, probablemente por falta de potencia estadística del estudio5 .
+
+
+
+
+                                                                                             19
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Aunque la PPE es altamente efectiva cuando se inicia de forma precoz y existe una correcta
+        adherencia a la pauta, se han documentado algunas seroconversiones debido, en la gran
+        mayoría de casos, a la persistencia de la conducta / factor de riesgo una vez completada
+        la PPE 6 . Otras potenciales causas de fallo de la PPE pueden ser el retraso en el inicio, la
+        adherencia subóptima o la infección primaria precoz ya presente en el momento de iniciar
+        la PPE.
+        En cualquier caso, el inicio y mantenimiento de la PPE debe estar supeditado a una
+        evaluación exhaustiva y rigurosa de los riesgos asociados con la exposición, con el objetivo
+        de determinar la probabilidad de transmisión viral y la necesidad de instaurar medidas
+        adicionales.
+
+
+
+        4.2. Evaluación del riesgo de transmisión ocupacional del VIH, VHB y
+        VHC
+
+        4.2.1. Evaluación del riesgo de transmisión ocupacional del VIH
+        La PPE para VIH se determina tras una evaluación minuciosa de: 1) tipo de exposición; 2) la
+        persona fuente y 3) la persona expuesta.
+        Es crucial su rápida asistencia para iniciarla pronto, idealmente en las primeras 2 horas,
+        preferiblemente en las primeras 12 horas, y siempre antes de las 72 horas.
+        1) Tipos de exposición
+        Exposiciones percutáneas: son más eﬁcientes en la transmisión del VIH que las mucosas.
+        Los CDC estiman que el riesgo promedio de seroconversión del VIH después de una EO
+        percutánea de un caso índice VIH positivo que no recibe TAR supresor es aproximadamente
+        del 0,3 % (IC 95 %: 0,2 a 0,5 %), lo que supone 3 infecciones por cada 1000 incidentes 6 . El
+        uso de guantes disminuye el 50 % el volumen inyectado.
+        Con respecto a los factores relacionados con la exposición percutánea, el riesgo dependerá
+        de:
+        a) La profundidad del pinchazo:
+        - Inoculación superﬁcial: erosión
+        - Profundidad intermedia: aparición de sangre
+
+        - Inoculación profunda (OR 15; IC del 95 %: 6,0 a 41,0) 4 .
+        b) Tipo de material utilizado:
+
+
+
+
+                                                                                             20
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        - Aguja hueca: mayor riesgo que con las agujas de sutura. Este riesgo es proporcional al
+        diámetro de la aguja.
+        - Aguja maciza o bisturí: menor riesgo que con la anterior
+        c) Tipo de ﬂuido al que se ha expuesto el trabajador, siendo el de mayor riesgo la sangre
+        visible en el dispositivo (OR 6,2; IC del 95 %: 2,2 a 21,0) o si ha estado dentro de una arteria
+        o vena 4 . Fluidos con elevado potencial infeccioso que requieren evaluación precisa son: la
+        sangre, el semen, las secreciones vaginales y otros ﬂuidos con sangre visible. Podrían ser
+        potencialmente infecciosos el LCR, los líquidos serosos y el líquido amniótico. La exposición
+        a vómito, heces, saliva, sudor, lágrimas, orina y esputo no comporta un riesgo signiﬁcativo,
+        excepto si contienen sangre visible.
+        Exposiciones mucocutáneas o lesiones por salpicaduras: se estima que el riesgo de
+        adquirir el VIH a través de una lesión mucocutánea por salpicadura por ﬂuidos con sangre es
+        de alrededor del 0,1 % (1 en 1.000 exposiciones) si la persona fuente VIH no recibe TAR 7 .
+        El VIH no se puede transmitir a través de la piel intacta. El riesgo de transmisión del
+        VIH a través de la piel no intacta (por ejemplo, abrasiones, cortes, heridas) se considera
+        insigniﬁcante.
+
+        2) Características de la persona fuente
+        Es fundamental conocer la situación serológica de la persona fuente contactando con su
+        médico responsable. Si ésta no se sabe o no se puede conocer, se debe realizar un estudio
+        serológico completo siempre que sea posible, previa solicitud de consentimiento verbal o
+        por escrito, con HBsAg, anti-VHC (si es positivo, medir la carga viral), VIH (si es positivo, medir
+        la carga viral).
+        Aunque existen interrogantes sobre la persona fuente VIH negativa que podría estar en
+        el período ventana antes de la seroconversión, hasta la fecha no se han registrado casos
+        de transmisión en esta situación. Por lo tanto, no es necesario investigar si una persona
+        fuente pudiera estar en el período ventana para determinar si está indicada la PPE, a menos
+        que se sospeche clínicamente un síndrome retroviral agudo. Las pruebas combinadas de
+        Ag p24 y Ac contra el VIH del ELISA de cuarta generación producen resultados rápidos
+        y precisos, y su detección permite identiﬁcar la mayoría de las infecciones durante este
+        período 8 . La administración de PPE no debe retrasarse mientras se esperan los resultados
+        de las pruebas. Si se determina que la serología de VIH de la persona fuente es negativa, se
+        debe suspender la PPE y no está indicado realizar pruebas de seguimiento.
+        En el caso de que la persona fuente tenga infección por el VIH conocida, es fundamental
+        conocer la carga viral, el tipo de TAR (si lo recibe), así como la historia farmacológica y los
+        motivos de cambio de tratamiento (resistencias o intolerancia) 10 . Existen varios estudios
+        que demuestran que la exposición a elevadas cargas virales se asocia a mayor riesgo de
+        transmisión de la infección 6,11 . Por este motivo, en los periodos de elevada viremia como son
+        las fases de infección aguda o las fases avanzadas de la enfermedad, si la fuente no está
+        recibiendo TAR, el riesgo de transmisión es mayor 12 .
+
+
+
+
+                                                                                             21
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Un accidente de riesgo con exposición a ﬂuidos corporales de un paciente con una carga viral
+        indetectable hace muy improbable la transmisión del VIH. No obstante, se debe ofrecer la
+        PPE individualizando la decisión de inicio y mantenimiento en función de las características
+        del accidente, de los datos analíticos de la fuente y tras diálogo con la persona expuesta.
+        Si no se puede conocer la situación serológica de la fuente, se valorarán las características
+        clínicas y epidemiológicas y en caso de duda se considerará como de alto riesgo.
+        Características de la persona expuesta (trabajador sanitario)
+        Se debe realizar un estudio serológico completo a la persona expuesta para determinar su
+        estatus serológico frente al VIH, VHB y VHC.
+        Basándonos en estas 3 características se puede establecer una gradación del riesgo de
+        adquisición del VIH tras una exposición ocupacional:
+        - Riesgo muy alto: accidente con gran volumen de sangre (pinchazo profundo con aguja
+        usada en acceso vascular del paciente) y persona fuente con alta carga viral plasmática de
+        VIH.
+        - Riesgo alto: accidente con gran volumen de sangre o con sangre de persona fuente con alta
+        carga viral plasmática de VIH. Se incluyen contactos mucocutáneos con ﬂuidos que también
+        tienen alta carga viral de VIH y que sean: muy prolongados, sobre un área extensa o con piel
+        no íntegra.
+        - Riesgo bajo: accidente sin exposición a gran volumen de sangre ni procedente de persona
+        con carga viral plasmática de VIH elevada (p. e. pinchazo con aguja de sutura y con carga viral
+        indetectable) 13 .
+
+        4.2.2. Evaluación del riesgo de transmisión ocupacional del VHB y VHC
+        El VHB permanece viable e infeccioso durante períodos de hasta 1 semana en las superﬁcies14
+        y se transmite de manera eﬁciente a través de la exposición percutánea o mucosa a sangre o
+        ﬂuidos corporales. El VHC se transmite principalmente a través de la exposición parenteral,
+        con mayor frecuencia a través de agujas contaminadas.
+        El riesgo de hepatitis B después de un pinchazo con una aguja procedente de un paciente con
+        HBsAg+ es muy superior al riesgo de infección por el VIH (6-30%)15 si el trabajador expuesto
+        no está vacunado o, si estando vacunado presenta un título de anti-HBs < 10 mUI/ml 16.
+        Es fundamental evaluar la presencia de la infección en la persona fuente. Si no se sabe o no
+        se puede conocer, se debe realizar un estudio serológico completo siempre que sea posible,
+        previa solicitud de consentimiento informado verbal o por escrito, con HBsAg, anticuerpos
+        anti-VHC (si es positivo solicitar una carga viral) así como serología de VIH. Además, se
+        debe evaluar la susceptibilidad del trabajador expuesto, conocer su estado inmunológico,
+        vacunación y el título previo de anticuerpos anti-HBs. La seroprevalencia en España de
+        HBsAg+ es del 0,22 %, aunque sólo el 0,05 % de la población tiene ADN-VHB detectable
+        en plasma (replicación viral activa). La prevalencia de HBsAg+ es superior en poblaciones
+        clave (5,3 % en UDI o 3,7 % en PVVIH) 17. Para aquellas personas no vacunadas o con estado
+        inmunológico incierto, se debería ofrecer una primera dosis o dosis de recuerdo de la vacuna
+        para el VHB a la espera de los resultados del anti-HBs. Si se trata de un paciente no vacunado,
+
+
+
+
+                                                                                             22
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        o con un título de anti-HBs < 10 UI en el momento de la exposición, se procederá a completar
+        la vacunación del VHB con una pauta rápida (0, 1 y 6 meses). Si la fuente es HBsAg+ se
+        aconseja también administrar una dosis de gammaglobulina especíﬁca en las primeras 12
+        - 24 h tras el contacto. En la (Figura 4.1.) se expone el algoritmo de actuación frente a la
+        exposición al VHB.
+        Según los datos recogidos en un estudio realizado entre 2017-2018 en España, la
+        prevalencia de anticuerpos anti VHC (anti-VHC) en nuestro medio es del 0,85 % y con
+        viremia activa (ARN-VHC+) sólo el 0,22 %; no obstante, una estimación reciente realizada
+        en el año 2022, reduce esta tasa al 0,12 %. La prevalencia de anti-VHC es superior en
+        poblaciones clave: 45,9 % en UDI, 9,76 %, en internos en instituciones penitenciarias (0,92 %
+        con ARN-VHC+), 24,4 % en PVVIH (1,7 % con ARN-VHC+), 1,8 % en HSH y 0,4 % en usuarios
+        de PrEP 17 . Por lo tanto, se deberá realizar la valoración de la situación serológica de la fuente
+        siempre que se pueda y si esto no es posible, una estimación del riesgo teniendo en cuenta
+        los datos epidemiológicos.
+
+        La posibilidad de infección por VHC en personal sanitario tras la EO con agujas se estima
+        que es del 0 al 3 % 18 , y la carga viral inoculada es uno de los factores que pueden inﬂuir en
+        la probabilidad de adquirir la infección 19,20 . Así, la incidencia de infección aguda por VHC es
+        baja, (frecuencia de seroconversión según los CDC del 1,8 %) 21 . No obstante, es necesario
+        realizar un correcto seguimiento serológico tras el accidente ya que, en la mayoría de los
+        casos, la hepatitis aguda cursa de forma asintomática. No disponemos de vacuna ni existe
+        una proﬁlaxis efectiva frente al VHC, por tanto, es importante el seguimiento estrecho de
+        estas personas para poder diagnosticar cuanto antes la infección e iniciar el tratamiento de
+        forma inmediata 22.
+
+
+
+        4.3. Evaluación del riesgo de transmisión no ocupacional del VIH, VHB
+        y VHC
+
+        4.3.1. Evaluación del riesgo de transmisión no ocupacional del VIH
+
+        Nos referiremos en este apartado al riesgo de transmisión del VIH a través de relaciones
+        sexuales. En el capítulo 5 se analizan otros tipos de exposición no ocupacional.
+        La probabilidad de transmisión del VIH dependerá fundamentalmente de:
+        a. - Tipo de exposición. En el caso de exposición traumática, con violencia, como en relaciones
+        sexuales no consentidas o si se produce sangrado o menstruación, el riesgo se incrementa
+        considerablemente. También cuando ha habido múltiples exposiciones en las últimas 72
+        horas 23,24.
+
+
+
+
+                                                                                             23
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        b.- Estado de la persona fuente y la cantidad de virus en el inóculo. No habrá riesgo de
+        transmisión si la fuente es VIH negativa, pero con frecuencia no se conoce el estado de la
+        fuente respecto del VIH; en estos casos la valoración del riesgo debe ser individualizada.
+        En personas con VIH y enfermedad avanzada (con niveles bajos de CD4, o sida), si la persona
+        fuente no está recibiendo TAR, y durante la infección aguda, la carga viral suele ser muy
+        elevada. En estos casos, el riesgo de transmisión aumenta 2,9 veces 25,26 .
+        En una revisión sistemática de la literatura que incluyó 7 762 parejas serodiscordantes en 25
+        países no se encontró evidencia deﬁnitiva de la transmisión del VIH cuando las cargas virales
+        eran inferiores a 600 copias/ml y sucedió de manera extremadamente rara cuando las
+        cargas virales estaban entre 600 - 1000 copias/ml. Además, los estudios de infectividad han
+        demostrado que el riesgo estimado de transmisión por exposición sexual sin preservativo
+        cuando la pareja índice tenía una carga viral de 1000 copias/ml es extremadamente pequeño
+        (0,00028 %) 27.
+        Existe evidencia suﬁciente para aﬁrmar que el riesgo de transmisión del VIH de una PVVIH
+        que recibe TAR y tiene carga viral menor de 200 copias/ml, a través de relaciones sexuales
+        sin preservativo, es nulo, independientemente del tipo de relación sexual 28 .
+        c.- Individuo expuesto. La presencia de lesiones genitales o ITS en el individuo expuesto
+        también son factores que facilitan la infección 29 . Por otro lado, la probabilidad de
+        adquisición del VIH por relación sexual es mayor al ﬁnal del embarazo (riesgo relativo
+        ajustado 2,82, p=0,01) y en el período posparto (3,97, p=0,01) en comparación con la mujer
+        no embarazada 30.
+
+
+        4.3.2. Cálculo individualizado del riesgo de transmisión del VIH
+        El cálculo del riesgo ﬁnal de transmisión dependerá de la prevalencia de la infección VIH
+        en la población a la que pertenece la persona fuente, más concretamente de la prevalencia
+        de viremia detectable del VIH en esa población, y del riesgo estimado inherente al tipo de
+        exposición.
+        Según datos del Ministerio y de ONUSIDA referentes al año 2022, y tomando como
+        referentes el continuo de atención al VIH más reciente, en España hay entre 130 000 y 170
+        000 PVVIH, prevalencia del 0,2 - 0,3 %, con una fracción no diagnosticada del 7,5 %, lo que
+        supone entre 8 623 y 15 461 personas que desconocen su situación de infección por el
+        VIH. Entre aquellas que están correctamente diagnosticadas, el 96,6 % reciben tratamiento
+        antirretroviral, y de estas el 90,4 % tienen carga viral suprimida 31,32 . Aplicando estos datos
+        sobre la población española en julio de 2022, 47 615 034 habitantes (Instituto Nacional de
+        Estadística, INE, nota de prensa 18 nov 2022), la prevalencia de personas con VIH y carga
+        viral detectable en la población general en España es del 0,04 - 0,06 %.
+        No existen datos oﬁciales de prevalencia de infección por el VIH y de viremia en diferentes
+        poblaciones, no obstante, en base a datos de población del INE, publicaciones del Centro de
+        Investigaciones sociológicas, CIS 33 , la Encuesta europea on-line para HSH (EMIS-2017) 34 , y
+
+
+
+
+                                                                                             24
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        el informe del Observatorio Español de la Drogas y las Adicciones 2023 35 , hemos realizado
+        una aproximación. Según estos datos, la prevalencia de viremia por VIH (Carga viral > 200
+        copias/ml) en el colectivo de GBHSH es de 9 personas cada 1000, entre 17 y 32 personas de
+        cada 1000 UDI, y solo 2 cada 10 000 personas entre los hombres y mujeres heterosexuales.
+        La incertidumbre que pueden generar resultados sustentados en distintas presunciones,
+        aún basados en documentos oﬁciales, aconsejan ser cautos a la hora de aplicarlos, pero nos
+        sirven para valorar que la prevalencia de personas con VIH virémicas, a día de hoy en España,
+        es baja en la mayoría de colectivos.
+
+        En la última edición de las Guías británicas de PPE 28, se ha publicado una estimación del
+        riesgo de transmisión del VIH, según el tipo de exposición (Tabla 4.1.), y una estimación de la
+        viremia en diferentes poblaciones de Gran Bretaña. Según estos datos y basándonos en la
+        fórmula para el cálculo la probabilidad de transmisión de la infección podemos aproximarnos
+        a una estimación más individualizada del riesgo de transmisión.
+        Riesgo de transmisión del VIH = riesgo de que la fuente sea VIH positiva con viremia
+        detectable X riesgo inherente al tipo de exposición
+        Se considera de forma general, que en exposiciones con un riesgo inferior a 1 / 10 000,
+        no se aconseja la administración de PPE. No obstante, la decisión debe ser individualizada
+        y considerar posibles factores agravantes del riesgo de transmisión (relaciones traumáticas
+        como es la agresión sexual, durante la menstruación o presencia de úlceras genitales o ITS
+        concomitantes, …)
+
+        En la (Tabla 4.2.) se recogen las indicaciones para realizar PPE para el VIH tras exposi-
+        ción ocupacional y no ocupacional.
+
+        4.3.3. Evaluación del riesgo de transmisión no ocupacional del VHB y VHC
+
+        Dado que el VIH comparte vías de transmisión con el VHB y el VHC, en todas las situaciones
+        comentadas previamente de riesgo para la ENO del VIH se deberá realizar la valoración de
+        estas infecciones, así como su seguimiento serológico correspondiente.
+        En lo que respecta al VHB habrá que conocer el estado de la fuente y el estado de inmunidad
+        del sujeto expuesto, y vacunar o utilizar gammaglobulina anti-VHB en caso necesario. En la
+        (Figura 4.1.) se expone el algoritmo de actuación frente al VHB.
+        La transmisión del VHC por vía sexual ocurre primordialmente en HSH y, en un elevado
+        porcentaje, con infección crónica por el VIH 36,37 por tanto es importante valorar esta
+        situación según las características de la relación y la persona fuente.
+
+
+
+
+                                                                                             25
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        4.4. Evaluación de otras infecciones
+        (La mayoría aplican a las ENO por contacto sexual)
+
+        4.4.1. ITS
+        Tras una exposición sexual de riesgo, hay que tener en cuenta la posibilidad de transmisión
+        de otras ITS, por ejemplo, síﬁlis, infección por Neisseria gonorrhoeae o por Chlamydia
+        trachomatis , entre otras. Se ha reportado una prevalencia aproximada del 5 % de ITS,
+        no detectadas en el cribado inicial basal, que se maniﬁestan en los 15 siguientes días a la
+        exposición de riesgo. Por tanto, en aquellas personas que solicitan PPE se recomienda:
+           • Las personas asintomáticas deben ser evaluadas para ITS y la toma de muestras irá
+             determinada por el tipo de práctica (sexo oral, vaginal, anal, insertivo / receptivo, etc.).
+           • Realizar una serología de síﬁlis.
+           • Realizar nueva valoración en el caso de experimentar algún síntoma sugestivo de ITS.
+           • Si hay síntomas de ITS presentes en el momento de la primera evaluación se requiere de
+             una evaluación adicional, tratamiento empírico y seguimiento, de acuerdo con las guías
+             nacionales de manejo del paciente con ITS.
+
+        4.4.2. Virus de la hepatitis A (VHA):
+        Es conveniente conocer el estado vacunal frente al VHA. En personas inmunocompetentes
+        puede valorarse la indicación de una dosis de vacuna en las dos primeras semanas tras la
+        exposición. La administración de inmunoglobulina como PPE frente al VHA puede ser de
+        utilidad especialmente en personas inmunodeprimidas y ha de administrarse junto con una
+        dosis de vacuna38 .
+
+        4.4.3. Mpox:
+        La vacunación puede ser utilizada como una forma de PPE en individuos sin síntomas que
+        hayan tenido una exposición de riesgo a casos diagnosticados de mpox. Se debe realizar en
+        los primeros 4 días tras el contacto (aunque podrá ofrecerse hasta los 14 días) 39 .
+
+        4.4.3. Tétanos:
+        A las personas que sufran mordeduras, heridas o abrasiones se les debe evaluar su estado
+        vacunal frente al tétanos y ofrecerles la proﬁlaxis indicada 40 .
+
+
+
+        4.5. Recomendaciones generales e indicación de PPE ante la
+        exposición ocupacional y no ocupacional frente al VIH, VHB y VHC
+           • Tras una exposición cutánea debemos limpiar la zona con agua y jabón. Para las
+             exposiciones percutáneas usar un antiséptico de base alcohólica ya que el alcohol tiene
+             actividad viricida frente el VIH, VHB y VHC. En caso de una posible exposición sobre
+             mucosas, se debe enjuagar la zona con abundante agua o irrigar con suero salino. Tras
+             un pinchazo accidental, nunca debe exprimirse la zona del pinchazo. (AII)
+           • Se recomienda investigar la situación serológica frente al VIH de la persona fuente. (AI)
+
+
+                                                                                             26
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+           • En el caso de que la persona fuente tenga infección por el VIH conocida, es fundamental
+             conocer la carga viral, el régimen de TAR (si lo recibe), así como la historia farmacológica
+             y los motivos de cambio de tratamiento. (AI)
+           • Se recomienda PPE en exposiciones percutáneas con sangre si el riesgo es alto o muy
+             alto. Si el riesgo es bajo, se evalúa la carga viral del paciente fuente, no siendo necesaria
+             PPE si es indetectable. Para exposiciones de mucosas o piel de alto riesgo con sangre
+             o líquidos infectantes, se recomienda PPE si la persona fuente presenta carga viral
+             detectable. (AI)
+           • Si la PPE está indicada se recomienda iniciarla idealmente en las primeras 2 horas,
+             preferiblemente en las primeras 12 horas, y siempre antes de las 72 horas. No se
+             recomienda iniciar PPE si han pasado más de 72 horas desde la exposición. (AII)
+           • En el caso de la exposición ocupacional si no se puede conocer la situación serológica de
+             la persona fuente, se valorarán las características clínicas y epidemiológicas y en caso de
+             duda se considerará de alto riesgo. (BIII)
+           • En caso de una exposición no ocupacional sexual se debe valorar de forma individualizada
+             la situación serológica de la fuente, y si esto no es posible, una estimación del riesgo
+             teniendo en cuenta los datos epidemiológicos y el tipo de relación sexual. (BII)
+           • El sexo anal receptivo con eyaculación es la relación sexual asociada con un mayor riesgo
+             de trasmisión del VIH, y es indicación para iniciar PPE si la persona fuente es VIH con
+             carga viral detectable o desconocida o pertenece a un grupo de alta prevalencia de VIH
+             (HSH o país de alta prevalencia). (AI)
+           • El sexo anal insertivo con persona fuente con VIH con carga viral detectable o desconocida
+             es recomendación para iniciar PPE, y en el caso de persona fuente con estado serológico
+             desconocido de un país o grupo de alta prevalencia se deberá considerar iniciar la PPE.
+             (CII)
+           • El sexo vaginal receptivo con persona fuente con infección por VIH con carga viral
+             detectable o desconocida es recomendación de iniciar PPE. Si se desconoce el estado
+             serológico de la persona fuente, incluso si ésta pertenece a un grupo de alta prevalencia,
+             generalmente no se recomienda PPE. (CII)
+           • En el sexo vaginal insertivo no se recomienda la PPE salvo sexo con persona con VIH con
+             carga viral desconocida o detectable en el que se considerará. (CII)
+           • El sexo oral activo o pasivo no es indicación de PPE. (BII)
+           • Se recomienda individualizar, considerar la presencia de factores agravantes que
+             incrementen el riesgo de transmisión del VIH, y valorar las preferencias de la persona
+             expuesta respecto a la decisión de iniciar PPE. (CIII)
+           • Cuando se produce una exposición de riesgo, con independencia de si se realiza o no
+             PPE, todos los procedimientos e intervenciones deben estar claramente recogidos en la
+             historia clínica. (AI)
+           • En el caso del VHB la actuación depende de la situación tanto de la persona fuente como
+             de la persona expuesta. (AII)
+           • Si la pauta de vacunación VHB es correcta, no debe efectuarse seguimiento salvo por las
+             posibles implicaciones legales. (AII)
+           • En el caso de personas no vacunadas previamente o con vacunación incompleta, está
+             indicada la proﬁlaxis con IGHB y vacunación completa. (AII)
+
+
+
+                                                                                             27
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+            • En cuanto al VHC, no se dispone de PPE, las recomendaciones deben ir dirigidas a un
+              diagnóstico y tratamiento precoz de una posible infección aguda. (AII)
+
+        Gráﬁcos:
+
+        Figura 4.1. PPE tras exposición ocupacional o no ocupacional al VHB
+
+
+
+
+        Notas: 1: Vacuna a los 0, 1 y 6 meses.; 2:IgHB: en lesiones punzantes
+        accidentales, tan pronto como se pueda (dentro de los primeros
+        7 días de la exposición), 1 dosis de 0,06 ml/kg de peso (máximo
+        5 ml); en exposiciones sexuales, hasta 14 días. 3: No reiniciar la
+        vacunación, sólo administrar las dosis que faltan.
+
+        * No respondedor vacunado con dos pautas completas (6 dosis).
+        ** No respondedor vacunado con 3 dosis.
+
+
+
+
+                                                                                             28
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Tablas:
+        Tabla 4.1. Riesgo de transmisión del VIH por ENO a una PVVIH que no recibe TAR supresor.
+
+
+
+         Tipo de exposición                                                    Riesgo estimado
+         Recepción anal                                                            1 entre 90
+              Con eyaculación                                                      1 entre 65
+              Sin eyaculación                                                      1 entre 170
+         Penetración anal                                                         1 entre 666
+              No circuncidado                                                      1 entre 161
+              Circuncidado                                                        1 entre 909
+         Recepción vaginal                                                       1 entre 1.000
+         Inserción vaginal                                                        1 entre 1.219
+         Contacto de semen con los ojos                                         < 1 entre 10.000
+         Sexo orogenital                                                        < 1 entre 10.000
+         Exposición mucocutánea                                                  1 entre 1.000
+         Transfusión de sangre                                                      1 entre 1
+         Pinchazo accidental con aguja                                            1 entre 333
+         Compartir equipo de inyección (incluido chemsex)                          1 entre 149
+         Mordedura humana                                                       < 1 entre 10.000
+
+
+
+
+                                                                                             29
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Tabla 4.2. Indicaciones de prescripción de PPE al VIH tras exposición ocupacional y no
+        ocupacional.
+
+                                                                                 Estado de la fuente frente al VIH
+                                                                    VIH positivo                                    Estado desconocido
+                                                                                                        De un país de
+                                                   CV VIH                                                                          De un país /
+                                                                              CV VIH                    alta prevalencia
+                                                   desconocida o                                                                   grupo de baja
+                                                                              indetectable              a / Grupo riesgo
+                                                   detectable                                                                      prevalencia
+                                                                                                        (p.e HSH)
+         EXPOSICIÓN SEXUAL
+         Sexo anal receptivo                       Recomendado                No recomendadob           Recomendado                No recomendado
+         Sexo anal insertivo                       Recomendado                No recomendadob           Considerarc                No recomendado
+                                                                                                        Generalmente no
+         Sexo vaginal receptivo                    Recomendado                No recomendadob                                      No recomendado
+                                                                                                        recomendadoc
+                                                                                                        Generalmente no
+         Sexo vaginal insertivo                    Considerarc                No recomendado                                       No recomendado
+                                                                                                        recomendadoc
+         Felación con eyaculación                  No recomendado             No recomendado            No recomendado             No recomendado
+         Felación sin eyaculación                  No recomendado             No recomendado            No recomendado             No recomendado
+         Salpicadura de semen en ojo No recomendado                           No recomendado            No recomendado             No recomendado
+         Cunnilingus                               No recomendado             No recomendado            No recomendado             No recomendado
+         OCUPACIONAL Y OTRAS EXPOSICIONES
+         Compartir material de                                                                          Generalmente no
+                                                   Recomendado                No recomendado                                       No recomendado
+         inyección                                                                                      recomendadod
+                                                                                                        Generalmente no
+         Material punzante                         Recomendado                No recomendado                                       No recomendado
+                                                                                                        recomendadod,e
+         Lesión por salpicadura en                                                                      Generalmente no
+                                                   Recomendado                No recomendado                                       No recomendado
+         mucosa                                                                                         recomendado
+                                                   Generalmente no
+         Mordedura humana                                                     No recomendado            No recomendado             No recomendado
+                                                   recomendado
+         Pinchazo con aguja en
+                                                   No aplica                  No aplica                 No recomendado             No recomendado
+         comunidad
+
+        Recomendado: los beneﬁcios de PPE son mayores que los riesgos, debe administrarse la PPE salvo que exista una razón muy clara para no
+        hacerlo. Considerar: el riesgo de transmisión de VIH es bajo, el balance riesgo / beneﬁcio es menos claro. El riesgo debe valorarse de forma
+        individual. No recomendado: el riesgo de transmisión de VIH es muy bajo, la potencial toxicidad y la no conveniencia es mayor que el beneﬁcio, salvo
+        excepciones muy puntuales. No se debe administrar la PPE si el riesgo supera al beneﬁcio.
+        a
+         Países con prevalencia de VIH mayor o igual al 1 % en adultos mayores de 15 años, estimación para el año 2023 (https://aidsinfo.unaids.org/): países
+        de África subsahariana: Angola, Botswana, Burundi, Cabo Verde, Chad, Congo, Costa de Marﬁl, Yibuti, Suazilandia, Etiopía, Gabón, Gambia, Ghana,
+        Guinea, Guinea-Bissau, Kenia, Lesoto, Liberia, Malawi, Mali, Mauricio, Mozambique, Namibia, Nigeria, Ruanda, Sierra Leona, Sudáfrica, Sudán del
+        Sur, Tanzania, Togo, Uganda, Zambia y Zimbabue; de Centroamérica: Barbados, Bahamas, Belice, Haití, Jamaica, República Domi-nicana, Surinam,
+        Guyana; y de la región Asia-Pacíﬁco: Papúa Nueva Guinea y Tailandia.
+        b
+          El caso índice debe haber estado tomando TAR al menos 6 meses, con carga viral indetectable en la ultima determinación y en los últimos
+        6 meses, con una buena adherencia reportada. Cuando no se dispone de CV, o hay dudas o se documenta mala adherencia al TAR, se debe
+        administrar PPE. El dintel de CV considerado indetectable en los estudios PARTNER 1 y 2 y en HPTN 052 fue de <200 cp/ml.
+        c
+         Los factores que inﬂuyen en la toma de decisión en todas las exposiciones relacionadas con exposición sexual: alteraciones en la barrera
+        mucosa como úlceras genitales y trauma anal o vaginal tras violación o primera relación sexual; múltiples episodios de exposición en un corto
+        periodo de tiempo como sexo grupal; ITS en cualquier pareja, personas en situación de alto riesgo de adquirir el VIH, como las personas trans.
+        d
+          La prevalencia entre IDUS varía considerablemente dependiendo del país de origen. Las estimaciones especíﬁcas por región se pueden encontrar
+        en el Global data on HIV epidemiology and response (https://aidsinfo.unaids.org/)
+        e
+          Factores que pueden inﬂuir la toma de decisiones incluidos en exposición ocupacional; traumatismo-herida profunda o inyección de sangre en
+        bolo.
+
+
+
+
+                                                                                                                                     30
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Bibliografía:
+        1. The path that ends AIDS: UNAIDS Global AIDS Update 2023. Geneva: Joint United Nations Programme
+        on HIV/AIDS; 2023. Licence: CC BY-NC-SA 3.0 IGO. Accesible en: https://thepath.unaids.org/wp-content/
+        themes/unaids2023/assets/ﬁles/2023_report.pdf
+
+        2. Bourry O, Brochard P, Souquiere S, Maria Makuwa, Julien Calvo, Nathalie Dereudre-Bosquet, et al.
+        Prevention of vaginal simian immunodeﬁciency virus transmission in macaques by postexposure prophylaxis
+        with zidovudine, lamivudine and indinavir. AIDS. 2009; 23(4):447-54. doi: 10.1097/QAD.0b013e328321302d.
+        PMID: 19240457.
+
+        3. Nielsen-Saines K, Watts DH, Veloso VG, Joao EC, Pilotto JH, Gray G, et al. Three postpartum antiretroviral
+        regimens to prevent intrapartum HIV infection. N Engl J Med 2012; 366:2368-79. doi: 10.1056/
+        NEJMoa1108275. PMID: 22716975; PMCID: PMC3590113.
+
+        4. Cardo DM, Culver DH, Ciesielski CA, P U Srivastava, R Marcus, D Abiteboul, et al. A case-control study
+        of HIV seroconversion in health care workers after percutaneous exposure. Centers for Disease Control
+        and Prevention Needlestick Surveillance Group. N Engl J Med. 1997; 337(21):1485-90. doi: 10.1056/
+        NEJM199711203372101. PMID: 9366579.
+
+        5. Schechter M, do Lago RF, Mendelsohn AB, Ronaldo I Moreira, Lawrence H Moulton, Lee H Harrison et al.
+        Behavioral impact, acceptability, and HIV incidence among homosexual men with access to postexposure
+        chemoprophylaxis for HIV. J Acquir Immune Deﬁc Syndr 2004; 35:519-25. doi: 10.1097/00126334-
+        200404150-00010. PMID: 15021317.
+
+        6. Beymer MR, Weiss RE, Bolan RK, Kofron RM, Flynn RP, Pieribone DL et al. Differentiating Nonoccupational
+        Postexposure Prophylaxis Seroconverters and Non-Seroconverters in a Community-Based Clinic in Los
+        Angeles, California. Open Forum Infect Dis 2017 Apr 4;4(2):ofx061. doi: 10.1093/oﬁd/ofx061. eCollection
+        2017 Spring.
+
+        7. Kuhar DT, Henderson DK, Struble KA, Walid Heneine, Vasavi Thomas, Laura W Cheever, et al. Updated US
+        Public Health Service guidelines for the management of occupational exposures to human immunodeﬁciency
+        virus and recommendations for postexposure prophylaxis. Infect Control Hosp Epidemiol 2013 Sep;34(9):875-
+        92. doi: 10.1086/672271. Erratum in: Infect Control Hosp Epidemiol. 2013 Nov;34(11):1238. Dosage error in
+        article text. PMID: 23917901.
+
+        8. Cohen MS, Chen YQ, McCauley M, Gamble T, Hosseinipour MC, Kumarasamy N, et al. Prevention of HIV-1
+        infection with early antiretroviral therapy. N Engl J Med.2011; 365:493-505. doi: 10.1056/NEJMoa1105243.
+        PMID: 21767103; PMCID: PMC3200068.
+
+        9. Masciotra S, McDougal JS, Feldman J, Patrick Sprinkle, Laura Wesolowski, S Michele Owen. Evaluation
+        of an alternative HIV diagnostic algorithm using specimens from seroconversion panels and persons
+        with established HIV infections. J Clin Virol 2011;52 Suppl 1: S17-22. doi: 10.1016/j.jcv.2011.09.011. PMID:
+        21981983.
+
+        10. Chávez P, Wesolowski L, Patel P, Anastos K, DeHovitz J, Kassaye SG, et al. Evaluation of the performance
+        of the Abbott ARCHITECT HIV Ag/Ab Combo Assay. J Clin Virol 2011;52 Suppl 1:S 51-5. doi: 10.1016/
+        j.jcv.2011.09.010. PMID: 21983253.
+
+        11. Documento de consenso de GeSIDA/ División de Control de VIH, ITS, Hepatitis virales y Tuberculosis
+        del Ministerio de Sanidad respecto al tratamiento antirretroviral en adultos infectados por el virus de la
+        inmunodeﬁciencia humana (Actualización enero 2023). Panel de expertos de GeSIDA y de la División
+        de Control de VIH, ITS, Hepatitis virales y Tuberculosis del Ministerio de Sanidad. Accesible en: https://
+        gesidaseimc.org/wp-content/uploads/2023/06/Guia_TAR_V12.pdf
+
+        12. Centers for Disease Control and Prevention. Diagnoses of HIV infection in the United States and dependent
+        areas, 2021. HIV Surveillance Report. 2021. Accesible en: https://stacks.cdc.gov/view/cdc/149071
+
+        13. Furtado MR, Callaway DS, Phair JP, K J Kunstman, J L Stanton, C A Macken, et al. Persistence of HIV-1
+        transcription in peripheral-blood mononuclear cells in patients receiving potent antiretroviral therapy. N Engl
+        J Med 1999; 340 (21):1614-22. doi: 10.1056/NEJM199905273402102. PMID: 10341273.
+
+
+
+                                                                                                     31
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        14. Ibáñez A, Puig T, Elías J, B Clotet, L Ruiz, M A Martínez. Quantiﬁcation of integrated and total HIV-1 DNA
+        after long-term highly active antiretroviral therapy in HIV-1-infected patients. AIDS 1999; 13 (9):1045-9. doi:
+        10.1097/00002030-199906180-00007. PMID: 10397534.
+
+        15. Bond WW, Favero MS, Petersen NJ, C R Gravelle, J W Ebert, J E Maynard. Survival of hepatitis B virus after
+        drying and storage for one week. Lancet 1981 Mar 07;1(8219):550-1. doi: 10.1016/s0140-6736(81)92877-4.
+        PMID: 6111645.
+
+        16. Werner BG, Grady GF. Accidental hepatitis B surface antigen positive innoculations: use of e antigen to
+        estimate infectivity. Ann Intern Med 1982; 97: 367-9. doi: 10.7326/0003-4819-97-3-367. PMID: 7114632.
+
+        17. CDC Guidance for Evaluating Health-Care Personnel for Hepatitis B Virus Protection and for Administering
+        Postexposure Management. MMWR Recomm Rep. 2013 Dec 20;62(RR-10):1-19. PMID: 24352112.
+
+        18. Unidad de vigilancia de VIH, ITS y hepatitis B y C. Indicadores clave: Hepatitis B y C. Centro Nacional de
+        Epidemiología, Instituto de Salud Carlos III / División de Control de VIH, ITS, Hepatitis virales y Tuberculosis,
+        Dirección General de Salud Pública; 2024. Accesible en: https://www.isciii.es/QueHacemos/Servicios/
+        VigilanciaSaludPublicaRENAVE/EnfermedadesTransmisibles/Documents/archivos%20A-Z/Hepatitis%20C/
+        INDICADORES%20Hepatitis_Febrero%202024.pdf
+
+        19. Bruguera M. Hepatitis C esporádica: importancia relativa de la transmisión vertical, sexual y parenteral
+        inaparente del virus de la hepatitis C. Med Clin (Barc) 1998 Nov 21;111(17):658-9. PMID: 9881348.
+
+        20. Serra C, Torres M, Campins M. Riesgo laboral de infección por el virus de la hepatitis C después de una
+        exposición accidental. Grupo Catalán para el Estudio del Riesgo laboral de infección por el VHC en hospitales.
+        Med Clin (Barc) 1998; Nov 21;111(17):645-9. PMID: 9881345.
+
+        21. Esteve M, Casas I, Planas R, Matas L. Hepatitis C aguda postinoculación accidental en un profesional
+        sanitario con respuesta al tratamiento con interferón. Med Clin (Barc) 2000 Feb 5;114(4):157. doi: 10.1016/
+        s0025-7753(00)71223-1. PMID: 10734627.
+
+        22. U.S. Public Health Service. Updated U.S. Public Health Service Guidelines for the Management of
+        Occupational Exposures to HBV, HCV, and HIV and Recommendations for Postexposure Prophylaxis. MMWR
+        Recomm Rep. 2001 Jun 29;50(RR-11):1-52. PMID: 11442229.
+
+        23. Moorman AC, de Perio MA, Goldschmidt R, Chu C, Kuhar D, Henderson DK, et al. Testing and Clinical
+        Management of Health Care Personnel Potentially Exposed to Hepatitis C Virus - CDC Guidance, United
+        States, 2020. MMWR Recomm Rep. 2020 Jul 24;69(6):1-8. doi: 10.15585/mmwr.rr6906a1. PMID: 32701942;
+        PMCID: PMC8631757.
+
+        24. Rothenberg RB, Scarlett M, del Rio C, Reznik D, O'Daniels C, et al. Oral transmission of HIV. AIDS 1998;
+        12(16):2095-105. doi: 10.1097/00002030-199816000-00004. PMID: 9833850.
+
+        25. Rottingen JA, Cameron DW, Garnett GP. A systematic review of the epidemiologic interactions between
+        classic sexually transmitted diseases and HIV: how much really is known? Sex Transm Dis 2001;28(10):579-
+        97. doi: 10.1097/00007435-200110000-00005. PMID: 11689757.
+
+        26. Gray RH, Wawer MJ. Probability of heterosexual HIV-1 transmission per coital act in sub-Saharan Africa.
+        The Journal of infectious diseases. 2012;205(3):351-2. doi: 10.1093/infdis/jir751. Epub 2012 Jan 11. PMID:
+        22241799.
+
+        27. Leynaert B, Downs AM, de Vincenzi I. Heterosexual transmission of human immunodeﬁciency virus:
+        variability of infectivity throughout the course of infection. European Study Group onHeterosexual
+        Transmission of HIV. American journal of epidemiology. 1998;148(1):88-96. doi: 10.1093/ oxfordjournals.aje.
+        a009564. PMID: 9663408.
+
+        28. Broyles LN, Luo R, Boeras D, Vojno L. The risk of sexual transmission of HIV in individuals with low-
+        level HIV viraemia: a systematic review. Lancet 2023 Aug 5;402(10400):464-471. doi: 10.1016/ S0140-
+        6736(23)00877-2. Epub 2023 Jul 22. PMID: 37490935; PMCID: PMC10415671.
+
+
+
+
+                                                                                                       32
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        29. Cresswell F, Asanati K, Bhagani S, Bofﬁto M, Delpech V, Ellis J, et al. UK guideline for the use of HIV
+        postexposure prophylaxis 2021. HIV Med. 2022 May;23(5):494-545. doi: 10.1111/hiv.13208. Erratum in: HIV
+        Med. 2022 Jul;23(6):701. doi: 10.1111/hiv.13327. PMID: 35166004.
+
+        30. Wald A, Link K. Risk of human immunodeﬁciency virus infection in herpes simplex virus type 2seropositive
+        persons: a meta-analysis. J Infect Dis 2002;185(1):45-52. doi: 10.1086/338231. Epub 2001 Dec 14. PMID:
+        11756980.
+
+        31. Thomson KA, Hughes J, Baeten JM, Grace John-Stewart, Connie Celum, Craig R Cohen, et al. Increased
+        Risk of HIV Acquisition Among Women Throughout Pregnancy and During the Postpartum Period: A
+        Prospective Per-Coital-Act Analysis Among Women With HIV-Infected Partners. J Infect Dis 2018;218(1):16-
+        25. doi: 10.1093/infdis/jiy113. PMID: 29514254; PMCID: PMC5989601.
+        32. Unidad de vigilancia de VIH, ITS y hepatitis B y C. Indicadores clave: Infeccioń por VIH e Infecciones de
+        Transmisioń Sexual. Centro Nacional de Epidemiologıa,́ Instituto de Salud Carlos III / Divisioń de Control de
+        VIH, ITS, Hepatitis virales y Tuberculosis, Direccioń General de Salud P ́ ublica; 2024. Accesible en: https://
+        www.sanidad.gob.es/ciudadanos/enfLesiones/enfTransmisibles/sida/vigilancia/docs/               INDICADORES_
+        VIH_e_ITS_Febrero_2024.pdf
+        33. Unidad de vigilancia del VIH, ITS y hepatitis B y C. Actualizacioń del Continuo de Atencioń del VIH en
+        Espana,̃ 2021. Madrid: Centro Nacional de Epidemiologıá – Instituto de Salud Carlos III/ Divisioń de control de
+        VIH, ITS, Hepatitis Virales y Tuberculosis – Direccioń General de Salud P ́ ublica; 2023. Accesible en: https://
+        www.sanidad.gob.es/ciudadanos/enfLesiones/enfTransmisibles/sida/vigilancia/docs/Continuo_atencion_
+        VIH_mayo_2023.pdf
+
+        34. Encuesta sobre relaciones sociales y afectivas pospandemia III. Avance de resultados. Estudio nº 3040.
+        Centro de Investigaciones Sociológicas, Marzo de 2023. Accesible en: https://www.cis.es/documents/d/cis/
+        es3400marmt_a
+
+        35. Encuesta europea on-line para hombres que tienen sexo con hombres (EMIS-2017): resultados en
+        Espana.̃ Ministerio de Sanidad, 2020. Accesible en: https://www.sanidad.gob.es/ciudadanos/enfLesiones/
+        enfTransmisibles/sida/docs/EMIS_Report_07052020.pdf
+
+        36. Observatorio Espanol̃ de las Drogas y las Adicciones. Informe 2023. Alcohol, tabaco y drogas ilegales
+        en Espana.̃ Madrid: Ministerio de Sanidad. Delegacioń del Gobierno para el Plan Nacional sobre Drogas;
+        2023. Accesible en: https://pnsd.sanidad.gob.es/profesionales/sistemasInformacion/informesEstadisticas/
+        pdf/2023OEDA-INFORME.pdf
+
+        37. Urbanus AT, van de Laar TJ, Stolte IG, Schinkel J, Heijman T, Coutinho RA, et al. Hepatitis C virus infections
+        among HIV-infected men who have sex with men: an expanding epidemic. AIDS 2009; 23: F1-7. doi: 10.1097/
+        QAD.0b013e32832e5631. PMID: 19542864.
+
+        38. Yaphe S, Bozinoff N, Kyle R, Shivkumar S, Pai NP, Klein M. Incidence of acute hepatitis C virus infection
+        among men who have sex with men with and without HIV infection: a systematic review. Sex Transm Infect
+        2012; 88:558-64. doi: 10.1136/sextrans-2012-050566. PMID: 22859499.
+
+        39. Protocolo de vigilancia de la hepatitis A. Protocolos de la Red Nacional de Vigilancia Epidemiológica.
+        Accesible en: https://cne.isciii.es/documents/d/cne/protocolo-20de-20vigilancia-20de-20hepatitis-20a-pdf
+
+        40. Recomendaciones de vacunación en el brote actual de viruela del mono. Ministerio de Sanidad. Comisión de
+        Salud Pública de 9 de junio de 2022. Accesible en: https://www.sanidad.gob.es/areas/promocionPrevencion/
+        vacunaciones/MonkeyPox/docs/Propuesta_vacunacion_Monkeypox.pdf
+
+        41. Grupo de trabajo recomendaciones Td 2017. Ponencia de Programa y Registro de Vacunaciones.
+        Recomendaciones de utilización de vacunas Td. Comisión de Salud Pública del Consejo Interterritorial
+        del Sistema Nacional de Salud. Ministerio de Sanidad, Servicios Sociales e Igualdad, 2017. Accesible en:
+        https://www.sanidad.gob.es/areas/promocionPrevencion/vacunaciones/programasDeVacunacion/docs/
+        TetanosDifteria_2017.pdf
+
+
+
+
+                                                                                                        33
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        5. PROFILAXIS POSEXPOSICIÓN EN SITUACIONES ESPECIALES
+        Índice:
+           5.1. Pinchazo accidental en la comunidad
+           5.2. Agresiones sexuales
+           5.3. En personas gestantes y madres en periodo de lactancia
+           5.4. Tras mordedura humana
+           5.5. Particularidades de la PPE en contextos de PrEP
+           5.6. Particularidades de la PPE en usuarios de drogas inyectadas y chemsex
+           5.7. PPE para el VIH en personas en tratamiento crónico frente al VHB
+
+        5.1. Pinchazo accidental en la comunidad
+
+        PPE frente al VIH
+        En general, no se recomienda la PPE al VIH tras una exposición por pinchazo con aguja
+        en la comunidad, ya que el riesgo es extremadamente bajo y normalmente no es posible
+        determinar si se ha utilizado la aguja y con qué ﬁn, el estado serológico respecto al VIH del
+        caso índice y el intervalo entre el uso de la aguja y la exposición 1. (CII)
+
+        PPE frente a la hepatitis B
+        Si la fuente es HBsAg positiva: seguir indicaciones de la PPE ocupacional.
+        En caso de que la fuente sea HBsAg desconocida, si la persona expuesta tiene documentada
+        la vacunación completa frente a la hepatitis B no precisa PPE. En caso de vacunación
+        incompleta debe continuar la pauta pendiente. Si no tiene vacunación previa debe recibir
+        pauta completa con la administración de la primera dosis en las primeras 24 h, y no más de
+        7 días después. Ver ﬁgura 4.1. 1,2. (AII)
+
+        PPE frente a la hepatitis C
+        No existen datos que respalden ninguna modalidad de PPE para prevenir la adquisición
+        del VHC tras la exposición al virus. Existen tratamientos antivirales muy eﬁcaces, y se
+        recomienda un tratamiento precoz si se detecta seroconversión del VHC 1,3. (AII)
+
+
+
+        5.2. Agresiones sexuales
+        Dado que la presencia de abrasiones o lesiones en la mucosa vaginal o anal aumenta el
+        riesgo de adquisición de VIH se cree que el riesgo sería mayor en personas supervivientes
+        de agresión sexual, aunque no se ha publicado evidencia suﬁciente que lo apoye 4 . Además,
+        los datos sobre seroprevalencia de infección por VIH en agresores son poco conocidos y aún
+        más su estado virológico. Se debe tratar como una exposición de alto riesgo.
+
+
+
+
+                                                                                             34
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Se recomienda PPE frente a VIH en situaciones de exposición signiﬁcativa (BIII), la aplicación
+        de protocolos médico-legales vigentes en el centro y la recomendación de tratamiento
+        empírico de otras ITS. (AII)
+        No existen peculiaridades respecto a la proﬁlaxis del VHB.
+
+
+
+        5.3. En personas gestantes y madres en periodo de lactancia
+
+        Los cambios biológicos durante el embarazo sugieren que las personas gestantes y en
+        puerperio inmediato presentan un mayor riesgo de adquisición de VIH por vía sexual 5 .
+        Además, el riesgo de transmisión del VIH de madre a hijo durante el embarazo y la lactancia
+        aumenta notablemente durante la infección aguda por VIH.
+
+        La indicación de proﬁlaxis debe ser independiente del estado gestacional y estar guiada por
+        la valoración de riesgo según el tipo de exposición. (CII)
+
+        En caso de estar indicada, la pauta preferente en una persona gestante será raltegravir 400
+        mg / 12 horas y emtricitabina 200 mg / tenofovir disoproxil 245 mg / 24 horas, durante 28
+        días (consultar Tabla 6.1.) (Tabla 5.1.). (AI)
+        La lactancia no es contraindicación para la PPE frente al VIH.
+        No existen diferencias respecto a la población general en cuanto a proﬁlaxis frente al VHB.
+
+
+
+        5.4. Tras mordedura humana
+
+        Aunque existen algunos casos publicados de trasmisión tras mordeduras, la evidencia es
+        escasa y de poca calidad6,7.
+
+        En general, no se recomienda la PPE después de una mordedura ya que, aunque se
+        desconoce el riesgo preciso de transmisión, es probable que sea insigniﬁcante. (BIII)
+        Únicamente debería ofrecerse PPE si se cumplen 3 condiciones: carga viral VIH detectable
+        (> 1000 copias/ml) en la fuente, saliva con abundante contenido de sangre y exposición con
+        herida profunda. (CII)
+
+
+
+        5.5. Particularidades de la PPE en contextos de PrEP
+
+        Los usuarios de PrEP son un grupo que presenta alto riesgo de adquirir la infección VIH. En el
+        caso de una potencial exposición reciente al VIH, se deberá plantear la PPE si la adherencia
+        no es buena y la indicación dependerá del tiempo transcurrido desde la última dosis de PrEP
+        y el tipo de exposición 8,9 (Tabla 5.1.) . (CIII)
+
+
+
+
+                                                                                             35
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Tras completar el tratamiento de 28 días de PPE y conﬁrmarse la negatividad de la serología
+        de VIH, habrá que valorar las posibles barreras o causas de la mala adherencia a la PrEP y
+        reiniciarla si está indicada 9 .
+        En los usuarios que solicitan la PrEP se debe evaluar la existencia de situaciones de riesgo
+        en las 72 horas previas y en caso de indicación de PPE iniciarla, realizando la transición a la
+        PrEP tras completar el tratamiento (BI) 9 , sin necesidad de interrupción entre ambas, (BII),
+        conﬁrmando que no han adquirido la infección por VIH con una prueba serológica de 4a
+        generación y/o CV de VIH (BI). Sin embargo, en caso de sospecha de infección aguda por VIH
+        se debe continuar la PPE hasta descartarla completamente 9. (CIII)
+        Respecto a la proﬁlaxis frente a la infección por VHB, existen datos de estudios que
+        muestran una protección del tratamiento con TDF/FTC frente a la infección VHB 10 , no
+        obstante, las recomendaciones actuales son las mismas que para el resto de personas.
+
+
+
+        5.6. Particularidades de la PPE en usuarios de drogas inyectadas y
+        chemsex
+        La infección por el VIH y las hepatitis B y C se pueden transmitir en personas que usan drogas
+        por vía parenteral mediante el intercambio de jeringuillas y otros materiales de inyección
+        con sangre contaminada. Esto incluye el uso sexualizado de drogas administradas por vía
+        intravenosa (slamming o slamsex). En HSH se debe preguntar especíﬁcamente por el uso de
+        drogas, chemsex y slamsex 1 . Algunos estudios reﬂejan un retraso en el inicio de la PPE en
+        este contexto, dado que el consumo de drogas unido a sesiones de sexo de larga duración,
+        pueden llevar a una menor percepción del riesgo o hacerlo de forma diferida. Es posible que
+        algunas personas consulten por otros problemas derivados del consumo de dichas drogas,
+        siendo esta una oportunidad para evaluar los contactos de riesgo recientes y ofrecer la
+        PPE cuando esté indicada 11 , (BIII). En los casos de slamsex es difícil separar el riesgo de
+        transmisión del VIH a través de la vía intravenosa o de la vía sexual, por lo que habrá que
+        considerar ambas exposiciones en la evaluación del riesgo. (CII)
+        El riesgo y fundamentos de la transmisión percutánea no ocupacional para VIH, VHB y VHC
+        son similares a los de la transmisión ocupacional, excepto por la frecuente diﬁcultad para
+        identiﬁcar la fuente de exposición que caracteriza a la exposición no ocupacional 12 .
+        Según estimaciones, el riesgo de transmisión del VIH por cada exposición a través de agujas
+        compartidas es aproximadamente del 0,7 % (1 de cada 149 exposiciones) (Tabla 4.1.).
+        Este riesgo puede variar según factores como la carga viral del individuo infectado y la
+        frecuencia del intercambio de agujas. Por este motivo, se recomienda la PPE tras haber
+        compartido material de inyección si la fuente es una persona con VIH positivo sin TAR, con
+        mal cumplimiento del mismo o CV detectable 13. (CI)
+
+
+
+
+                                                                                             36
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        5.7. PPE para el VIH en personas en tratamiento crónico frente al VHB
+        Se ha objetivado que el TDF en monoterapia puede ser eﬁcaz como proﬁlaxis preexposición
+        para VIH en varones heterosexuales y mujeres y, posiblemente, para varones HSH. No
+        obstante, se han descrito infecciones de brecha y, por lo tanto, en estas personas se debe
+        considerar realizar la PPE con las pautas recomendadas de triple terapia 14 , salvo en los casos
+        en los que la persona expuesta estuviese en tratamiento bajo terapia combinada (TDF/FTC,
+        TAF/FTC) y se conﬁrmara una buena adherencia a la misma. (AII)
+
+        En base a los datos que conocemos de la PrEP el riesgo de alteraciones hepáticas tras su
+        suspensión en pacientes sin cirrosis es bajo 15 , suspender la PPE sería relativamente seguro
+        en pacientes con hepatitis B crónica sin tratamiento ni indicación del mismo previamente,
+        aunque es aconsejable valorar la situación junto con un especialista en hepatitis virales (BII).
+        No se considera que exista riesgo de que el VHB desarrolle resistencia frente a tenofovir o
+        emtricitabina/lamivudina tras 28 días de terapia combinada.
+
+        En los casos en que se diagnostique infección activa por VHB en la evaluación inicial, no se
+        debe retrasar el inicio de la PPE según esté indicada, y se deberá mantener hasta consultar
+        con un especialista en hepatitis virales para valorar su suspensión tras ﬁnalizar la PPE. (BI)
+
+
+
+        Tablas:
+        Tabla 5.1. Indicaciones de PPE al VIH en pacientes en PrEP.
+
+         Considerar INICIAR PPE frente a VIH en pacientes en PrEP si:
+                               PrEP diaria (TDF/FTC o TAF/     PrEP a demanda       PrEP mediante
+         Tipo de exposición
+                               FTC)                            (TDF/FTC)            cabotegravir IM c/2meses
+                               Toma de menos de 4 pastillas    No se ha tomado      No se ha recibido en la
+         Sexo anal
+                               en los últimos 7 días           como está indicada   ventana indicada
+         Sexo vaginal o sexo   Si han pasado más de 48 horas
+         frontal en hombres    desde la última toma o se han                        No se ha recibido en la
+                                                                        NA
+         trans o neovaginal    tomado menos de 6 pastillas                          ventana indicada
+         en mujeres trans      en los últimos 7 días
+
+
+
+
+                                                                                                 37
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Bibliografía:
+        1. Cresswell F, Asanati K, Bhagani S, Bofﬁto M, Delpech V, Ellis J, et al. UK guideline for the use of HIV
+        postexposure prophylaxis 2021. HIV Med. 2022 May;23(5):494-545. doi: 10.1111/hiv.13208. Epub 2022
+        Feb 14. Erratum in: HIV Med. 2022 Jul;23(6):701. doi: 10.1111/hiv.13327. PMID: 35166004.
+
+        2. Schillie S, Vellozzi C, Reingold A, Harris A, Haber P, Ward JW, et al. Prevention of Hepatitis B Virus Infection
+        in the United States: Recommendations of the Advisory Committee on Immunization Practices. MMWR
+        Recomm Rep 2018;67(No. RR-1):1–31. DOI: http://dx.doi.org/10.15585/mmwr.rr6701a1. PMID: 29939980;
+        PMCID: PMC5837403.
+
+        3. Moorman AC, de Perio MA, Goldschmidt R, Chu C, Kuhar D, Henderson DK, et al. Testing and clinical
+        management of health care personnel potentially exposed to hepatitis C virus. CDC Guidance, United
+        States, 2020. MMWR Recomm Rep 2020;69:1-8. PMID: 32701942; PMCID: PMC8631757.
+
+        4. Scannell-Tocci M, Reynolds R. A review of sexual transmitted infection rates among sexually assaulted
+        patients that present for care. Journal of Forensic and Legal Medicine 2022; 88:102352. doi:10.1016/
+        j.jﬂm.2022.102352. PMID: 35512505.
+
+        5. Thomson KA, Hughes J, Baeten JM, John-Stewart G, Celum C, Cohen CR, et al. Increased Risk of HIV
+        Acquisition Among Women Throughout Pregnancy and During the Postpartum Period: A Prospective
+        PerCoital-Act Analysis Among Women With HIV-Infected Partners. J Infect Dis. 2018 Jun 5;218(1):16-25.
+        doi: 10.1093/infdis/jiy113. PMID: 29514254; PMCID: PMC5989601.
+
+        6. Cresswell FV, Ellis J, Hartley J, Sabin CA, Orkin C, Churchill DR. A systematic review of risk of HIV
+        transmission through biting or spitting: implications for policy. HIV Med. 2018 Apr 23;19(8):532–40. doi:
+        10.1111/hiv.12625. PMID: 29687590; PMCID: PMC6120498.
+
+        7. Thomas MG, Hopkins CJ, Luey CE. Transmission of HIV infection by severe bites. Int J STD AIDS. 2019
+        Aug;30(9):927-929. doi: 10.1177/0956462419844852. PMID: 31226915.
+
+        8. EACS guidelines version 12.1. European AIDS Clinical Society; 2024. https://www.eacsociety.org/
+        guidelines/eacs-guidelines/
+
+        9. US Public Health Service: Preexposure prophylaxis for the prevention of HIV in the United States - 2021
+        update, a clinical practice guideline. https://stacks.cdc.gov/view/cdc/112360
+
+        10. Mizushima D, Takano M, Aoki T, Ando N, Uemura H, Yanagawa Y, et al. Effect of tenofovir-based HIV
+        pre-exposure prophylaxis against HBV infection in men who have sex with men. Hepatology. 2023 Jun
+        1;77(6):2084-2092. doi: 10.1097/HEP.0000000000000384. PMID: 36960800; PMCID: PMC10187616.
+
+        11. Casalino E, Bouzid D, Antoniol S, Pinto A, Choquet C, Pereira L, et al. Characteristics of human
+        immunodeﬁciency virus exposure and predictors of time until access to postexposure prophylaxis: a
+        prospective observational study. Emergencias. 2021 Feb;33(1):35-41. English, Spanish. PMID: 33496398.
+
+        12. Documento de Consenso sobre proﬁlaxis postexposición ocupacional y no ocupacional en relación con
+        el VIH, VHB y VHC en adultos y niños. (Actualización 2015). Guías GESIDA. https://seimc.org/wp-content/
+        uploads/2025/06/gesida-guiasclinicas-2015-Profilaxispostexposicion-VIH-VHC-VHB.pdf
+
+        13. Antiretroviral Postexposure Prophylaxis After Sexual, Injection Drug Use, or Other Nonoccupational
+        Exposure to HIV — CDC Recommendations, United States, 2025 from the Centers for Disease Control and
+        Prevention, U.S. Department of Health and Human Services. Accesible en: https://www.cdc.gov/mmwr/
+        volumes/74/rr/rr7401a1.htm
+
+
+
+
+                                                                                                        38
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        14. Fox J, Brady M, Alexander H, Davies O, Robinson N, Pace M, et al. Tenofovir Disoproxil Fumarate Fails to
+        Prevent HIV Acquisition or the Establishment of a Viral Reservoir: Two Case Reports. Infect Dis Ther. 2016
+        Mar;5(1):65-71. doi: 10.1007/s40121-015-0102-x. PMID: 26746652; PMCID: PMC4811833.
+
+        15. Solomon MM, Schechter M, Liu AY, McMahan VM, Guanira JV, Hance RJ, et al. The Safety of
+        TenofovirEmtricitabine for HIV Pre-Exposure Prophylaxis (PrEP) in Individuals With Active Hepatitis B.
+        J Acquir Immune Deﬁc Syndr. 2016 Mar 1;71(3):281-6. doi: 10.1097/QAI.0000000000000857. Erratum
+        in: J Acquir Immune Deﬁc Syndr. 2016 Jul 1;72(3):e82. doi: 10.1097/QAI.0000000000001100. PMID:
+        26413853; PMCID: PMC4752387.
+
+
+
+
+                                                                                                   39
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        6. PAUTAS DE PROFILAXIS POSEXPOSICIÓN
+        Índice:
+           6.1. Eﬁcacia y elección de tratamiento
+           6.2. Inicio y duración de PPE
+           6.3. Toxicidad
+           6.4. Interacciones
+           6.5. Recomendaciones
+
+        6.1. Eﬁcacia y elección de tratamiento
+        Aunque no es posible establecer recomendaciones estrictamente basadas en la eﬁcacia,
+        es crucial considerar la evidencia cientíﬁca disponible, la experiencia, la tolerabilidad y los
+        beneﬁcios asociados a la pauta de dosiﬁcación y la existencia o no de interacciones. A
+        pesar de que hay unas pautas generales recomendadas, las características de la persona
+        fuente o las comorbilidades de la persona expuesta pueden determinar la elección de pautas
+        distintas. Hay que tener en cuenta que el TDF puede producir toxicidad renal y que está
+        contraindicado en pacientes con insuﬁciencia renal.
+        Las opciones de tratamiento se han seleccionado basándose en los datos de eﬁcacia,
+        seguridad, tolerabilidad y disponibilidad, además de experiencia clínica.
+
+        6.1.1. Pautas de elección:
+           • Raltegravir más tenofovir disoproxil fumarato / emtricitabina (RAL + TDF/FTC):
+             esta combinación es ampliamente recomendada por su experiencia de uso 1 , es una
+             pauta bien tolerada y tiene mínimas interacciones farmacológicas, (AI). El principal
+             inconveniente es su posología cada 12 horas, aunque existe recomendación para una
+             dosis diaria 2. (AIII)
+           • Dolutegravir más tenofovir disoproxil fumarato / emtricitabina (DTG + TDF/FTC): es
+             una pauta bien tolerada y tiene mínimas interacciones farmacológicas 3 . Se administran
+             los dos comprimidos de forma conjunta una vez al día. (AII)
+           • Doravirina / lamivudina / tenofovir disoproxil fumarato o Doravirina más tenofovir-
+             disoproxil / emtricitabina (DOR/3TC/TDF o DOR + TDF/FTC): es un tratamiento bien
+             tolerado que ha demostrado bajas tasas de discontinuación (2 %) 4 (AII). No disponemos
+             en España de la combinación DOR/3TC/TDF en un comprimido.
+           • Bictegravir / tenofovir alafenamida / emtricitabina (BIC/TAF/FTC): existen datos de
+             buena tolerabilidad y pocas discontinuaciones para PPE en dos pequeñas cohortes
+             retrospectivas 6 y recomendaciones recientes como pauta preferente 8. (AII)
+
+        6.1.2. Pautas alternativas:
+           • Rilpivirina / tenofovir disoproxil fumarato / emtricitabina (RPV/TDF/FTC): es una
+             combinación bien tolerada y su uso está respaldado por experiencias comunicadas en
+             distintos países, además de estudios prospectivos en cohortes multicéntricas 9. (BI)
+
+
+
+
+                                                                                             40
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        •     Darunavir más ritonavir más tenofovir disoproxil / emtricitabina (DRV + RTV + TDF/
+              FTC): tiene una alta barrera genética a la resistencia y es mejor tolerado que otras
+              opciones de IPs. Hay que tener en cuenta las interacciones farmacológicas y la posología
+              de administración cada 12 horas, sería una pauta alternativa en personas gestantes
+              cuando hay intolerancia a RAL o DTG. (BI)
+            • Darunavir / cobicistat/ tenofovir alafenamida / emtricitabina (DRV/c/TAF/FTC): Las
+              ventajas respecto a DRV + RTV + TDF/FTC son la coformulación en un comprimido
+              único y el uso de TAF en lugar de TDF. (BIII)
+
+
+        6.2. Inicio y duración de PPE
+        Se aconseja iniciar el tratamiento, idealmente en las primeras 2 horas, preferiblemente en
+        las primeras 12 horas, y siempre antes de las 72 horas tras la exposición y con una duración
+        de 28 días (AIII). Aunque hay estudios que sugieren que la eﬁcacia es máxima con una sola
+        dosis de fármaco las primeras 2 horas en modelos animales 11 , no se disponen de datos que
+        justiﬁquen recomendar pautas más cortas debido a la falta de evidencia sobre su eﬁcacia.
+        (AIII)
+        La terapia con 3 fármacos es la terapia habitual recomendada debido a la mayor probabilidad
+        de una mayor eﬁcacia; los regímenes actuales recomendados tienen una excelente
+        tolerabilidad, sin embargo, si esto fuese una preocupación, el uso de un régimen de 2
+        fármacos sería preferible a suspender el régimen por completo 8 .
+
+
+
+        6.3. Toxicidad
+        La combinación TDF/FTC como terapia principal es más tolerable y provoca menos
+        abandonos por efectos secundarios que la terapia ZDV/3TC 12 .
+        Los inhibidores de la transcriptasa inversa no análogos de nucleósidos como RPV
+        combinado con TDF/FTC (TDF/FTC/RPV) mostraron en HSH unas tasas altas de tolerabilidad
+        y adherencia. Aunque el 70 % experimentó efectos adversos relacionados con RPV, sólo el
+        3 % discontinuó la PPE. La combinación DOR/3TC/TDF mostró efectos adversos leves, con
+        sólo un 2 % de discontinuaciones 4.
+        Los inhibidores de integrasa para la PPE, como en la combinación TDF/FTC y DTG, presentan
+        buena tolerabilidad, con astenia, náuseas, diarrea y cefalea como efectos más habituales
+        3
+         . En cuanto a RAL, en combinación con TDF/FTC, los efectos adversos observados son
+        similares al resto de inhibidores de integrasa, y estos efectos son comparativamente
+        menores a los observados con pautas que incluyen IP, donde los eventos adversos
+        gastrointestinales como náuseas, diarrea y vómitos son más frecuentes y las tasas de
+        discontinuación hasta del 10 % - 18 % 14 - 17. En caso de efectos adversos graves con una PPE
+        previa, se debe optar por otro tratamiento disponible.
+
+
+
+
+                                                                                             41
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        6.4. Interacciones
+        Se debe veriﬁcar el historial de medicación de la persona expuesta, incluidos medicamentos
+        sin receta, vitaminas, productos de herboristería y drogas recreativas, antes de prescribir
+        PPE para evitar interacciones medicamentosas signiﬁcativas.
+        Los inhibidores de integrasa RAL, DTG y BIC, se unen a cationes como hierro y magnesio,
+        reduciendo la absorción y los niveles del fármaco en sangre. Es preferible evitar antiácidos
+        y suplementos con estos cationes o separar su ingesta de los inhibidores de integrasa al
+        menos 4 horas, o bien cambiar a antiácidos sin cationes y suspender suplementos minerales
+        como sales de hierro o multivitamínicos.
+        En el caso de fármacos con potenciadores metabólicos (ritonavir o cobicistat) hay que evitar
+        estatinas, ergotamínicos, psicotrópicos, corticoides y anticonvulsivantes. En las mujeres
+        en edad fértil que toman anticonceptivos no se recomienda esta pauta por las posibles
+        interacciones. La rifampicina puede reducir las concentraciones de fármacos, por lo que, si
+        fuera necesario,se aconseja el uso de RAL o DTG a doble dosis.
+        Es importante veriﬁcar posibles interacciones medicamentosas. (Universidad de
+        Liverpool https://www.hiv-druginteractions.org/checker, Medscape https:// reference.
+        medscape.com/drug-interactionchecker).
+
+
+
+        6.5. Recomendaciones
+           • Se aconseja iniciar la PPE, idealmente en las primeras 2 horas, preferiblemente en las
+             primeras 12 horas, y siempre antes de las 72 horas. (AII)
+
+           • La duración de la PPE debe ser de 28 días. (AII)
+
+           • Las pautas preferentes están basadas en TDF/FTC (salvo en pacientes con insuﬁciencia
+             renal) (AI) y un tercer fármaco, de elección RAL o DTG (AI-AII) o DOR (AII), o bien la pauta
+             de BIC/TAF/FTC. (AII).
+
+           • Las pautas alternativas están basadas en RPV/TDF/FTC/ (BI) y DRV/C/TAF/FTC. (BIII)
+
+           • La elección del tratamiento depende de las características de la persona fuente y las de
+             la persona expuesta. (AII)
+
+           • Hay que revisar las interacciones antes de la prescripción de la PPE. (AII)
+
+
+
+
+                                                                                             42
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Tablas:
+        Tabla 6.1. Pautas recomendadas para proﬁlaxis posexposición para el VIH.
+
+
+         NOMBRE                         NOMENCLATURA           OBSERVACIONES                     POSOLOGÍA
+
+                                                               Pauta de elección (AI)            1 cp de RAL 400 mg/12h
+                                                                                                 (AI) o 2 cp de 600 mg una
+         Raltegravir + tenofovir-
+                                        RAL + TDF/FTC                                            sola toma al día (AIII), junto
+         DF / emtricitabina
+                                                               Elección en el embarazo           a 1 cp de TDF/FTC una vez
+                                                               (siempre 400 mg/12h) (AI)         al día
+
+                                                               Bien tolerado, mínimas
+                                                               interacciones (AII)
+         Dolutegravir + tenofovir-                                                               1 cp DTG y 1 cp de TDF/
+                                        DTG + TDF/FTC
+         DF / emtricitabina                                                                      FTC cada 24h, juntos
+                                                               Elección en el embarazo (AI)
+
+         Bictegravir / tenofovir-                              Buena tolerabilidad, bajas
+                                        BIC/TAF/FTC                                              1 cp al día
+         AF / emtricitabina                                    discontinuaciones (AII)
+
+                                                                                                 1 cp TDF/3TC/DOR
+                                                                                                 una vez al día (AI), no
+         Doravirina / lamivudina                                                                 disponible en España
+         / tenofovir-DF o               DOR/3TC/TDF o          Bajas tasas de
+         Doravirina + tenofovir-        DOR + TDF/FTC          discontinuación (2%) (AII)
+         DF / emtricitabina                                                                      1 cp de TDF/FTC y 1 cp de
+                                                                                                 DOR, juntos, una toma al
+                                                                                                 día (AIII)
+
+         Rilpivirina / tenofovir-DF                            Apoyada por estudios
+                                        RPV/TDF/FTC                                              1 cp al día
+         / emtricitabina                                       multicéntricos (BI)
+
+                                                                                                 1 cp de DRV 600 mg junto
+         Darunavir + ritonavir                                                                   a 1 cp de ritonavir 100 mg,
+                                        DRV + RTV + TDF/       Alternativa en embarazo
+         + tenofovir-DF /                                                                        ambos cada 12h, más 1 cp
+                                        FTC                    (BI)
+         emtricitabina                                                                           de TDF/FTC al día, en total
+                                                                                                 5 cp/día
+
+         Darunavir / cobicistat
+                                                               Alta Barrera de resistencia
+         / Tenofovir-AF /               DRV/c/TAF/FTC                                            1 cp al día
+                                                               (BIII)
+         emtricitabina
+
+
+        3TС: lamivudina; c: cobicistat; cp: comprimido; DOR: doravirina; DRV: darunavir; DTG: dolutegravir; FTC: emtricitabina;
+        RAL: raltegravir; RPV: rilpivirina; RTV: ritonavir; TAF: tenofovir-alafenamida; TDF: tenofovir‑disoproxil fumarato.
+        Sombreado gris corresponde a “pautas de elección”.
+        Sombreado rosa corresponde a “pautas alternativas”.
+
+
+
+
+                                                                                                               43
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Bibliografía:
+        1. Leal L, León A, Torres B, Inciarte A, Lucero C, Mallolas J, Laguno M, el al. A randomized clinical trial comparing
+        ritonavir-boosted lopinavir versus raltegravir each with tenofovir plus emtricitabine for postexposure
+        prophylaxis for HIV infection. J Antimicrob Chemother. 2016 Jul;71(7):1987-93. doi: 10.1093/jac/ dkw049.
+        PMID: 26994089 .
+
+        2. Quah SP, McIntyre M, Wood A, Mc Mullan K, Rafferty P. Once-daily raltegravir with tenofovir disoproxil/
+        emtricitabine as HIV post-exposure prophylaxis following sexual exposure. HIV Med. 2021 Feb;22(2):e5-e6.
+        doi: 10.1111/hiv.12938. PMID: 33063431.
+
+        3. McAllister JW, Towns JM, Mcnulty A, Pierce AB, Foster R, Richardson R, et al. Dolutegravir with tenofovir
+        disoproxil fumarate-emtricitabine as HIV postexposure prophylaxis in gay and bisexual men. AIDS. 2017 Jun
+        1;31(9):1291-1295. doi: 10.1097/QAD.0000000000001447. PMID: 28301425.
+
+        4. Inciarte A, Ugarte A, Martínez-Rebollar M, Torres B, Fernández E, Berrocal L, et al. Doravirine/Lamivudine/
+        Tenofovir Disoproxil Fumarate for Nonoccupational HIV-1 Postexposure Prophylaxis: A Prospective
+        OpenLabel Trial (DORAVIPEP). Open Forum Infect Dis. 2023 Jul 19;10(8):ofad374. doi: 10.1093/oﬁd/ofad374.
+        PMID: 37539061; PMCID: PMC10394723.
+
+        5. Devred I, Kayembe K, Valin N, Rougier H, Shinga BW, Lambert-Niclot S, Chiarabini T, Meyohas MC, Lacombe
+        K. Prophylaxis by doravirine-lamivudine- tenofovir disoproxil fumarate or elvitegravir-cobicistatemtricitabine-
+        tenofovir alafenamide after sexual exposure to HIV. BMC Infect Dis. 2023 Sep 4;23(1):578. doi: 10.1186/
+        s12879-023-08544-x. PMID: 37667182; PMCID: PMC10478445.
+
+        6. Liu A, Xin R, Zhang H, Dai L, Wu RE, Wang X, et al. An open-label evaluation of safety and tolerability
+        of coformulated bictegravir/emtricitabine/tenofovir alafenamide for post-exposure prophylaxis following
+        potential exposure to human immunodeﬁciency virus-1. Chin Med J (Engl). 2022 Nov 20;135(22):2725-2729.
+        doi: 10.1097/CM9.0000000000002494. PMID: 36719359; PMCID: PMC9944392.
+
+        7. Mayer KH, Gelman M, Holmes J, Kraft J, Melbourne K, Mimiaga MJ. Safety and Tolerability of Once Daily
+        Coformulated Bictegravir, Emtricitabine, and Tenofovir Alafenamide for Postexposure Prophylaxis After Sexual
+        Exposure. J Acquir Immune Deﬁc Syndr. 2022 May 1;90(1):27-32. doi: 10.1097/ QAI.0000000000002912.
+        PMID: 34991141.
+
+        8. New York State Department of Health and AIDS Institute Guideline. Post-Exposure Prophylaxis (PEP) to
+        Prevent HIV Infection. Actualización 3 de octubre de 2024. Accesible en: https://www.hivguidelines.org/
+        guideline/hiv-pep/?mycollection=pep-prep
+
+        9. Chauveau M, Billaud E, Bonnet B, Merrien D, Hitoto H, Bouchez S, et al. Tenofovir DF/emtricitabine/ rilpivirine
+        as HIV post-exposure prophylaxis: results from a multicentre prospective study. J Antimicrob Chemother.
+        2019 Apr 1;74(4):1021-1027. doi: 10.1093/jac/dky547. PMID: 30689937.
+
+        10. Foster R, McAllister J, Read TR, Pierce AB, Richardson R, McNulty A, et al. Single-Tablet
+        EmtricitabineRilpivirine-Tenofovir as HIV Postexposure Prophylaxis in Men Who Have Sex With Men. Clin
+        Infect Dis. 2015 Oct 15;61(8):1336-41. doi: 10.1093/cid/civ511. PMID: 26123937.
+
+        11. Massud I, Ruone S, Zlotorzynska M, Haaland R, Mills P, Cong ME, et al. Single oral dose for HIV pre or
+        post-exposure prophylaxis: user desirability and biological efﬁcacy in macaques. EBioMedicine. 2020
+        Aug;58:102894. doi: 10.1016/j.ebiom.2020.102894. Epub 2020 Jul 21. Erratum in: EBioMedicine. 2024
+        Mar;101:105014. doi: 10.1016/j.ebiom.2024.105014. PMID: 32707451; PMCID: PMC7381488.
+
+        12. Ford N, Shubber Z, Calmy A, Irvine C, Rapparini C, Ajose O, et al. Choice of antiretroviral drugs for
+        postexposure prophylaxis for adults and adolescents: a systematic review. Clin Infect Dis. 2015 Jun 1;60
+        Suppl 3:S170-6. doi: 10.1093/cid/civ092. PMID: 25972499.
+
+
+
+
+                                                                                                          44
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        13. Thomas R, Galanakis C, Vézina S, Longpré D, Boissonnault M, Huchet E, et al. Adherence to Post-Exposure
+        Prophylaxis (PEP) and Incidence of HIV Seroconversion in a Major North American Cohort. PLoS One. 2015
+        Nov 11;10(11):e0142534. doi: 10.1371/journal.pone.0142534. PMID: 26559816; PMCID: PMC4641668.
+
+        14. Fätkenheuer G, Jessen H, Stoehr A, Jung N, Jessen AB, Kümmerle T, et al. PEPDar: A randomized
+        prospective noninferiority study of ritonavir-boosted darunavir for HIV post-exposure prophylaxis. HIV Med.
+        2016 Jun;17(6):453-9. doi: 10.1111/hiv.12363. PMID: 27166295.
+
+        15. Milinkovic A, Benn P, Arenas-Pinto A, Brima N, Copas A, Clarke A, et al. Randomized controlled trial of
+        the tolerability and completion of maraviroc compared with Kaletra® in combination with Truvada® for HIV
+        postexposure prophylaxis (MiPEP Trial). J Antimicrob Chemother. 2017 Jun 1;72(6):1760-1768. doi: 10.1093/
+        jac/ dkx062. PMID: 28369381.
+
+        16. Inciarte A, Leal L, González E, León A, Lucero C, Mallolas J, et al. Tenofovir disoproxil fumarate/
+        emtricitabine plus ritonavir-boosted lopinavir or cobicistat-boosted elvitegravir as a single-tablet regimen
+        for HIV post-exposure prophylaxis. J Antimicrob Chemother. 2017 Oct 1;72(10):2857-2861. doi: 10.1093/jac/
+        dkx246. PMID: 29091217.
+
+        17. Fernández I, de Lazzari E, Inciarte A, Díaz-Brito V, Milinkovic A, Arenas-Pinto A, et al. Network metaanalysis
+        of post-exposure prophylaxis randomized clinical trials. HIV Med. 2021 Mar;22(3):218-224. doi: 10.1111/
+        hiv.12964. PMID: 33108035.
+
+
+
+
+                                                                                                        45
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        7. SEGUIMIENTO
+        Índice:
+           7.1. Analítica basal
+           7.2. Seguimiento
+
+        A toda persona que haya sido evaluada tras una exposición ocupacional o no ocupacional,
+        con independencia de que se realice PPE o no, se le debe ofrecer un plan de seguimiento
+        clínico y analítico, información y apoyo psicológico. En caso de agresión sexual se debe
+        ofrecer apoyo psicológico y social, y en el caso concreto de una mujer se debería realizar
+        valoración por ginecología.
+
+        7.1. Analítica basal
+        Ha de realizarse lo antes posible, siempre en las primeras 72 horas tras la exposición.
+
+        Caso fuente (si es posible):
+        •   Test combinado anti-VIH 1 -2 y Ag-p24 (4ª generación)
+        Si es positivo, completar proceso diagnóstico habitual (no urgente): carga viral y estudio de
+        resistencias.
+           • Ac VHC
+        Si es positivo, completar proceso diagnóstico habitual (no urgente) para detección de
+        infección activa (ARN VHC o Ag VHC).
+           • HBsAg
+        Si es positivo, completar el perﬁl serológico y realizar determinación de carga viral
+        plasmática (ADN VHB; no urgente). Realizar serología de VHD.
+        Si la persona fuente no da el consentimiento para la realización de las determinaciones
+        serológicas, es desconocido o no puede realizarse, debe considerarse la fuente como de
+        potencial riesgo.
+
+        Persona expuesta:
+           • Test combinado anti-VIH 1/2 y Ag-p24 (4ª generación)
+           • Anti-VHC
+           • Anti-HBs (realizar si susceptible y en inmunodeprimidos)*
+
+        Añadir prueba de anti-HBc y HBsAg en caso de anti-HBs < 10 UI/ml
+            • Analítica que incluya bioquímica (perﬁl renal y hepático)
+            • En exposición sexual es necesario descartar otras ITS
+            • En mujeres en edad fértil, test de embarazo
+
+
+        *Se considera susceptible cuando la persona no está vacunada o presenta un título de antiHBs < 10 mUI/ml y es anti-HBc negativo. La
+        protección vacunal es superior al 90 % hasta 30 años después de la pauta inicial.
+
+
+
+
+                                                                                                                      46
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        7.2. Seguimiento
+        Las unidades de VIH o servicios especializados en VIH, los servicios de Salud Laboral y de
+        Medicina Preventiva y Salud Pública, realizan el seguimiento de estos pacientes.
+        Es muy importante instruir al paciente sobre los síntomas de infección aguda por VIH, VHB
+        y/o VHC para que consulte urgentemente si los presenta.
+        Toda persona expuesta se beneﬁciará de una evaluación inicial. Independientemente de la
+        toma o no de la PPE, se recomienda al menos una evaluación de seguimiento. El momento de
+        su realización dependerá del tipo de exposición y sobre todo de la posibilidad de encadenar
+        proﬁlaxis preexposición tras completar la pauta de PPE.1
+
+
+
+        VIH
+        La evaluación clínica incluirá la valoración de la tolerancia y adherencia a la pauta de PPE.
+        Se suspenderá la PPE si la fuente ha resultado negativa o indetectable para VIH.
+        Al ﬁnalizar el periodo de 28 días de PPE se realizará nuevo test de VIH, bioquímica con perﬁl
+        renal y hepático y, en mujeres en edad fértil, test de embarazo. Es importante valorar la
+        necesidad de PrEP antes de ﬁnalizar la PPE para facilitar la continuidad de la prevención.
+
+        Si disponemos de un test combinado de VIH de 4a generación (anti-VIH 1/2 y Ag-p24), el
+        seguimiento ﬁnalizará a las 12 semanas posexposición. En los casos en los que no existen
+        riesgo de transmisión de hepatitis y que no han llegado a tomar la PPE un test de 4ª
+        generación en la semana 6 permite descartar la infección por VIH 5 .
+
+        En caso de que la serología de VIH resulte positiva:
+           • Realizar determinación de carga viral plasmática de VIH urgente con estudio de
+             resistencias
+
+           • No debe interrumpirse la PPE hasta que se conﬁrme la primoinfección y se optimice el
+             tratamiento antirretroviral.
+
+
+
+        VHB
+        Si anti-HBs ≥ 10 UI/ml, se considera inmune y no sería necesario realizar seguimiento
+        (independientemente del resultado del HBsAg de la fuente).
+
+        Si se ha administrado una dosis de recuerdo de vacuna de VHB, se solicitarán anti-HBs para
+        evaluar la respuesta (en 4-8 semanas).
+
+        Si la fuente es HBsAg + o de un grupo de alta prevalencia y la persona expuesta no inmune, se
+        recomiendan controles adicionales para descartar la infección aguda por VHB (valorar hasta
+        24 semanas).
+
+
+
+
+                                                                                             47
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        En caso que la determinación de HBsAg resulte positiva:
+           • Completar el perﬁl serológico (IgM anti-HBc, IgG anti-HBc, HBe Ag, anti-HBe)
+           • Realizar determinación de carga viral plasmática del VHB (ADN VHB)
+           • Realizar diagnóstico reﬂejo de VHD
+           • Valorar la necesidad de iniciar tratamiento frente al VHB
+
+        VHC
+        Se recomienda realizar una prueba de anticuerpos anti-VHC en la visita ﬁnal de seguimiento
+        tras la exposición.
+        Si la exposición es de alto riesgo (ejemplo, persona fuente VHC positivo) es preferible realizar
+        ARN VHC o Ag VHC a las dos semanas de la exposición; el seguimiento se extendería en este
+        caso hasta las 24 semanas posexposición.
+        En caso de que la prueba de anticuerpos anti-VHC resulte positiva:
+           • Realizar determinación de la carga viral plasmática del VHC (ARN VHC).
+           • Todas las personas infectadas deberían recibir tratamiento con AAD para erradicar el
+             VHC, independientemente del estado de ﬁbrosis hepática.
+
+        ITS
+        Es necesario realizar nuevo test de síﬁlis a las 12 semanas posexposición o en la última visita
+        de seguimiento.
+        Se debe valorar la proﬁlaxis posexposición de ITS con doxiciclina según las
+        recomendaciones vigentes 6 .
+        Se puede repetir el cribado de ITS a las dos semanas de la exposición en personas que
+        presenten síntomas o a criterio del clínico responsable.
+
+        RECOMENDACIONES:
+           • Es necesario evaluar la adherencia y tolerancia a la PPE durante las 4 semanas de
+             tratamiento. Se suspenderá la PPE si la fuente ha resultado negativa o la CV plasmática
+             de VIH es indetectable. (AI)
+           • En individuos expuestos con anti-HBs ≥ 10 mIU/ml no es necesario realizar seguimiento
+             de la infección por VHB, salvo por razones legales. (AIII)
+           • Se debe informar a los casos expuestos sobre medidas de prevención (uso de
+             anticonceptivos de barrera, evitar las donaciones de sangre o derivados, tejidos o
+             semen, el embarazo o la lactancia) para prevenir la transmisión secundaria.(AII)
+
+
+
+
+                                                                                             48
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Tablas:
+        Tabla 7.1. Seguimiento: cronograma de acciones.
+
+                                                                                    Seguimiento (semanas)
+                                                Basal             Síntomas o
+                                                                                            4              12              24
+                                                                 positivización
+
+         Persona fuente
+
+             Serología VIH                         +
+
+             HBsAg                                 +
+
+             Ac VHC                                +
+
+         Persona expuesta
+
+         Todos
+
+             Bioquímica (Cr, GPT)                  +                                        +               +
+
+             Serología VIH                         +                    (3)                + (7)          + (9)
+
+             Serología VHB                       + (2)                  (4)                + (8)          + (8)           + (10)
+
+             Anti-VHC                              +                    (5)                 +               +             + (11)
+
+             Embarazo (1)                          +                                        +               +
+
+         Relaciones sexuales
+
+             Sífilis                               +                                        +               +
+
+             Cribado ITS                           +                    (6)
+
+
+        Ac VHC: anticuerpos frente a la hepatitis C; Anti HBs: anticuerpos frente al antígeno de superficie del VHB; Cr: creatinina;
+        GPT: ALT, Alanina aminotransferasa; HBsAg: antígeno de superficie del VHB; ITS: infecciones de transmisión sexual;
+        VIH: virus de la inmunodeficiencia humana.
+
+        (1) Mujeres en edad fértil, en ausencia de anticonceptivos en el momento del cribado y cuando la mujer lo desee.
+
+        (2) Si anti-HBs ≥ 10 Ul/ml, se considera inmune y no sería necesario realizar seguimiento; si anti-HBs < 10 Ul solicitar anti-
+        HBc y HBsAg, en el caso de no haberlo solicitado basalmente.
+
+        (3) Si positivización serología VIH o alta sospecha clínica de primoinfección continuar con PPE, carga viral VIH urgente
+        con estudio de resistencias genotípicas.
+
+        (4) Completar el perfil serológico (IgM anti-HBc, anti-HBc, HBeAg, anti-HBe); carga viral del VHB; VHD; valorar la necesidad
+        de iniciar tratamiento frente al VHB.
+
+        (5) ARN VHC a las 2 semanas si exposición de alto riesgo (ejemplo, persona fuente VHC positivo).
+
+        (6) Valorar la repetición del cribado ITS a las dos semanas de la exposición en función de la presencia de síntomas o a
+        criterio del clínico responsable.
+
+        (7) Plantear continuación con PrEP, completar el estudio recomendado de PrEP.
+
+        (8) Si se ha administrado una dosis de recuerdo de vacuna de VHB.
+
+        (9) En los casos en los que no existen riesgo de transmisión de hepatitis y que no han llegado a tomar la PPE, un test de 4ª
+        generación en la semana 6 permite descartar la infección por VIH.
+
+        (10) Si la fuente es HBsAg positivo o de un grupo de alta prevalencia y el accidentado no inmune.
+
+        (11) Si exposición de alto riesgo (ejemplo, persona fuente VHC positivo).
+
+
+
+                                                                                                                  49
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Bibliografía:
+        1. Inciarte A, Leal L, Masfarre L, González E, Díaz-Brito V, Lucero C, et al; Sexual Assault Victims Study Group.
+        Post-exposure prophylaxis for HIV infection in sexual assault victims. HIV Med. 2020 Jan;21(1):43-52. doi:
+        10.1111/hiv.12797. PMID: 31603619; PMCID: PMC6916272.
+
+        2. DeHaan E, McGowan JP, Fine SM, et al. PEP to Prevent HIV Infection [Internet]. Baltimore (MD): Johns
+        Hopkins University; 2022 Aug 11. Available from: https://www.ncbi.nlm.nih.gov/books/NBK562734/
+
+        3. Schillie S, Vellozzi C, Reingold A, Harris A, Haber P, Ward JW, et al. Prevention of Hepatitis B Virus
+        Infection in the United States: Recommendations of the Advisory Committee on Immunization Practices.
+        MMWR Recomm Rep. 2018 Jan 12;67(1):1-31. doi: 10.15585/mmwr.rr6701a1. PMID: 29939980; PMCID:
+        PMC5837403.
+
+        4. Bruce MG, Bruden D, Hurlburt D, Zanis C, Thompson G, Rea L, et al. Antibody Levels and Protection After
+        Hepatitis B Vaccine: Results of a 30-Year Follow-up Study and Response to a Booster Dose. J Infect Dis.
+        2016 Jul 1;214(1):16-22. doi: 10.1093/infdis/jiv748. Epub 2016 Jan 21. Erratum in: J Infect Dis. 2024 Aug
+        16;230(2):e504. doi: 10.1093/infdis/jiae336. PMID: 26802139.
+
+        5. Le Conseil National du Sida et des hépatites virales (CNS) et l'Agence nationale de recherches sur le sida
+        | Maladies infectieuses émergentes (ANRS | MIE). Traitement préventif post-exposition au VIH. Practice
+        guidelines - Updated on Aug 02 2024. Accesible en: https://www.has-sante.fr/jcms/p_3536535/en/
+        traitement-preventif-post-exposition-au-vih#voirAussi
+
+        6. Documento de consenso Diagnóstico y tratamiento de las infecciones de transmisión sexual en adultos,
+        niños y adolescentes. Noviembre de 2024. Panel de expertos del Ministerio de Sanidad del Gobierno de
+        España y de los grupos de trabajo de la SEIMC, GeSIDA, GEITS y GEHEP. Accesible en: https://seimc.org/
+        wp-content/uploads/2025/06/seimc-dc-2024-Documento-ITS-geits-gesida-gehep-1.pdf
+
+
+
+
+                                                                                                        50
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        8. PROFILAXIS POSEXPOSICIÓN EN NIÑOS Y ADOLESCENTES
+        Índice:
+           8.1. Generalidades
+           8.2. Proﬁlaxis VIH
+           8.3. Proﬁlaxis VHB
+           8.4. Proﬁlaxis VHC
+
+        8.1. Generalidades
+        En general la atención de niños, niñas y adolescentes potencialmente expuestos a VIH, VHB
+        o VHC se realizará en servicios de urgencias pediátricos o centros especializados, en los que
+        exista la posibilidad de realizar un abordaje integral de la situación.
+        Debe informarse al tutor legal de los menores de 16 años de los riesgos de la exposición
+        y los beneﬁcios de la PPE. Los menores capacitados para la toma de decisiones que no
+        deseen que se notiﬁque la situación a un adulto/tutor responsable, y tras valorar riesgos y
+        beneﬁcios, deben ser igualmente atendidos, justiﬁcando detalladamente la situación en la
+        historia clínica. En mayores de 16 años no se requiere notiﬁcación a tutor legal. En caso de
+        sospecha (o conﬁrmación) de abuso sexual, este debe notiﬁcarse a las autoridades judiciales
+        correspondientes y asegurar un examen físico forense por personal adecuadamente
+        formado y acreditado.
+        Es necesario establecer la necesidad de PPE de forma individualizada. Previo al inicio de la
+        PPE se debe realizar al menos estudio básico, como en población adulta (ver capítulo 7).
+        Debe ofrecerse el tratamiento para los primeros 3-5 días y asegurar su seguimiento en
+        consultas de enfermedades infecciosas o Infectología Pediátrica de referencia, en ausencia
+        de este recurso lo asumirá la consulta de pediatría general o el centro de referencia de
+        ITS, donde se ofrecerá tratamiento completo, adherencia a PPE y seguimiento posterior. Se
+        recomienda que se disponga de kits de medicación antirretroviral preparados en servicios
+        de urgencias pediátricas o centros de referencia. (BIII)
+        Las situaciones más habituales en las que se plantea PPE en niños, niñas y adolescentes son:
+           • El pinchazo accidental con aguja de origen desconocido. Es la situación más habitual en
+             niños y en general no requiere proﬁlaxis posexposición (CIII). Debe iniciarse PPE si el
+             pinchazo se produce con aguja usada recientemente por persona que vive con VIH con
+             carga viral detectable o desconocida o persona que se inyecta droga.
+           • La mordedura es un motivo frecuente de consulta en niños y niñas. El riesgo de
+             transmisión es muy bajo. Por tanto, en caso de mordedura humana, NO se recomienda
+             proﬁlaxis (CII) salvo que concurran TODAS estas condiciones: saliva contaminada con
+             sangre visible, persona que ha ocasionado la mordedura tenga (o se sospeche) carga
+             viral > 1000 copias/ml y la mordedura haya ocasionado herida profunda.
+           • Si existe (o se conﬁrma) posibilidad de abuso sexual o si consultan por relación sexual
+             de riesgo (penetración vaginal o recepción anal sin protección) debemos saber que en
+             población pediátrica se asocia mayor riesgo de transmisión viral por mayorvulnerabilidad
+             anatómica a los traumatismos, una mucosa vaginal y anal más ﬁna, ectopia cervical, etc.
+
+
+
+
+                                                                                             51
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        8.2. Proﬁlaxis VIH
+        La PPE en el niño y adolescente supone un reto debido a la problemática legal ya que en
+        muchas ocasiones esta se origina después de un abuso o violación, pero también debido a
+        que la disponibilidad de fármacos no es la misma que para el adulto y se tiene que diseñar en
+        base a las formulaciones existentes. Esta debe iniciarse idealmente en las primeras 2 horas,
+        preferiblemente en las primeras 12 horas, y siempre antes de las 72 horas. (AII)
+        La duración de la proﬁlaxis siempre será de 28 días. La elección del fármaco se hará en
+        función de la edad y peso del paciente, de acuerdo con la (Tabla 8.1.) (AII)
+
+
+        8.3. Proﬁlaxis VHB
+        La indicación o necesidad de proﬁlaxis viene determinada por el estado y respuesta vacunal
+        del sujeto expuesto y se detalla en la ﬁgura 4.1. del tema 4. En población pediátrica, si existe
+        indicación, la proﬁlaxis consiste en la administración de una dosis de inmunoglobulina anti
+        hepatitis B (0,6 ml/kg; dosis mínima: 0,5 ml; dosis máxima: 5 ml), en las primeras 24 horas o
+        hasta un plazo máximo de 14 días después de la exposición y una segunda dosis al mes en
+        no respondedores a la vacunación. En no vacunados, ésta se iniciará según la pauta estándar
+        (tres dosis: 0, 1 y 6 meses). En menores de 16 años, las dos vacunas disponibles en nuestro
+        medio son: Engerix B Junior# (10 mcg, GSK) y HBVAXPRO# (5 mcg, Sanoﬁ Pasteur MSD).
+
+
+        8.4. Proﬁlaxis VHC
+        No existe proﬁlaxis para el virus de la hepatitis C. Al paciente se le hará seguimiento mediante
+        la determinación de anticuerpos anti VHC como en el adulto.
+
+
+
+
+                                                                                             52
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Tablas:
+        Tabla 8.1. Pautas preferentes y alternativas para la PPE en niños y adolescentes.
+
+
+         Edad                  Pauta preferente                     Pauta alternativa
+                                                                    TDF/FTC (245 mg / 200 mg) 1 cp / 24h + DRV
+                                                                    (400 mg) 2 cp / 24h y RTV 100 mg / 24h
+
+                               TDF/FTC (245 mg / 200 mg) 1cp/24h
+                               + RAL (400 mg) 1cp / 12h             Si ClCr < 59 ml / min:
+         > 12 años y adoles-
+         centes                ó                                    ZDV + 3TC (ajustados a función renal) + RAL
+                               DTG (50 mg) 1 cp / 24h               (400 mg) 1cp / 12h
+                                                                    ó
+                                                                    DTG (50 mg) 1 cp / 24h
+                               TDF* + 3TC* ó ZDV* + 3TC* + RAL*     ZDV* + 3TC* + LPV/RTV (230 mg / 57,5 mg /
+         2 - 12 años
+                               ó DTG*                               m2 / dosis c / 12h)
+         1 mes - 2 años        ZDV* + 3TC* + RAL*
+         < 1 mes               Consultar a un especialista
+
+
+        *Dosis en Tabla 8.2.
+        **Es posible que en los próximos años se aprueben nuevas presentaciones farmacológicas para población
+        pediátrica, como Biktarvy® comprimido pediátrico. Dado que actualmente no están comercializadas en nuestro
+        medio, no se incluyen en esta guía.
+
+
+
+
+                                                                                                 53
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Tabla 8.2. Presentaciones comerciales y dosis de fármacos antirretrovirales en niños,
+        niñas y adolescentes.
+
+         TDF, Tenofovir disoproxil fumarato
+         Gránulos: 33 mg / 1 g                                    8 mg / kg / dosis, cada 24h
+
+         Comprimidos: 123, 163, 204 y 245 mg                      17 - 22 kg: 123 mg, cada 24h
+                                                                  22 - 28 kg: 163 mg, cada 24h
+                                                                  28 - 35 kg: 204 mg, cada 24h
+         3TC, Lamivudina
+         Jarabe: 100 mg / 10 ml                                   < 14 kg: 8 mg / kg / día, cada 12h
+
+         Comprimidos: 150 mg                                      14 - 20 kg: 75 mg, cada 12h
+                                                                  20 - 25 kg: 75 mg - 150 mg, cada 12h
+         ZDV, Zidovudina
+         Jarabe: 100 mg / 10 ml                                   4 - 9 kg: 12 mg / kg / dosis, cada 12h
+
+         Cápsulas: 100 y 250 mg                                   9 - 30 kg: 9 mg / kg / dosis, cada 12h
+         RAL, Raltegravir
+         Comprimidos masticables: 25 y 100 mg                     Dosis comprimido masticable:
+                                                                  6 - 10 kg: 50 mg / dosis (2 cp x 25 mg), cada 12h
+                                                                  10 - 14 kg: 75 mg / dosis (3 cp x 25 mg), cada 12h
+                                                                  14 - 20 kg: 100 mg / dosis (1 cp x 100 mg), cada 12h
+                                                                  20 - 28 kg: 150 mg / dosis (1,5 cp x 100 mg),cada 12h
+                                                                  28 - 40 kg: 200 mg / dosis (2 cp x 100 mg), cada 12h
+         Comprimidos duros: 400 y 600 mg
+                                                                  Dosis comprimido duro:
+                                                                  *Si > 25 kg: 400 mg (1 cp duro) cada 12h
+                                                                  *Si > 40 kg: 1200 mg (2 cp 600 mg, duros) cada 24h
+         DTG, Dolutegravir
+         Comprimidos dispersables: 5 mg                           Niños/as, mediante comprimidos dispersables:
+                                                                  6 - 10 kg: 15 mg, cada 24h
+                                                                  10 - 14 kg: 20 mg, cada 24h
+                                                                  14 - 20 kg: 25 mg, cada 24h
+                                                                  ≥ 20 kg: 30 mg, cada 24h
+
+         Comprimidos duros: 10, 25 y 50 mg                        Niños/as ≥ 6 años y ≥ 14 kg:
+                                                                  14 - 20 kg: 40 mg, cada 24h (4 cp duros)
+                                                                  ≥ 20 kg: 50 mg, cada 24h
+
+        *Las dosis de comprimido masticable y duro no son intercambiables.
+
+
+
+
+                                                                                                              54
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Bibliografía:
+        1. Dominguez K, Smith DK, Vasavi T, et al. Updated guidelines for antiretroviral postexposure prophylaxis
+        after sexual, injection drug use, or other nonoccupational exposure to HIV—United States, 2016. Published
+        Date: April 18, 2016, Update (May 23, 2018). Available: https://stacks.cdc.gov/view/cdc/38856
+
+        2. Title : Updated Guidelines for Antiretroviral Postexposure Prophylaxis After Sexual, Injection Drug Use,
+        or Other Nonoccupational Exposure to HIV—United States, 2016. Personal Author(s) : Dominguez, Kenneth
+        L.;Smith, Dawn K.;Vasavi Thomas,;Crepaz, Nicole;Lang, Karen;Heneine, Walid;McNicholl, Janet M.;Reid,
+        Laurie;Freelon, Brandi;Nesheim, Steven R.;Huang, Ya-lin (Aileen);Weidle, Paul J.; Published Date : April 18,
+        2016, Update (May 23, 2018) URL : https://stacks.cdc.gov/view/cdc/38856
+
+        3. Panel de Expertos de GeSIDA. Documento de consenso sobre proﬁlaxis postexposición ocupacional y
+        no ocupacional en relación con el VIH, VHB y VHC en adultos y niños. (actualización marzo 2015). Accesible
+        en: https://www.sanidad.gob.es/ciudadanos/enfLesiones/enfTransmisibles/hepatitisC/informacion/docs/
+        Proﬁlaxis_postexposicion_ocupacional_y_no_ocupacional_VIH_VHB_VHC(PPE).pdf
+
+        4. Martínez Gómez X, Rodrigo Pendás JA, González Peris S, Sancosmed Ron M, Caballero Requero E,
+        Cabañas Poy MJ, et al. Protocolo de actuación tras pinchazo accidental en niños y adolescentes. Hospital
+        Vall d’Hebron. Marzo 2023. https://www.upiip.com/sites/upiip.com/ﬁles/Protocolo%20pinchazo_marzo
+        %202023_0.pdf
+
+        5. WHO. Vaccines and immunization for monkeypox: Interim guidance, 16 November 2022. https:// www.
+        who.int/publications/i/item/WHO-MPX-Immunization
+
+        6. Post-Exposure Prophylaxis after non-occupational and occupational exposure to HIV. Australian National
+        Guidelines (Third edition) 2023. Accesible en: https://pep.guidelines.org.au/wp-content/uploads/2023/07/
+        ASHM-PEP-Guidelines_2023_3rd-edition.pdf
+
+        7. Comité Asesor de Vacunas (CAV-AEP). Manual de Inmunizaciones en línea de la AEP [Internet]. Madrid:
+        AEP; 2024. [consultado el 03/11/2024]. Accesible en: http://vacunasaep.org/documentos/manual/cap-9
+
+        8. Villaverde S, Bello P, Rojo P. Pinchazo accidental y otras exposiciones a virus transmitidos por sangre
+        y ﬂuidos corporales (v.4/2019). Guía-ABE. Infecciones en Pediatría. Guía rápida para la selección del
+        tratamiento antimicrobiano empírico [en línea][actualizado el 05/01/2019; consultado el abril 2024].
+        Disponible en http://www.guia-abe.es
+
+
+
+
+                                                                                                    55
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        9. SITUACIONES DE NO RECOMENDACIÓN DE PPE
+        Índice:
+           9.1. Introducción
+           9.2. Escenarios de no recomendación
+
+        9.1. Introducción
+        De forma general no se recomienda administrar la PPE si el riesgo de transmisión es
+        muy bajo (< 1 / 10 000) ya que el riesgo de potencial toxicidad e inconveniencia de la PPE
+        seguramente es superior al beneﬁcio, salvo que exista alguna circunstancia especíﬁca que
+        aumente el riesgo por encima de > 1 / 10 0001. Si bien, dada la buena tolerabilidad de los
+        nuevos antirretrovirales y la corta duración de la pauta, existen escasos o nulos riesgos a la
+        hora de administrarla, ésta no debería ser recomendada en aquellas situaciones en las que
+        tampoco se obtendrá ningún beneﬁcio. Basándose en el principio bioético de autonomía,
+        por el cual las personas deben tomar sus propias decisiones libremente una vez informadas,
+        debemos transformar los escenarios clínicos de una “no indicación” del profesional, a una
+        “desestimación” de la estrategia por parte de la persona solicitante. Por ello, toda valoración
+        de PPE requiere tiempo, para poder realizar un asesoramiento adecuado y poder exponer
+        las razones cientíﬁcas por las que el clínico considera que iniciarla no aportará beneﬁcio,
+        para que sea el solicitante quien pueda tomar una decisión de forma libre. Se debe tener
+        en cuenta que una persona que acude solicitando la PPE, se encuentra en un momento
+        vital que genera estrés puesto que dicha persona considera que puede haber contraído la
+        infección. Es vital entender el proceso que atraviesan y empatizar para poder llevar a cabo
+        un correcto acompañamiento, para evitar la innecesaria medicalización de una situación de
+        miedo, y poder dar respuesta mediante la información y empoderamiento.
+
+        9.2. Escenarios de no recomendación
+        Exposición sexual.
+
+        A continuación, se disponen las situaciones en las que generalmente la PPE no está
+        recomendada:
+           • Relaciones sexuales de cualquier modalidad cuando la pareja sexual tiene VIH y se
+             encuentra en tratamiento y con carga viral indetectable durante al menos 6 meses2,3 .
+             (AI)
+
+        Existen numerosos estudios que demuestran que las personas con VIH y carga viral
+        indetectable NO pueden transmitir la infección (Indetectable = Intransmisible).
+           • Cualquier práctica sexual (excepto sexo anal receptivo con eyaculación) con parejas
+             sexuales de las que se desconoce el estado serológico y que no pertenecen a poblaciones
+             con prevalencia de VIH > 1 % (personas asignadas hombre al nacer que tienen sexo con
+             hombres, personas que usan drogas inyectadas y realizan intercambio de material,
+             migrantes procedentes de países con alta prevalencia) 1. (BIII)
+        Basándose en la fórmula para cálculo la probabilidad de transmisión de la infección:
+                        P(transmisión)=P(PS con VIH y CV detectable) x P(exposición)
+
+
+
+
+                                                                                             56
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        La probabilidad de transmisión en el sexo anal receptivo con eyaculación con personas de
+        poblaciones con prevalencia de VIH > 1 % seria 1 / 6500. En el resto de prácticas la probabilidad
+        sería < 1 / 10000 por lo que no estaría recomendada la PPE.
+           • Sexo oral tanto insertivo como receptivo con o sin eyaculación en cavidad oral íntegra4.
+             (BII)
+
+        Un estudio observacional realizado en nuestro país en 2002, no evidenció ningún caso
+        de transmisión de VIH tras analizar 19 316 contactos mediante sexo oral entre parejas
+        serodiscordantes sin la utilización de métodos barrera. De éstas, 3 060 fueron actos orales
+        receptivos con eyaculación en cavidad oral.
+
+        Se debe tener precaución en circunstancias que puedan aumentar la probabilidad de
+        transmisión debido a la presencia de puertas de entrada en la cavidad oral (aftas orales,
+        mucositis por quimioterapia, intervenciones odontológicas, etc.) y contacto con parejas
+        sexuales con VIH y carga viral elevada (infección aguda).
+           • Otras: eyaculación en globo ocular, masturbación, besos, prácticas que impliquen
+             contacto piel con piel o contacto con saliva. (AIII)
+        Exposición ocupacional y otras no sexuales.
+           • Heridas y salpicaduras con fuente VIH + 5
+              a. De forma general, no se recomienda tras una herida cortante si el caso índice ha
+                 permanecido en tratamiento antirretroviral durante, al menos, 6 meses y con carga
+                 viral indetectable en este periodo, y que reﬁera buena adherencia al tratamiento
+                 (BII). No obstante, la decisión de tratar se puede considerar de forma individualizada.
+             b. No se recomienda PPE tras una salpicadura si el caso índice mantiene carga viral
+                indetectable de manera sostenida. (AII)
+             c. No se recomienda PPE en situaciones de riesgo de transmisión insigniﬁcante, por
+                ejemplo, salpicaduras de sangre u otros ﬂuidos corporales sobre piel intacta. (AII)
+
+           • Heridas y salpicaduras con caso índice con estado virológico desconocido 6
+
+             No se recomienda PPE tras una herida o salpicadura en mucosas si el caso índice
+             pertenece a un grupo de bajo riesgo. (AIII)
+
+             De forma general, no se recomienda PPE tras herida o salpicadura en mucosas si el
+             caso índice pertenece a un grupo de alto riesgo (ej. HSH, UDI), a menos que existan otros
+             factores que incrementen la posibilidad de transmisión (ej. heridas profundas, inyección
+             de sangre o heridas cortantes de un UDI en el contexto de epidemia local). (BIII)
+
+           • Pinchazo accidental en ámbito comunitario 7
+             La PPE no está recomendada. (AIII)
+
+
+
+
+                                                                                             57
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+           • Mordedura humana 8
+             De forma general no se recomienda (AIII), salvo que concurran TODAS estas
+             condiciones:
+             • Saliva contaminada con sangre visible,
+             • La persona que ha ocasionado la mordedura tiene o se sospecha que tiene carga
+               viral superior a 1000 copias/ml, 3,0 log, y
+             • La mordedura ha ocasionado una herida profunda
+
+           • PPE en personas que se inyectan drogas (UDI) 9
+
+             Dado que la prevalencia de infección por el VIH es alta en este colectivo, y que la indicación
+             de PPE es prevenir la transmisión en personas expuestas de forma excepcional y
+             esporádica, no se considera la administración de PPE en UDI que comparten material
+             de venopunción de forma habitual. (BIII)
+
+
+
+
+                                                                                             58
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Bibliografía:
+        1. Cresswell F, Asanati K, Bhagani S, Bofﬁto M, Delpech V, Ellis J, et al. UK guidelines for the use of HIV post#
+        exposure prophylaxis 2021. HIV Med. 2022 May;23(5):494-545. doi: 10.1111/hiv.13208. Erratum in: HIV Med.
+        2022 Jul;23(6):701. doi: 10.1111/hiv.13327. PMID: 35166004.
+
+        2. Rodger AJ, Cambiano V, Bruun T, Vernazza P, Collins S, van Lunzen J, et al. Sexual Activity Without Condoms
+        and Risk of HIV Transmission in Serodifferent Couples When the HIV-Positive Partner Is Using Suppressive
+        Antiretroviral Therapy. JAMA. 2016 Jul 12;316(2):171-81. doi: 10.1001/jama.2016.5148. Erratum in: JAMA. 2016
+        Aug 9;316(6):667. doi: 10.1001/jama.2016.10914. Erratum in: JAMA. 2016 Nov 15;316(19):2048. doi: 10.1001/
+        jama.2016.16194. PMID: 27404185.
+
+        3. Cohen MS, Chen YQ, McCauley M, Gamble T, Hosseinipour MC, Kumarasamy N, et al. Prevention of
+        HIV-1 Infection with Early Antiretroviral Therapy.N Engl J Med. 2011 Aug 11;365(6):493-505. doi: 10.1056/
+        NEJMoa1105243. PMID: 21767103; PMCID: PMC3200068.
+
+        4. del Romero J, Marincovich B, Castilla J, García S, Campo J, Hernando V, et al. Evaluating the risk of HIV
+        transmission through unprotected orogenital sex. AIDS. 2002 Jun 14;16(9):1296-7. doi: 10.1097/00002030-
+        200206140-00017. PMID: 12045500.
+
+        5. Cardo DM, Culver DH, Ciesielski CA, Srivastava PU, Marcus R, Abiteboul D, et al. A Case–Control Study
+        of HIV Seroconversion in Health Care Workers after Percutaneous Exposure. N Engl J Med. 1997 Nov
+        20;337(21):1485-90. doi: 10.1056/NEJM199711203372101. PMID: 9366579.
+
+        6. Cresswell F, Ellis J, Hartley J, Sabin C, Orkin C, Churchill D. A systematic review of risk of HIV transmission
+        through biting or spitting: implications for policy. HIV Med. 2018 Apr 23;19(8):532–40. doi: 10.1111/hiv.12625.
+        PMID: 29687590; PMCID: PMC6120498.
+
+        7. Elósegui López-Quintana ME, Fernández Escribano M, Lucena García S, Mazón Cuadrado L, Orriols Ramos
+        RM, Morais Rodrigues T, et al. Guía de actuación ante exposición ocupacional a agentes biológicos de
+        transmisión sanguínea. Escuela Nacional de Medicina del Trabajo. Instituto de Salud Carlos III. Ministerio de
+        Ciencia e Innovación. Madrid. Actualización 2012. Sánchez Serrano, Sebastián. Coordinador.
+
+        8. Baggaley RF, Boily MC, White RG, Alary M. Risk of HIV-1 transmission for parenteral exposure and blood
+        transfusion: a systematic review and meta-analysis. AIDS. 2006 Apr 4;20(6):805–12. doi: 10.1097/01.
+        aids.0000218543.46963.6d. PMID: 16549963.
+
+        9. Thomas MG, Hopkins CJ, Luey CE. Transmission of HIV infection by severe bites. Int J STD AIDS. 2019 Aug
+        21;30(9):927–9. doi: 10.1177/0956462419844852. PMID: 31226915.
+
+
+
+
+                                                                                                        59
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        10. ALGORITMOS, CIRCUITOS DE ACTUACIÓN y ANEXOS
+        En este capítulo se reúnen un algoritmo general resumido sobre la indicación de PPE, los
+        circuitos de actuación en la PPE ocupacional y no ocupacional, el algoritmo de PPE frente
+        al VHB, un listado de veriﬁcación en la PPE, y una tabla simpliﬁcada para el seguimiento de
+        personas que reciben PPE. Además, se incluyen como anexos diferentes modelos de hoja
+        de información para la proﬁlaxis posexposición sexual (anexo 1) y hoja de información para
+        la proﬁlaxis posexposición ocupacional (anexo 2).
+        En opinión de los redactores es suﬁciente el consentimiento informado verbal, el cuál debe
+        quedar reﬂejado en la historia clínica del paciente, pudiendo ser válido alguna de estas
+        formas:
+        1.- “Previo consentimiento verbal del paciente se procede a la toma de muestras para
+        serología frente a VIH, VHB, VHC +/- ITS” (en caso de exposiciones por vía sexual).
+        2.- “Tras la valoración del riesgo biológico del accidente ocurrido, en base a las Guías de
+        práctica clínica vigentes se recomienda el inicio de proﬁlaxis posexposición (PPE) frente
+        al VIH. La persona que recibirá el tratamiento entiende los riesgos y beneﬁcios de este
+        expresados durante la visita y acepta iniciar PPE”.
+
+        Anexo I. Hoja de información. Proﬁlaxis posexposición sexual.
+        Antes de empezar:
+        Es habitual que cuando se tienen relaciones sexuales en las que cabe la posibilidad de
+        haber adquirido el VIH, sobre todo cuando no se ha usado preservativo, se experimenten
+        sentimientos de malestar, ansiedad o culpabilidad.
+
+        El preservativo es una herramienta muy eﬁcaz para la prevención del VIH, sin embargo, su
+        uso a veces se puede ver disminuido por múltiples motivos. Durante las relaciones sexuales
+        la capacidad para tomar decisiones puede verse diﬁcultada por presiones, o por la excitación
+        del momento, por ejemplo. Recuerda que nadie debería juzgarte por ello.
+        Estos pensamientos de culpa que pueden aparecer son comprensibles, pero no te van a
+        hacer bien. Respira hondo 3 veces cuando leas esto, y sé compasivo, compasiva o compasive
+        contigo. Intenta relajarte en la medida de lo posible, acompáñate de gente que te estime
+        y apoye. El sexo es a veces complejo y si no usaste preservativo (de forma consentida)
+        recuerda que no has hecho nada malo. Disfrutar de una vida sexual placentera es un derecho.
+
+        Es por esa diﬁcultad que puede existir a veces para el uso del preservativo que se han
+        desarrollado otras herramientas preventivas como es la proﬁlaxis posexposición, motivo por
+        el que has acudido.
+        ¿Qué es la proﬁlaxis posexposición (PPE)?
+        La PPE es una herramienta preventiva para evitar la infección por VIH cuando se ha tenido
+        una relación sexual en la que puede haberse transmitido. Su pilar fundamental es realizar
+        tratamiento antirretroviral (para el VIH) durante 28 días. Además, durante las visitas te
+        ofrecerán realizar pruebas de ITS; test de embarazo y actualizar algunas vacunas.
+
+
+                                                                                             60
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        ¿Qué eﬁcacia tiene?
+        Es difícil estimar la eﬁcacia de la PPE para evitar la infección puesto que por motivos éticos
+        no se han realizado ensayos clínicos. La transmisión del VIH cuando se tienen relaciones
+        sexuales con una persona con la infección y carga viral detectable es inferior al 1.5 %. La PPE
+        ayuda a disminuir esa probabilidad.
+        ¿Cuánto tiempo tengo para pedir la PPE?
+        La PPE ha demostrado ser eﬁcaz si se da en las primeras 72 h, pero su eﬁcacia disminuye
+        con el tiempo. Por eso es muy importante administrarla cuanto antes mejor, por lo que, si se
+        puede, es preferible acudir en las primeras 24h.
+
+        La PPE consiste en la toma de medicación para el VIH. Hoy en día, los tratamientos para
+        el VIH son seguros y tienen pocos efectos adversos. Aunque la mayoría de personas
+        no experimentan efectos secundarios, pueden aparecer molestias digestivas (náuseas,
+        vómitos, dolor abdominal) y también cansancio, insomnio o dolor de cabeza.
+        ¿Y cuándo acabe la PPE?
+        Una vez ﬁnalizado el proceso y descartada la infección pregunta a tu médico por otras
+        alternativas para la prevención del VIH. Si has realizado PPE quizá podría interesarte la
+        proﬁlaxis pre-exposición (PrEP).
+
+        Descargar Anexo I
+
+
+
+        Anexo II. Hoja de información. Proﬁlaxis pospexposición ocupacional.
+
+        El riesgo de adquirir el VIH después de una exposición ocupacional a sangre u otros ﬂuidos
+        corporales potencialmente infecciosos (líquido cefalorraquídeo, líquidos serosos, líquido
+        amniótico, semen, secreciones vaginales) de una persona con VIH con carga viral detectable
+        o con sospecha de tenerlo es variable según el tipo de exposición. El riesgo medio de
+        transmisión después de una exposición percutánea es de un 0,3 %. Tras una exposición con
+        mucosas el riesgo se reduce a un 0,09 % y es todavía menor cuando el contacto se produce
+        con piel no intacta.
+
+        En las exposiciones de mayor riesgo la PPE puede ser de utilidad, disminuyendo el riesgo
+        de contraer el VIH. La PPE es un tratamiento preventivo que consiste en tomar durante
+        cuatro semanas medicamentos frente al VIH (antirretrovirales) con el objetivo de reducir
+        la probabilidad de adquirir el virus tras haberse expuesto al mismo. Los datos disponibles
+        sugieren que este tratamiento es eﬁcaz en la mayoría de los casos para evitar la infección,
+        aunque se han comunicado fallos del mismo. La PPE se debe iniciar lo antes posible y
+        como máximo hasta 72 horas después de la exposición, no estando indicada si el tiempo
+        transcurrido es mayor. Su eﬁcacia disminuye con el tiempo por lo que es muy importante
+        administrarla cuanto antes, idealmente en las primeras 24 h. Por otra parte, en el momento
+        actual no existe ninguna otra alternativa terapéutica para prevenir la infección por el VIH en
+        esta situación. Si la PPE está indicada sus beneﬁcios superan sus riesgos potenciales.
+
+
+
+                                                                                             61
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Los medicamentos antirretrovirales pueden producir efectos secundarios con cierta
+        frecuencia, aunque en general no son graves y se suelen resolver tras ﬁnalizar el tratamiento.
+        Los efectos secundarios graves o irreversibles son muy poco frecuentes. Los efectos
+        secundarios más habituales son cansancio, náuseas, vómitos, diarrea, dolor abdominal,
+        ﬂatulencia, dolor de cabeza, insomnio, mareos y dolores musculares. Con menor frecuencia
+        pueden producir reacciones alérgicas, erupciones cutáneas, anemia, alteraciones renales
+        y hepáticas. Los medicamentos antirretrovirales pueden ser incompatibles con otras
+        medicinas, por lo que debe informar al médico de todos los medicamentos que esté
+        tomando. Si usted está embarazada o cree que puede estarlo comuníqueselo al médico.
+        Durante la PPE y posteriormente, durante 3-6 meses, se le realizará un seguimiento
+        periódico en la consulta del especialista. Si tiene alguna duda puede realizar todas las
+        preguntas que considere oportunas.
+
+        Descargar anexo II
+
+
+
+
+                                                                                             62
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Algoritmo 10.1. Indicación de PPE frente al VIH.
+
+
+
+
+                                                      Criterio EXPOSICIÓN
+                              ALTO RIESGO                                                  BAJO RIESGO
+         Sangre, semen, secreciones vaginales,         Orina, secreciones nasales, saliva, sudor,
+         secreciones anales, leche materna o cualquier lágrimas, si no hay contaminación visible
+         fluido visiblemente contaminado por sangre    por sangre
+
+        *Población alto riesgo: HSH, usuarios de drogas intravenosa, personas de países de alta prevalencia de VIH**** y agresores
+        sexuales.
+        **Población general: no alto riesgo.
+        ***Factores que incrementan el riesgo de transmisión: alteraciones en la barrera mucosa como úlceras genitales y trauma
+        anal o vaginal tras violación o primera relación sexual; múltiples episodios de exposición en un corto periodo de tiempo
+        como sexo grupal; ITS en cualquier pareja.
+        ****Países con prevalencia de VIH mayor o igual al 1% en adultos mayores de 15 años, estimación para el año 2023
+        (https://aidsinfo.unaids.org/):
+        Países de África subsahariana: Angola, Botswana, Burundi, Cabo Verde, Chad, Congo, Costa de Marfil, Yibuti, Suazilandia,
+        Etiopía, Gabón, Gambia, Ghana, Guinea, Guinea-Bissau, Kenia, Lesoto, Liberia, Malawi, Mali, Mauricio, Mozambique,
+        Namibia, Nigeria, Ruanda, Sierra Leona, Sudáfrica, Sudán del Sur, Tanzania, Togo, Uganda, Zambia y Zimbabue; de
+        Centroamérica: Barbados, Bahamas, Belice, Haití, Jamaica, República Dominicana, Surinam, Guyana; y de la región
+        Asia‑Pacífico: Papúa Nueva Guinea y Tailandia.
+
+
+
+                                                                                                              63
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Algoritmo 10.2. Circuito de actuación frente a exposición de riesgo biológico ocupa-
+        cional (PPEO)
+
+
+
+
+        ARB: accidente riesgo biológico; E.INFECCIOSAS: servicio de enfermedades infecciosas; M.PREVENTIVA: servicio de medicina
+        preventiva; PPEO: profilaxis posexposición ocupacional; UPRL: unidad de prevención de riesgos laborales; VHB: virus de la hepatitis B;
+        VIH: virus de la inmunodeficiencia humana.
+        * Ante la duda sobre si está indicada la PPE, la recomendación es INICIAR SIEMPRE y SIN DEMORA
+        ** El paciente se debe remitir a la unidad de seguimiento garantizando siempre que dispondrá de las dosis de PPE necesarias hasta que
+        sea revisado en la misma.
+
+
+
+
+                                                                                                                         64
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Algoritmo 10.3. Circuito de actuación frente a exposición de riesgo biológico no
+        ocupacional (PPENO)
+
+
+
+
+        E. INFECCIOSAS: servicio/unidad/consulta de enfermedades infecciosas; ITS: infecciones de transmisión sexual;
+        M. PREVENTIVA: servicio de medicina preventiva; PPENO: profilaxis posexposición no ocupacional; VIH: virus de la inmunodeficiencia
+        humana; VHB: virus de la hepatitis B.
+        *Ceftriaxona 500 mg IM o IV monodosis (MD) + Doxiciclina 100 mg c/12h VO 7 días (alternativa: azitromicina 1 g, dosis única) +
+        Metronidazol o Tinidazol 2 g VO (MD). Recomendaciones de Profilaxis Post-Exposición frente a ITS en casos de agresión sexual en
+        Documento de consenso Diagnóstico y tratamiento de las infecciones de transmisión sexual en adultos, niños y adolescentes. Noviembre
+        de 2024. Panel de expertos del Ministerio de Sanidad del Gobierno de España y de los grupos de trabajo de la SEIMC, GeSIDA, GEITS y
+        GEHEP. Accesible en: https://seimc.org/wp-content/uploads/2025/06/seimc-dc-2024-Documento-ITS-geits-gesida-gehep-1.pdf
+        **Ante la duda razonable sobre si está indicada la PPE, la recomendación es INICIAR SIEMPRE y SIN DEMORA.
+        ***El paciente se debe remitir a la Unidad de seguimiento garantizando siempre que dispondrá de las dosis de PPE necesarias hasta que
+        sea revisado en la misma.
+
+
+
+
+                                                                                                                         65
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Algoritmo 10.4. Proﬁlaxis frente a la Hepatitis B
+
+
+
+
+        Notas: 1: Vacuna a los 0, 1 y 6 meses.; 2:IgHB: en lesiones punzantes
+        accidentales, tan pronto como se pueda (dentro de los primeros
+        7 días de la exposición), 1 dosis de 0,06 ml/kg de peso (máximo
+        5 ml); en exposiciones sexuales, hasta 14 días. 3: No reiniciar la
+        vacunación, sólo administrar las dosis que faltan.
+
+        * No respondedor vacunado con dos pautas completas (6 dosis).
+        ** No respondedor vacunado con 3 dosis.
+
+
+
+
+                                                                                             66
+DOCUMENTO DE CONSENSO SOBRE LA PROFILAXIS POSEXPOSICIÓN OCUPACIONAL Y NO OCUPACIONAL AL VIH...
+
+
+
+
+        Listado de veriﬁcación para PPE.
+
+
+
+
+                                                                                             67
+

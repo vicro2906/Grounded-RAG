@@ -1,0 +1,127 @@
+Necesito que conviertas una guía clínica de VIH en formato PDF a un Markdown limpio, fiel y bien estructurado. El resultado se va a usar para hacer chunking y alimentar un chatbot RAG que utilizarán médicos en su práctica clínica con pacientes VIH.
+
+## Regla absoluta: fidelidad por encima de completitud
+
+El chatbot lo van a usar profesionales sanitarios para tomar decisiones clínicas reales. Una alucinación sobre una dosis de antirretroviral, una interacción farmacológica o un criterio diagnóstico puede causar daño al paciente. Por tanto:
+
+- **No describas con un LLM las imágenes, diagramas o algoritmos** del PDF, ni intentes "reconstruir" tablas que se extraigan rotas. Si algo no se puede extraer con garantía de que coincide con el original, **omítelo y deja una marca explícita** (por ejemplo `> _[Tabla omitida — consultar PDF original]_`) para que el médico sepa que ahí había contenido y vaya al PDF.
+- **No expandas, parafrasees ni resumas nada.** El texto del Markdown debe corresponderse palabra por palabra con el del PDF.
+- **No inventes encabezados** ni reorganices el orden del contenido.
+
+## Herramienta base
+
+Usa `pymupdf4llm` (`pip install pymupdf4llm`). Es predecible y no "interpreta" estructura con modelos de visión, que es justo lo que queremos en este caso conservador. Configúralo con `ignore_images=True`, `ignore_graphics=True`, `show_progress=False`.
+
+Si al inspeccionar el PDF detectas que es un escaneo (no nativo), **para y avísame** antes de seguir; no apliques OCR por tu cuenta.
+
+## Proceso que quiero que sigas
+
+**No me entregues un script en frío y lo ejecutes directamente.** Sigue este proceso iterativo:
+
+### 1. Inspección del PDF
+Antes de escribir nada, examina la guía concreta y descubre sus particularidades:
+
+- Metadatos básicos (`pdfinfo`): páginas, tamaño, si es nativo o escaneado.
+- Una muestra de las primeras páginas para confirmar que el texto es extraíble.
+- Una extracción de prueba con `pymupdf4llm` sobre **5-10 páginas representativas**: alguna del principio (índice/portada), alguna del cuerpo clínico (recomendaciones, dosis), alguna que parezca contener tablas, y alguna del final (bibliografía/anexos).
+- A partir de esa muestra, identifica:
+  - **Sistema de numeración de secciones** (¿`1.`, `1.1.`, `1.1.1.`? ¿romanos? ¿letras? ¿mezclado?)
+  - **Encabezados especiales sin numerar** que aparecen recurrentemente (típicos: "Recomendaciones", "Bibliografía", "Comité de redacción", "Agradecimientos", "Anexo", pero esta guía puede tener otros distintos)
+  - **Pies de página repetitivos** (suele ser el título del documento)
+  - **Cómo se marcan los grados de evidencia/recomendación** (`(A-I)`, `(B-II)`, etc.)
+  - **Tipos de elementos no extraíbles fielmente** que aparecen en la guía: imágenes con texto OCR, tablas que parezcan layouts del maquetador, figuras, algoritmos
+  - Cualquier peculiaridad propia de esta guía que no esperarías a priori
+
+Cuéntame qué has encontrado en la inspección antes de seguir.
+
+### 2. Construcción del script
+
+Construye un script Python autocontenido (`convert_guideline.py`) adaptado a las particularidades que hayas descubierto. Que cubra al menos:
+
+**Conservar fielmente:**
+- Texto corrido del cuerpo
+- Encabezados con jerarquía bien reconstruida según la numeración del documento
+- Negritas, cursivas, citas bibliográficas en el cuerpo (`[2]`, `[1,3]`)
+- Grados de evidencia/recomendación
+- Listas, enumeraciones
+- Tablas markdown solo si son tablas semánticas reales (no layouts)
+
+**Omitir con marca de aviso (`> _[... omitido — consultar PDF original]_`):**
+- Bloques OCR que `pymupdf4llm` inserta entre `**----- Start of picture text -----**` y `**----- End of picture text -----**` (texto desordenado, inútil clínicamente)
+- Placeholders de imagen tipo `**==> picture [WxH] intentionally omitted <==**`
+- Tablas malformadas. Heurísticas razonables: >6 columnas, >50% celdas vacías, o número de columnas muy irregular entre filas → casi seguro layout, descartar. Las que pasen los filtros, conservarlas pero contarlas en estadísticas para que pueda revisarlas.
+
+**Limpieza adicional:**
+- "Tachado" (`~~texto~~`): pymupdf4llm lo genera para texto que en el PDF está resaltado en amarillo (no realmente tachado). Por defecto, **quitar los marcadores `~~` y conservar el texto**. Añade un flag para mantenerlos por si fuera necesario.
+- Pie de página repetitivo: detéctalo automáticamente (líneas largas que se repiten muchas veces) y elimínalo.
+- Números de página sueltos en su propia línea.
+- Múltiples líneas en blanco consecutivas → máximo dos.
+
+**Reconstrucción de jerarquía de encabezados** (esto es crítico para el chunking):
+
+Por defecto, `pymupdf4llm` pone todos los encabezados al mismo nivel (`##`). Reasigna niveles según la numeración:
+- Numeración de un nivel (`1.`) → H2
+- Dos niveles (`1.2.`) → H3
+- Tres niveles (`1.2.3.`) → H4
+- Y así sucesivamente
+
+Para encabezados especiales sin numerar, asígnales el nivel coherente con su rol estructural (ej. "Recomendaciones" suele ser H4 dentro de un apartado clínico; "Bibliografía" cierra cada sección numerada y suele ir a H3; "Anexo" o "Agradecimientos" suelen ir a H2). Adapta los niveles a lo que veas en *esta* guía.
+
+Limpieza adicional de encabezados:
+- Quitar basura inicial que pymupdf4llm arrastra (`- 2.2.3.` → `2.2.3.`, asteriscos sueltos)
+- Quitar negritas redundantes dentro de los `#` (`## **Texto**` → `## Texto`)
+- **Fusionar encabezados rotos en dos líneas** por saltos de columna del maquetador. Detección: encabezado que termina en preposición/conector ("con", "de", "del", "en", "para", "y", "o", "a", "la", "el", "los", "las", "al", "ante", "sobre", "tras", "por", "sin", coma) seguido de una línea corta sin formato de encabezado, o de una línea vacía + otro encabezado del mismo nivel y corto. Fusionar en un único encabezado.
+- Degradar referencias bibliográficas coladas como encabezados (`## 35. Workowski K. ... 2021;` → texto plano). Patrón: empieza por número, autor con mayúscula, contiene año o "et al".
+
+El script debe imprimir estadísticas claras: caracteres antes/después, bloques OCR eliminados, imágenes omitidas, tablas no fiables descartadas, tablas conservadas, resaltados desmarcados, encabezados normalizados, encabezados rotos fusionados.
+
+### 3. Aplicación y validación
+
+Ejecuta el script sobre la guía y muéstrame:
+- Las **estadísticas** que imprime
+- El **listado completo de encabezados** extraídos del Markdown final (`grep -E "^#" salida.md`), para validar de un vistazo que la jerarquía es coherente
+- Una **muestra del cuerpo** (~50 líneas) en una zona con contenido clínico denso (recomendaciones, dosis, criterios) para verificar fidelidad
+- La lista de **tablas conservadas** (las que pasaron los filtros), para que pueda decidir si son legítimas
+- Cualquier zona donde la extracción te haya parecido dudosa
+
+### 4. Iteración
+
+Si veo algo que ajustar (encabezado mal nivelado, tabla descartada que sí era válida, párrafo perdido, etc.), iteramos sobre el script hasta que el resultado sea fiel y limpio. Solo entonces dejamos el `.md` final como bueno.
+
+Elimina completamente:
+
+Números de página
+Afiliaciones y nombres de autores
+Declaraciones de conflicto de interés
+Agradecimientos
+Referencias bibliográficas del final (las listas numeradas de citas)
+Encabezados y pies de página repetitivos del PDF
+
+Normaliza el texto:
+
+Siempre TAR (nunca TARV ni HAART)
+Siempre VIH (nunca HIV)
+Siempre TB (nunca tuberculosis salvo la primera vez que aparece en cada sección)
+
+Normaliza el sistema de gradación:
+Todas las recomendaciones deben quedar en formato (A-I), (A-II), (B-I) etc. donde:
+
+La letra indica la fuerza: A = fuerte, B = moderada, C = débil
+El número romano indica la calidad de evidencia: I = alta (ensayos clínicos), II = moderada (estudios observacionales), III = baja (opinión de expertos)
+
+Si la guía usa el sistema GRADE con texto como "Recomendación fuerte, moderada calidad de evidencia", conviértelas así:
+
+fuerte + alta → (A-I)
+fuerte + moderada → (A-II)
+fuerte + baja → (A-III)
+débil + alta → (B-I)
+débil + moderada → (B-II)
+débil + baja → (B-III)
+
+Responde únicamente con el Markdown, sin explicaciones previas ni posteriores.
+
+## Qué adjunto
+
+[aquí adjuntas el PDF de la guía]
+
+Empieza por la **inspección del PDF** (paso 1) y cuéntame qué encuentras antes de escribir el script.
