@@ -1,6 +1,14 @@
-import os 
+import os
+import sys
 import json
 from openai import OpenAI
+
+# La consola de Windows usa cp1252 por defecto y rompe al imprimir acentos,
+# 'µ' o las cajas '═'/'─' de las fuentes. Forzamos UTF-8 en la salida.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
 from qdrant_client import QdrantClient
 from qdrant_client import models
 from evidencias import format_answer
@@ -69,6 +77,12 @@ def generate_answer(query:str,context: str):
     10. En "fragmentos_usados" incluye ÚNICAMENTE los fragmentos que realmente sustentan tu respuesta. Si solo usaste 2 de los 5, devuelve solo esos 2. No incluyas fragmentos irrelevantes ni "por si acaso".
     11. Para cada fragmento usado, copia en "cita_textual" la frase EXACTA Y LITERAL del fragmento que respalda tu afirmación, carácter por carácter, sin reescribirla, resumirla ni corregirla. Debe poder encontrarse tal cual dentro del texto del fragmento.
 
+    PREGUNTAS DE SEGUIMIENTO:
+    12. Genera EXACTAMENTE 3 preguntas de seguimiento ("preguntas_seguimiento") que un clínico podría plantear de forma natural justo después de esta consulta.
+    13. Cada pregunta debe: (a) ser específica y clínicamente útil; (b) abordar un aspecto NO resuelto ya en tu respuesta (profundizar en un matiz, un escenario clínico contiguo, monitorización, interacciones, manejo alternativo, etc.); (c) poder responderse previsiblemente con guías clínicas de VIH (GeSIDA/SPNS). NO formules preguntas de cultura general ni que dependan de datos del paciente concreto que no se han aportado.
+    14. Redáctalas breves, autocontenidas, en español y terminadas en "?". No las numeres ni les añadas prefijos.
+    15. Genera las 3 preguntas también cuando "informacion_suficiente" sea false (relacionadas con el tema consultado).
+
     FORMATO DE SALIDA:
     Devuelve EXCLUSIVAMENTE un objeto JSON válido, sin texto antes ni después y sin envolverlo en bloques de código:
     {
@@ -77,9 +91,10 @@ def generate_answer(query:str,context: str):
     "fragmentos_usados": [
         {"ref": 1, "cita_textual": "frase literal copiada del fragmento [1]"},
         {"ref": 3, "cita_textual": "frase literal copiada del fragmento [3]"}
-    ]
+    ],
+    "preguntas_seguimiento": ["¿…?", "¿…?", "¿…?"]
     }
-    Si "informacion_suficiente" es false, "fragmentos_usados" debe ser una lista vacía.
+    Si "informacion_suficiente" es false, "fragmentos_usados" debe ser una lista vacía (pero "preguntas_seguimiento" debe contener igualmente las 3 preguntas).
     """
     
     prompt = f"""
@@ -112,8 +127,12 @@ def generate_answer(query:str,context: str):
                         "additionalProperties": False,
                     },
                 },
+                "follow_up_questions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
             },
-            "required": ["sufficient_information", "answer", "sources_used"],
+            "required": ["sufficient_information", "answer", "sources_used", "follow_up_questions"],
             "additionalProperties": False,
         },
     }

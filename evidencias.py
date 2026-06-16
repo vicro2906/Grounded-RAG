@@ -166,15 +166,38 @@ def section_label(chunk: dict) -> str:
     chain = " › ".join(_split_num(p)[1] for p in ancestors)
     return f"{chain} › {leaf}" if chain else leaf
 
+# ─────────────────────────────────────────── preguntas de seguimiento
+def _followup_lines(answer) -> list:
+    """Bloque 'PREGUNTAS DE SEGUIMIENTO' a partir de answer['follow_up_questions'].
+    Devuelve [] si no hay preguntas, para no pintar el panel vacío."""
+    qs = answer.get("follow_up_questions") or []
+    qs = [q.strip() for q in qs if isinstance(q, str) and q.strip()]
+    if not qs:
+        return []
+    out = [
+        f"{C.GRAY}{'─'*WIDTH}{C.RESET}",
+        f"{C.BOLD}  PREGUNTAS DE SEGUIMIENTO{C.RESET} {C.DIM}({len(qs)}){C.RESET}",
+        f"{C.GRAY}{'─'*WIDTH}{C.RESET}\n",
+    ]
+    for i, q in enumerate(qs, 1):
+        wrapped = textwrap.fill(q, width=WIDTH-6,
+                                initial_indent=f"  {i}. ", subsequent_indent="     ")
+        out.append(f"{C.BLUE}{wrapped}{C.RESET}")
+    out.append("")
+    return out
+
+
 # ─────────────────────────────────────────── formateo final
 def format_answer(answer, index):
     if not answer.get("sufficient_information", False):
-        return (
+        base = (
             f"\n{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n"
             f"{C.BOLD}{C.BLUE}  INFORMACIÓN INSUFICIENTE{C.RESET}\n"
             f"{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n\n"
             f"  {answer.get('answer','La información no está disponible en las guías proporcionadas.')}\n"
         )
+        extra = _followup_lines(answer)
+        return base + ("\n" + "\n".join(extra) if extra else "")
 
     lines = []
     lines.append(f"\n{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}")
@@ -205,7 +228,7 @@ def format_answer(answer, index):
                 {"status": status, "sentence": sentence, "grades": grades})
 
     if not order:
-        return "\n".join(lines)
+        return "\n".join(lines + _followup_lines(answer))
 
     lines.append(f"{C.GRAY}{'─'*WIDTH}{C.RESET}")
     lines.append(f"{C.BOLD}  FUENTES{C.RESET} {C.DIM}({len(order)}){C.RESET}")
@@ -237,4 +260,5 @@ def format_answer(answer, index):
             lines.append(f"      {C.DIM}(sección consultada · sin cita literal localizable){C.RESET}")
         lines.append("")
 
+    lines += _followup_lines(answer)
     return "\n".join(lines)
