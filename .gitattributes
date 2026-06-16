@@ -1,0 +1,18 @@
+# Normaliza saltos de línea: el repo guarda LF; en checkout cada quien usa los suyos.
+* text=auto eol=lf
+
+# Código y texto -> siempre LF
+*.py    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.toml  text eol=lf
+*.json  text eol=lf
+*.jsonl text eol=lf
+*.lock  text eol=lf
+
+# Binarios -> que git no toque los finales de línea
+*.pdf   binary
+*.docx  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
