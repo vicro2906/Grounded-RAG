@@ -6,7 +6,7 @@ from openai import OpenAI
 # La consola de Windows usa cp1252 por defecto y rompe al imprimir acentos,
 # 'µ' o las cajas '═'/'─' de las fuentes. Forzamos UTF-8 en la salida.
 try:
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 except (AttributeError, ValueError):
     pass
 from qdrant_client import QdrantClient
@@ -54,10 +54,8 @@ def build_context(context:list):
     return chunk_index,final_context
 
 
-def generate_answer(query:str,context: str):
-    """Makes a call to the llm in order to get the answer conditioned on the retrieved data"""
-    
-    sys_prompt = """
+# Prompt de sistema reutilizable (lo usan tanto main.py como graph.py).
+SYS_PROMPT = """
     Eres un asistente clínico especializado en el manejo del VIH. Respondes preguntas médicas utilizando EXCLUSIVAMENTE la información de los fragmentos de guías clínicas que te proporciona el sistema RAG.
 
     REGLAS CLÍNICAS:
@@ -78,10 +76,10 @@ def generate_answer(query:str,context: str):
     11. Para cada fragmento usado, copia en "cita_textual" la frase EXACTA Y LITERAL del fragmento que respalda tu afirmación, carácter por carácter, sin reescribirla, resumirla ni corregirla. Debe poder encontrarse tal cual dentro del texto del fragmento.
 
     PREGUNTAS DE SEGUIMIENTO:
-    12. Genera EXACTAMENTE 3 preguntas de seguimiento ("preguntas_seguimiento") que un clínico podría plantear de forma natural justo después de esta consulta.
+    12. Solo cuando "informacion_suficiente" sea true, genera EXACTAMENTE 3 preguntas de seguimiento ("preguntas_seguimiento") que un clínico podría plantear de forma natural justo después de esta consulta.
     13. Cada pregunta debe: (a) ser específica y clínicamente útil; (b) abordar un aspecto NO resuelto ya en tu respuesta (profundizar en un matiz, un escenario clínico contiguo, monitorización, interacciones, manejo alternativo, etc.); (c) poder responderse previsiblemente con guías clínicas de VIH (GeSIDA/SPNS). NO formules preguntas de cultura general ni que dependan de datos del paciente concreto que no se han aportado.
     14. Redáctalas breves, autocontenidas, en español y terminadas en "?". No las numeres ni les añadas prefijos.
-    15. Genera las 3 preguntas también cuando "informacion_suficiente" sea false (relacionadas con el tema consultado).
+    15. Cuando "informacion_suficiente" sea false, devuelve "preguntas_seguimiento" como una lista vacía []. Las preguntas de seguimiento deben relacionarse siempre con la respuesta dada; si no hay respuesta, no se plantean.
 
     FORMATO DE SALIDA:
     Devuelve EXCLUSIVAMENTE un objeto JSON válido, sin texto antes ni después y sin envolverlo en bloques de código:
@@ -94,10 +92,13 @@ def generate_answer(query:str,context: str):
     ],
     "preguntas_seguimiento": ["¿…?", "¿…?", "¿…?"]
     }
-    Si "informacion_suficiente" es false, "fragmentos_usados" debe ser una lista vacía (pero "preguntas_seguimiento" debe contener igualmente las 3 preguntas).
+    Si "informacion_suficiente" es false, tanto "fragmentos_usados" como "preguntas_seguimiento" deben ser listas vacías [].
     """
-    
-    prompt = f"""
+
+
+def build_user_prompt(query: str, context: str) -> str:
+    """Prompt de usuario con el contexto numerado y la pregunta clínica."""
+    return f"""
     CONTEXTO (fragmentos de guías clínicas sobre VIH,numerados):
 
     {context}
@@ -107,6 +108,13 @@ def generate_answer(query:str,context: str):
 
     Responde siguiendo las reglas del sistema y devuelve únicamente el objeto JSON especificado.
     """
+
+
+def generate_answer(query:str,context: str):
+    """Makes a call to the llm in order to get the answer conditioned on the retrieved data"""
+
+    sys_prompt = SYS_PROMPT
+    prompt = build_user_prompt(query, context)
     ANSWER_SCHEMA = {
         "name": "clinical_answer",
         "strict": True,

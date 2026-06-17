@@ -190,14 +190,14 @@ def _followup_lines(answer) -> list:
 # ─────────────────────────────────────────── formateo final
 def format_answer(answer, index):
     if not answer.get("sufficient_information", False):
-        base = (
+        # Sin respuesta no se plantean preguntas de seguimiento: estas deben
+        # relacionarse siempre con la respuesta dada.
+        return (
             f"\n{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n"
             f"{C.BOLD}{C.BLUE}  INFORMACIÓN INSUFICIENTE{C.RESET}\n"
             f"{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n\n"
             f"  {answer.get('answer','La información no está disponible en las guías proporcionadas.')}\n"
         )
-        extra = _followup_lines(answer)
-        return base + ("\n" + "\n".join(extra) if extra else "")
 
     lines = []
     lines.append(f"\n{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}")
