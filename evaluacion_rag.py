@@ -30,7 +30,7 @@ warnings.filterwarnings(
 )
 
 # --- Tu pipeline existente, sin tocar ---
-from main import retrieve, build_context, generate_answer
+from rag import retrieve, build_context, generate_answer
 
 # --- RAGAS ---
 from ragas import EvaluationDataset, evaluate
