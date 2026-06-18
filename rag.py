@@ -31,6 +31,11 @@ from fastembed import SparseTextEmbedding
 COLLECTION_DENSA   = "guias_vih"            # colección original (solo denso)
 COLLECTION_HIBRIDA = "guias_vih_hibrida"    # denso + sparse BM25 (Fase 2)
 
+# Modelos LLM (centralizados): la respuesta clínica final usa un modelo potente
+# (la calidad es crítica); el rephrasing es una tarea simple y va con uno barato.
+MODELO_GENERACION = "gpt-4o"
+MODELO_REPHRASE   = "gpt-4o-mini"
+
 _bm25 = None
 def _get_bm25() -> SparseTextEmbedding:
     """Carga perezosa del modelo BM25 (se instancia/descarga una sola vez)."""
@@ -113,6 +118,64 @@ def retrieve_rerank(query: str, top_k: int = 5, candidates: int = 20) -> list:
     cand = retrieve_hibrido(query, top_k=candidates, prefetch_limit=30)
     return rerank(query, cand, top_k=top_k)
 
+
+# ---------------------------------------------------------------------------
+# REPHRASING — preprocesado de la consulta para mejorar la recuperación.
+#   Reescribe la pregunta SIN añadir contenido nuevo y normaliza los términos:
+#   como las guías usan tanto siglas como nombres completos, incluye AMBAS formas
+#   (p.ej. "bictegravir (BIC)") para casar con el texto recuperable.
+# ---------------------------------------------------------------------------
+from typing import cast
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel
+from abreviaturas import ABREVIATURAS
+
+_LISTA_ABREV = "\n".join(f"{sigla} = {nombre}" for sigla, nombre in ABREVIATURAS.items())
+
+_REPHRASE_SYS = f"""Eres un componente de PREPROCESADO de consultas para un buscador (retriever) sobre guías clínicas de VIH (GeSIDA). Reescribe la pregunta del usuario para que el buscador la entienda mejor. NO la respondas.
+
+REGLAS:
+1. No añadas información clínica nueva (fármacos, dosis, cifras, criterios) que no esté en la pregunta original, y no cambies su significado ni intención.
+2. Aclara la redacción si es ambigua o coloquial, manteniéndola concisa y en español, como una sola consulta.
+3. NORMALIZACIÓN DE TÉRMINOS (lo más importante): para CUALQUIER fármaco o término que aparezca en la lista de abreviaturas de abajo (esté escrito en la pregunta como sigla o como nombre completo), escríbelo incluyendo SIEMPRE AMBAS formas, con el patrón «nombre completo (SIGLA)». Ejemplos: "bictegravir" -> "bictegravir (BIC)"; "TAF" -> "tenofovir alafenamida (TAF)"; "terapia dual" no se toca si no está en la lista. Solo aplica a los términos de la lista; no inventes siglas.
+
+LISTA DE ABREVIATURAS (SIGLA = nombre):
+{_LISTA_ABREV}
+
+Devuelve únicamente la consulta reescrita."""
+
+
+class _ConsultaReescrita(BaseModel):
+    query_reescrita: str
+
+
+_rephrase_llm = None
+def _get_rephrase_llm():
+    """Carga perezosa del LLM de rephrasing (salida estructurada)."""
+    global _rephrase_llm
+    if _rephrase_llm is None:
+        _rephrase_llm = ChatOpenAI(model=MODELO_REPHRASE, temperature=0).with_structured_output(
+            _ConsultaReescrita, method="json_schema", strict=True
+        )
+    return _rephrase_llm
+
+
+def rephrase(query: str) -> str:
+    """Reescribe la consulta para el retriever (sin añadir info) e incluye ambas
+    formas —nombre completo + sigla— de los términos conocidos. Devuelve la
+    consulta reescrita; ante cualquier fallo, devuelve la original."""
+    try:
+        out = cast(_ConsultaReescrita,
+                   _get_rephrase_llm().invoke([("system", _REPHRASE_SYS), ("human", query)]))
+        return out.query_reescrita.strip() or query
+    except Exception:
+        return query
+
+
+def buscar(query: str, top_k: int = 5) -> list:
+    """Pipeline de recuperación completo (Fase 2 + 3): rephrase -> híbrido -> reranker."""
+    return retrieve_rerank(rephrase(query), top_k=top_k)
+
 def build_context(context:list): 
     """Builds a formatted text out of the chunks retrieved"""
     final_context = ""
@@ -163,7 +226,10 @@ SYS_PROMPT = """
     "preguntas_seguimiento": ["¿…?", "¿…?", "¿…?"]
     }
     Si "informacion_suficiente" es false, tanto "fragmentos_usados" como "preguntas_seguimiento" deben ser listas vacías [].
-    """
+
+    ABREVIATURAS DE LAS GUÍAS (forman parte de las guías; NO son conocimiento externo):
+    Trata cada sigla y su nombre completo como EL MISMO término. Si el contexto usa la sigla (p.ej. «BIC») y la pregunta el nombre completo («bictegravir»), o al revés, son el mismo fármaco/término y debes responder usando ese fragmento. Lista (SIGLA = nombre):
+    """ + _LISTA_ABREV
 
 
 def build_user_prompt(query: str, context: str) -> str:
@@ -215,7 +281,7 @@ def generate_answer(query:str,context: str):
         },
     }
     response = client.chat.completions.create(
-        model= "gpt-4o-mini",
+        model= MODELO_GENERACION,
         messages = [{"role": "system", "content": sys_prompt},
                     {"role": "user", "content": prompt}],
         temperature = 0.2,

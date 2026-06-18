@@ -4,7 +4,7 @@ main.py — Punto de entrada: orquesta el RAG clínico (guías VIH) con LangGrap
 Encadena como nodos de un grafo las funciones del pipeline (rag.py) y el formateo
 de evidencias (evidencias.py), para poder auditar cada paso en LangSmith.
 
-Flujo:   question ─▶ retrieve ─▶ rerank ─▶ generate ─▶ evidence ─▶ output
+Flujo:   question ─▶ rephrase ─▶ retrieve ─▶ rerank ─▶ generate ─▶ evidence ─▶ output
 
 Trazado (LangSmith):
     Se activa automáticamente SOLO si defines LANGSMITH_API_KEY en .env. Entonces
@@ -37,7 +37,8 @@ if TRACING:
 
 # --- Pipeline RAG (funciones de recuperación/generación y clientes) ---
 import rag  # crea los clientes OpenAI/Qdrant al importarse
-from rag import retrieve_hibrido, rerank, build_context, SYS_PROMPT, build_user_prompt
+from rag import (rephrase, retrieve_hibrido, rerank, build_context,
+                 SYS_PROMPT, build_user_prompt, MODELO_GENERACION)
 from evidencias import format_answer
 
 # --- Trazado fino de las llamadas a OpenAI (tokens, latencia) SIN modificar rag.py ---
@@ -75,7 +76,7 @@ class ClinicalAnswer(BaseModel):
     follow_up_questions: list[str]
 
 
-_structured_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2).with_structured_output(
+_structured_llm = ChatOpenAI(model=MODELO_GENERACION, temperature=0.2).with_structured_output(
     ClinicalAnswer, method="json_schema", strict=True
 )
 
@@ -93,7 +94,8 @@ class InputState(TypedDict):
 
 
 class RAGState(TypedDict):
-    question: str            # entrada del usuario
+    question: str            # entrada del usuario (original; se usa para generar)
+    search_query: str        # pregunta reescrita/normalizada para el retriever (rephrase)
     candidates: list         # payloads recuperados (híbrido, ~20) antes de reordenar
     contexts: list           # payloads finales tras el reranker (top 5)
     chunk_index: dict        # {nº: chunk} para citar fuentes (build_context)
@@ -106,15 +108,20 @@ class RAGState(TypedDict):
 # NODOS — cada uno envuelve una de tus funciones existentes.
 #   Reciben el estado completo y devuelven SOLO las claves que producen.
 # ===========================================================================
+def node_rephrase(state: RAGState) -> dict:
+    """question -> consulta reescrita/normalizada para el retriever (no añade info)."""
+    return {"search_query": rephrase(state["question"])}
+
+
 def node_retrieve(state: RAGState) -> dict:
-    """question -> ~20 candidatos por búsqueda híbrida (denso + BM25)."""
-    candidates = retrieve_hibrido(state["question"], top_k=20, prefetch_limit=30)
+    """search_query -> ~20 candidatos por búsqueda híbrida (denso + BM25)."""
+    candidates = retrieve_hibrido(state["search_query"], top_k=20, prefetch_limit=30)
     return {"candidates": candidates}
 
 
 def node_rerank(state: RAGState) -> dict:
     """candidatos -> top 5 reordenados por el cross-encoder + contexto numerado."""
-    contexts = rerank(state["question"], state["candidates"], top_k=5)
+    contexts = rerank(state["search_query"], state["candidates"], top_k=5)
     chunk_index, formatted_context = build_context(contexts)
     return {
         "contexts": contexts,
@@ -140,16 +147,18 @@ def node_evidence(state: RAGState) -> dict:
 
 
 # ===========================================================================
-# GRAFO:  START ─▶ retrieve ─▶ rerank ─▶ generate ─▶ evidence ─▶ END
+# GRAFO:  START ─▶ rephrase ─▶ retrieve ─▶ rerank ─▶ generate ─▶ evidence ─▶ END
 # ===========================================================================
 def build_graph():
     builder = StateGraph(RAGState, input_schema=InputState)
+    builder.add_node("rephrase", node_rephrase)
     builder.add_node("retrieve", node_retrieve)
     builder.add_node("rerank", node_rerank)
     builder.add_node("generate", node_generate)
     builder.add_node("evidence", node_evidence)
 
-    builder.add_edge(START, "retrieve")
+    builder.add_edge(START, "rephrase")
+    builder.add_edge("rephrase", "retrieve")
     builder.add_edge("retrieve", "rerank")
     builder.add_edge("rerank", "generate")
     builder.add_edge("generate", "evidence")
