@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastembed>=0.8.0",
     "langchain-community<0.4",
     "langgraph>=1.2.5",
     "langsmith>=0.8.16",

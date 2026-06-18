@@ -24,7 +24,7 @@ try:
 except (AttributeError, ValueError):
     pass
 
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -37,7 +37,7 @@ if TRACING:
 
 # --- Pipeline RAG (funciones de recuperación/generación y clientes) ---
 import rag  # crea los clientes OpenAI/Qdrant al importarse
-from rag import retrieve, build_context, SYS_PROMPT, build_user_prompt
+from rag import retrieve_hibrido, build_context, SYS_PROMPT, build_user_prompt
 from evidencias import format_answer
 
 # --- Trazado fino de las llamadas a OpenAI (tokens, latencia) SIN modificar rag.py ---
@@ -81,11 +81,18 @@ _structured_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2).with_structur
 
 
 # ===========================================================================
-# ESTADO — lo que viaja por el grafo. Cada nodo lee unas claves y escribe otras.
-#   total=False => no hace falta rellenar todas las claves de golpe; cada nodo
-#   devuelve solo las que produce y LangGraph las fusiona en el estado.
+# ESTADO
+#   InputState: lo único que hay que pasar a app.invoke() -> la pregunta.
+#   RAGState:   estado interno completo que viaja por el grafo. Las claves son
+#               requeridas (cada nodo las va rellenando), de modo que acceder a
+#               state["..."] sea seguro a ojos del analizador de tipos. Los nodos
+#               devuelven solo las claves que producen y LangGraph las fusiona.
 # ===========================================================================
-class RAGState(TypedDict, total=False):
+class InputState(TypedDict):
+    question: str            # entrada del usuario
+
+
+class RAGState(TypedDict):
     question: str            # entrada del usuario
     contexts: list           # payloads recuperados de Qdrant (retrieve)
     chunk_index: dict        # {nº: chunk} para citar fuentes (build_context)
@@ -99,8 +106,8 @@ class RAGState(TypedDict, total=False):
 #   Reciben el estado completo y devuelven SOLO las claves que producen.
 # ===========================================================================
 def node_retrieve(state: RAGState) -> dict:
-    """question -> contextos de Qdrant + índice de citas + contexto numerado."""
-    contexts = retrieve(state["question"])
+    """question -> contextos de Qdrant (híbrido) + índice de citas + contexto numerado."""
+    contexts = retrieve_hibrido(state["question"])
     chunk_index, formatted_context = build_context(contexts)
     return {
         "contexts": contexts,
@@ -115,7 +122,7 @@ def node_generate(state: RAGState) -> dict:
         ("system", SYS_PROMPT),
         ("human", build_user_prompt(state["question"], state["formatted_context"])),
     ]
-    answer = _structured_llm.invoke(mensajes)          # objeto ClinicalAnswer validado
+    answer = cast(ClinicalAnswer, _structured_llm.invoke(mensajes))  # validado por Pydantic
     return {"answer": answer.model_dump()}             # -> dict idéntico al de antes
 
 
@@ -129,7 +136,7 @@ def node_evidence(state: RAGState) -> dict:
 # GRAFO:  START ─▶ retrieve ─▶ generate ─▶ evidence ─▶ END
 # ===========================================================================
 def build_graph():
-    builder = StateGraph(RAGState)
+    builder = StateGraph(RAGState, input_schema=InputState)
     builder.add_node("retrieve", node_retrieve)
     builder.add_node("generate", node_generate)
     builder.add_node("evidence", node_evidence)

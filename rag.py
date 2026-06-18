@@ -25,6 +25,20 @@ qdrant = QdrantClient(
     api_key = QDRANT_API_KEY
 )
 
+# --- Búsqueda híbrida (denso semántico + sparse léxico BM25) ---
+from fastembed import SparseTextEmbedding
+
+COLLECTION_DENSA   = "guias_vih"            # colección original (solo denso)
+COLLECTION_HIBRIDA = "guias_vih_hibrida"    # denso + sparse BM25 (Fase 2)
+
+_bm25 = None
+def _get_bm25() -> SparseTextEmbedding:
+    """Carga perezosa del modelo BM25 (se instancia/descarga una sola vez)."""
+    global _bm25
+    if _bm25 is None:
+        _bm25 = SparseTextEmbedding("Qdrant/bm25")
+    return _bm25
+
 def get_embedding(text: str):
     """
     Transforms the query into an embedding for latter comparison with the vector database
@@ -33,13 +47,39 @@ def get_embedding(text: str):
     return response.data[0].embedding
 
 def retrieve(query: str,top_k: int = 5):
-    """retrieves the context identified similar to the question"""
+    """retrieves the context identified similar to the question (solo denso)"""
     query_vector = get_embedding(query)
-    response = qdrant.query_points(collection_name = "guias_vih",
+    response = qdrant.query_points(collection_name = COLLECTION_DENSA,
                              query = models.NearestQuery(nearest= query_vector),
                              limit= top_k,
                              with_payload = True)
-    
+
+    return [r.payload for r in response.points]
+
+
+def retrieve_hibrido(query: str, top_k: int = 5, prefetch_limit: int = 20):
+    """Búsqueda híbrida: combina recuperación semántica (vector denso) y léxica
+    (sparse BM25) y las fusiona con RRF en Qdrant. De cada rama trae
+    prefetch_limit candidatos y devuelve los payloads de los top_k fusionados."""
+    dense_vec = get_embedding(query)
+    sparse = next(iter(_get_bm25().query_embed(query)))
+    response = qdrant.query_points(
+        collection_name=COLLECTION_HIBRIDA,
+        prefetch=[
+            models.Prefetch(query=dense_vec, using="dense", limit=prefetch_limit),
+            models.Prefetch(
+                query=models.SparseVector(
+                    indices=sparse.indices.tolist(),
+                    values=sparse.values.tolist(),
+                ),
+                using="bm25",
+                limit=prefetch_limit,
+            ),
+        ],
+        query=models.FusionQuery(fusion=models.Fusion.RRF),
+        limit=top_k,
+        with_payload=True,
+    )
     return [r.payload for r in response.points]
 
 def build_context(context:list): 

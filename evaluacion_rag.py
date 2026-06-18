@@ -30,7 +30,10 @@ warnings.filterwarnings(
 )
 
 # --- Tu pipeline existente, sin tocar ---
-from rag import retrieve, build_context, generate_answer
+from rag import retrieve, retrieve_hibrido, build_context, generate_answer
+
+# Retriever a evaluar. Cambia a `retrieve` para reproducir el baseline denso (F0).
+RETRIEVER = retrieve_hibrido
 
 # --- RAGAS ---
 from ragas import EvaluationDataset, evaluate
@@ -103,6 +106,17 @@ GOLDEN_SET = [
     {"pregunta": "Si un paciente suprimido cambia de TAR por toxicidad, ¿qué parámetros deben monitorizarse tras el cambio para confirmar eficacia?", "referencia": "Tras el cambio debe confirmarse el mantenimiento de la supresión virológica mediante la carga viral (por ejemplo, en torno a las 4 semanas y después de forma periódica), vigilar la resolución de la toxicidad que motivó el cambio, evaluar la tolerancia y la adherencia al nuevo régimen y vigilar posibles nuevas interacciones o efectos adversos."},
     {"pregunta": "Si un paciente tiene interacciones farmacológicas complejas por polifarmacia, ¿qué clases de antirretrovirales suelen ser más fáciles de manejar?", "referencia": "Los inhibidores de integrasa sin potenciador (dolutegravir, bictegravir, raltegravir) presentan menos interacciones que las pautas potenciadas con ritonavir o cobicistat (inhibidores enzimáticos potentes) o que los ITINN (inductores/inhibidores enzimáticos), por lo que son la opción más fácil de manejar en pacientes polimedicados. Debe recordarse la interacción de los INI con cationes y antiácidos."},
     {"pregunta": "Si un paciente presenta rebote viral tras años de supresión, ¿cuáles son las tres causas principales que deben investigarse antes de cambiar TAR?", "referencia": "Las tres causas principales son: (1) adherencia subóptima o interrupciones del tratamiento, que es la más frecuente; (2) interacciones farmacológicas o problemas de absorción que reducen las concentraciones del TAR; y (3) resistencia viral, preexistente/archivada o de nueva aparición. Debe confirmarse el rebote y realizarse un estudio de resistencias antes de cambiar el tratamiento."},
+
+    # --- Preguntas con TÉRMINOS ESPECÍFICOS (fármacos, dosis, siglas) para
+    #     estresar la búsqueda léxica/híbrida (BM25). Añadidas en Fase 2.
+    {"pregunta": "¿Qué inhibidores de la integrasa no pueden administrarse junto con rifampicina?", "referencia": "Con rifampicina no pueden administrarse elvitegravir/cobicistat, bictegravir (BIC) ni cabotegravir (CAB), ni raltegravir en su pauta de 1200 mg/24h; tampoco los ITINN distintos de efavirenz (RPV, ETR, DOR) ni los inhibidores de la proteasa. Entre los inhibidores de integrasa, las excepciones utilizables son dolutegravir (con ajuste de dosis) y raltegravir 800 mg/12h."},
+    {"pregunta": "¿A qué dosis debe administrarse dolutegravir cuando se combina con rifampicina?", "referencia": "Con rifampicina, dolutegravir debe administrarse a 50 mg cada 12 horas (en pacientes sin resistencia a inhibidores de integrasa), manteniendo esa dosis hasta 2 semanas después de finalizar la rifampicina."},
+    {"pregunta": "¿Está recomendado el uso de tenofovir alafenamida (TAF) junto con rifampicina?", "referencia": "No. No está recomendado el uso de tenofovir alafenamida (TAF) con rifampicina porque la rifampicina reduce sus concentraciones plasmáticas; como ITIAN con rifampicina se prefieren TDF, ABC, 3TC o FTC."},
+    {"pregunta": "¿Qué resultado de la prueba HLA-B*5701 contraindica el abacavir?", "referencia": "Un resultado positivo de HLA-B*5701 contraindica el abacavir: no debe prescribirse ABC si la prueba es positiva, por el alto riesgo de reacción de hipersensibilidad."},
+    {"pregunta": "¿Cuál es el tercer fármaco de elección junto a rifampicina en la coinfección tuberculosis-VIH?", "referencia": "El tercer fármaco de elección junto a rifampicina es efavirenz (EFV) a dosis estándar (A-I); como alternativas se recomiendan raltegravir 800 mg/12h o dolutegravir 50 mg/12h."},
+    {"pregunta": "¿Cuál es la pauta de TAR de inicio preferente en un paciente con VIH y tuberculosis en tratamiento con rifampicina?", "referencia": "La pauta preferente es tenofovir DF/emtricitabina (o abacavir/lamivudina) a dosis habituales más efavirenz a dosis de 600 mg/día (A-I)."},
+    {"pregunta": "¿En qué pacientes es adecuado el cambio a la terapia dual dolutegravir más lamivudina (DTG + 3TC)?", "referencia": "El cambio a dolutegravir + lamivudina (DTG + 3TC) es una opción adecuada en pacientes con replicación viral suprimida que quieran simplificar o evitar efectos adversos, sin resistencia conocida o sospechada a lamivudina ni a inhibidores de integrasa (y sin coinfección por VHB)."},
+    {"pregunta": "¿A qué dosis se administra raltegravir cuando se combina con rifampicina?", "referencia": "Con rifampicina, raltegravir se administra a dosis de 800 mg cada 12 horas."},
 ]
 
 
@@ -119,7 +133,7 @@ def construir_dataset(golden_set: list[dict]) -> EvaluationDataset:
             continue
 
         # --- tu pipeline, idéntico a main() ---
-        payloads = retrieve(pregunta)                       # list[dict]
+        payloads = RETRIEVER(pregunta)                      # list[dict]
         _, contexto_formateado = build_context(payloads)
         salida = generate_answer(pregunta, contexto_formateado)
 
