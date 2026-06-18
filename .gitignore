@@ -13,3 +13,6 @@ wheels/
 .env
 # Logs
 *.log
+
+# LangGraph dev server (caché local)
+.langgraph_api/
