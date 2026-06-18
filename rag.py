@@ -82,6 +82,37 @@ def retrieve_hibrido(query: str, top_k: int = 5, prefetch_limit: int = 20):
     )
     return [r.payload for r in response.points]
 
+
+# --- Reranker (cross-encoder local, multilingüe) ---
+RERANKER_MODEL = "jinaai/jina-reranker-v2-base-multilingual"
+_reranker = None
+def _get_reranker():
+    """Carga perezosa del cross-encoder (se descarga/instancia una sola vez)."""
+    global _reranker
+    if _reranker is None:
+        from fastembed.rerank.cross_encoder import TextCrossEncoder
+        _reranker = TextCrossEncoder(RERANKER_MODEL)
+    return _reranker
+
+
+def rerank(query: str, payloads: list, top_k: int = 5) -> list:
+    """Reordena los chunks con un cross-encoder que mira la pregunta y el texto
+    JUNTOS (mucho más preciso que el coseno del retriever) y devuelve los top_k.
+    A diferencia del bi-encoder, suele entender abreviaturas (p.ej. DTG=dolutegravir)."""
+    if not payloads:
+        return []
+    docs = [p["text"] for p in payloads]
+    scores = list(_get_reranker().rerank(query, docs))
+    ordenados = sorted(zip(scores, payloads), key=lambda x: x[0], reverse=True)
+    return [p for _, p in ordenados[:top_k]]
+
+
+def retrieve_rerank(query: str, top_k: int = 5, candidates: int = 20) -> list:
+    """Pipeline de recuperación de Fase 2: recupera 'candidates' por búsqueda
+    híbrida y los reordena con el cross-encoder, devolviendo los top_k mejores."""
+    cand = retrieve_hibrido(query, top_k=candidates, prefetch_limit=30)
+    return rerank(query, cand, top_k=top_k)
+
 def build_context(context:list): 
     """Builds a formatted text out of the chunks retrieved"""
     final_context = ""

@@ -4,7 +4,7 @@ main.py — Punto de entrada: orquesta el RAG clínico (guías VIH) con LangGrap
 Encadena como nodos de un grafo las funciones del pipeline (rag.py) y el formateo
 de evidencias (evidencias.py), para poder auditar cada paso en LangSmith.
 
-Flujo:   question ─▶ retrieve ─▶ generate ─▶ evidence ─▶ output
+Flujo:   question ─▶ retrieve ─▶ rerank ─▶ generate ─▶ evidence ─▶ output
 
 Trazado (LangSmith):
     Se activa automáticamente SOLO si defines LANGSMITH_API_KEY en .env. Entonces
@@ -37,7 +37,7 @@ if TRACING:
 
 # --- Pipeline RAG (funciones de recuperación/generación y clientes) ---
 import rag  # crea los clientes OpenAI/Qdrant al importarse
-from rag import retrieve_hibrido, build_context, SYS_PROMPT, build_user_prompt
+from rag import retrieve_hibrido, rerank, build_context, SYS_PROMPT, build_user_prompt
 from evidencias import format_answer
 
 # --- Trazado fino de las llamadas a OpenAI (tokens, latencia) SIN modificar rag.py ---
@@ -94,7 +94,8 @@ class InputState(TypedDict):
 
 class RAGState(TypedDict):
     question: str            # entrada del usuario
-    contexts: list           # payloads recuperados de Qdrant (retrieve)
+    candidates: list         # payloads recuperados (híbrido, ~20) antes de reordenar
+    contexts: list           # payloads finales tras el reranker (top 5)
     chunk_index: dict        # {nº: chunk} para citar fuentes (build_context)
     formatted_context: str   # contexto numerado [1]/[2]… para el LLM
     answer: dict             # respuesta estructurada del LLM (generate_answer)
@@ -106,8 +107,14 @@ class RAGState(TypedDict):
 #   Reciben el estado completo y devuelven SOLO las claves que producen.
 # ===========================================================================
 def node_retrieve(state: RAGState) -> dict:
-    """question -> contextos de Qdrant (híbrido) + índice de citas + contexto numerado."""
-    contexts = retrieve_hibrido(state["question"])
+    """question -> ~20 candidatos por búsqueda híbrida (denso + BM25)."""
+    candidates = retrieve_hibrido(state["question"], top_k=20, prefetch_limit=30)
+    return {"candidates": candidates}
+
+
+def node_rerank(state: RAGState) -> dict:
+    """candidatos -> top 5 reordenados por el cross-encoder + contexto numerado."""
+    contexts = rerank(state["question"], state["candidates"], top_k=5)
     chunk_index, formatted_context = build_context(contexts)
     return {
         "contexts": contexts,
@@ -133,16 +140,18 @@ def node_evidence(state: RAGState) -> dict:
 
 
 # ===========================================================================
-# GRAFO:  START ─▶ retrieve ─▶ generate ─▶ evidence ─▶ END
+# GRAFO:  START ─▶ retrieve ─▶ rerank ─▶ generate ─▶ evidence ─▶ END
 # ===========================================================================
 def build_graph():
     builder = StateGraph(RAGState, input_schema=InputState)
     builder.add_node("retrieve", node_retrieve)
+    builder.add_node("rerank", node_rerank)
     builder.add_node("generate", node_generate)
     builder.add_node("evidence", node_evidence)
 
     builder.add_edge(START, "retrieve")
-    builder.add_edge("retrieve", "generate")
+    builder.add_edge("retrieve", "rerank")
+    builder.add_edge("rerank", "generate")
     builder.add_edge("generate", "evidence")
     builder.add_edge("evidence", END)
     return builder.compile()

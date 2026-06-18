@@ -30,10 +30,13 @@ warnings.filterwarnings(
 )
 
 # --- Tu pipeline existente, sin tocar ---
-from rag import retrieve, retrieve_hibrido, build_context, generate_answer
+from rag import retrieve, retrieve_hibrido, retrieve_rerank, build_context, generate_answer
 
-# Retriever a evaluar. Cambia a `retrieve` para reproducir el baseline denso (F0).
-RETRIEVER = retrieve_hibrido
+# Retriever a evaluar:
+#   retrieve         -> denso (baseline F0)
+#   retrieve_hibrido -> híbrido (denso + BM25)
+#   retrieve_rerank  -> híbrido + reranker cross-encoder (pipeline Fase 2 completo)
+RETRIEVER = retrieve_rerank
 
 # --- RAGAS ---
 from ragas import EvaluationDataset, evaluate
