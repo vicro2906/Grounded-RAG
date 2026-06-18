@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "chatbot_vih": "./main.py:app"
+  },
+  "env": ".env"
+}
