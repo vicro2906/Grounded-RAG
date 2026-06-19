@@ -332,11 +332,15 @@ def _get_validate_llm():
 
 
 def validar(question: str, answer: dict, formatted_context: str) -> dict:
-    """Valida relevancia + grounding de la respuesta contra el contexto. Si la
-    respuesta declara información insuficiente, no hay nada que validar (apta).
-    Ante un fallo del juez, no bloquea (apta) pero lo deja constar en el motivo."""
+    """Valida relevancia + grounding de la respuesta contra el contexto. Devuelve
+    {apto, error, motivo, afirmaciones_no_respaldadas}:
+      - error=True  -> NO se pudo validar (fallo técnico del juez); el grafo no la
+                       mostrará y avisará del problema (no se 'falla abierto').
+      - sufficient_information=False -> nada que validar (apta).
+    """
     if not answer.get("sufficient_information", False):
-        return {"apto": True, "motivo": "Información insuficiente declarada; nada que validar.",
+        return {"apto": True, "error": False,
+                "motivo": "Información insuficiente declarada; nada que validar.",
                 "afirmaciones_no_respaldadas": []}
     try:
         v = cast(_Validacion, _get_validate_llm().invoke([
@@ -344,8 +348,9 @@ def validar(question: str, answer: dict, formatted_context: str) -> dict:
             ("human", f"PREGUNTA:\n{question}\n\nCONTEXTO:\n{formatted_context}\n\n"
                       f"RESPUESTA A VALIDAR:\n{answer.get('answer', '')}"),
         ]))
-        return {"apto": v.apto, "motivo": v.motivo,
+        return {"apto": v.apto, "error": False, "motivo": v.motivo,
                 "afirmaciones_no_respaldadas": v.afirmaciones_no_respaldadas}
     except Exception:
-        return {"apto": True, "motivo": "Validador no disponible; no se pudo verificar.",
+        return {"apto": False, "error": True,
+                "motivo": "No se pudo contactar con el servicio de validación (error técnico).",
                 "afirmaciones_no_respaldadas": []}

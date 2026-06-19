@@ -88,6 +88,11 @@ MENSAJE_NO_VALIDADA = (
     "para esta consulta. Te sugiero reformular la pregunta o revisar directamente las "
     "guías; es posible que la información no esté disponible en ellas."
 )
+MENSAJE_ERROR_VALIDACION = (
+    "No he podido validar la respuesta por un problema técnico (no se pudo contactar "
+    "con el servicio de validación). Por seguridad no la muestro sin verificar; "
+    "inténtalo de nuevo en unos momentos."
+)
 
 
 # ===========================================================================
@@ -171,14 +176,23 @@ def node_evidence(state: RAGState) -> dict:
 
 
 def node_fallback(state: RAGState) -> dict:
-    """Se agotaron las iteraciones sin respuesta apta: no se muestra la respuesta."""
+    """No se muestra la respuesta. El mensaje depende del motivo: error técnico del
+    validador vs. no se logró una respuesta apta tras los reintentos."""
+    if state["validacion"].get("error", False):
+        return {"output": MENSAJE_ERROR_VALIDACION}
     return {"output": MENSAJE_NO_VALIDADA}
 
 
 def route_validacion(state: RAGState) -> str:
-    """Tras validar: si es apta -> formatear; si no y quedan intentos -> regenerar;
-    si se agotaron -> salida segura (no mostrar respuesta no validada)."""
-    if state["validacion"].get("apto", False):
+    """Tras validar:
+      - error técnico del validador -> fallback (no reintentar; el juez está caído).
+      - apta -> formatear (evidence).
+      - no apta y quedan intentos -> regenerar con feedback.
+      - no apta y agotados -> fallback (salida segura)."""
+    v = state["validacion"]
+    if v.get("error", False):
+        return "fallback"
+    if v.get("apto", False):
         return "evidence"
     if state.get("intentos", 0) >= MAX_ITER:
         return "fallback"
