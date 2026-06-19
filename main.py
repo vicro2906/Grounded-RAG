@@ -4,7 +4,8 @@ main.py — Punto de entrada: orquesta el RAG clínico (guías VIH) con LangGrap
 Encadena como nodos de un grafo las funciones del pipeline (rag.py) y el formateo
 de evidencias (evidencias.py), para poder auditar cada paso en LangSmith.
 
-Flujo:   question ─▶ rephrase ─▶ retrieve ─▶ rerank ─▶ generate ─▶ evidence ─▶ output
+Flujo:   question ─▶ rephrase ─▶ retrieve ─▶ rerank ─▶ generate ⇄ validate ─▶ evidence ─▶ output
+         (validate reintenta generate si no es apta, hasta MAX_ITER; si se agota, salida segura)
 
 Trazado (LangSmith):
     Se activa automáticamente SOLO si defines LANGSMITH_API_KEY en .env. Entonces
@@ -37,7 +38,7 @@ if TRACING:
 
 # --- Pipeline RAG (funciones de recuperación/generación y clientes) ---
 import rag  # crea los clientes OpenAI/Qdrant al importarse
-from rag import (rephrase, retrieve_hibrido, rerank, build_context,
+from rag import (rephrase, retrieve_hibrido, rerank, build_context, validar,
                  SYS_PROMPT, build_user_prompt, MODELO_GENERACION)
 from evidencias import format_answer
 
@@ -80,6 +81,14 @@ _structured_llm = ChatOpenAI(model=MODELO_GENERACION, temperature=0.2).with_stru
     ClinicalAnswer, method="json_schema", strict=True
 )
 
+# Bucle de validación: nº máximo de generaciones (inicial + reintentos).
+MAX_ITER = 2
+MENSAJE_NO_VALIDADA = (
+    "No he podido elaborar una respuesta suficientemente fundamentada en las guías "
+    "para esta consulta. Te sugiero reformular la pregunta o revisar directamente las "
+    "guías; es posible que la información no esté disponible en ellas."
+)
+
 
 # ===========================================================================
 # ESTADO
@@ -101,6 +110,8 @@ class RAGState(TypedDict):
     chunk_index: dict        # {nº: chunk} para citar fuentes (build_context)
     formatted_context: str   # contexto numerado [1]/[2]… para el LLM
     answer: dict             # respuesta estructurada del LLM (generate_answer)
+    intentos: int            # nº de generaciones hechas (para el bucle de validación)
+    validacion: dict         # veredicto del validador {apto, motivo, ...}
     output: str              # texto final formateado con fuentes (format_answer)
 
 
@@ -131,13 +142,26 @@ def node_rerank(state: RAGState) -> dict:
 
 
 def node_generate(state: RAGState) -> dict:
-    """contexto + pregunta -> respuesta estructurada (validada) del LLM."""
-    mensajes = [
-        ("system", SYS_PROMPT),
-        ("human", build_user_prompt(state["question"], state["formatted_context"])),
-    ]
+    """contexto + pregunta -> respuesta estructurada del LLM. Si hubo un intento
+    previo rechazado por el validador, inyecta su feedback para corregir."""
+    user = build_user_prompt(state["question"], state["formatted_context"])
+    val = state.get("validacion")
+    if val and not val.get("apto", True):
+        user += (
+            f"\n\n    REINTENTO: tu respuesta anterior fue RECHAZADA por el validador. "
+            f"Motivo: {val.get('motivo', '')}. Corrige la respuesta para que cada afirmación "
+            f"esté respaldada por el contexto y aborde la pregunta. Si el contexto no respalda "
+            f"la respuesta, marca informacion_suficiente=false."
+        )
+    mensajes = [("system", SYS_PROMPT), ("human", user)]
     answer = cast(ClinicalAnswer, _structured_llm.invoke(mensajes))  # validado por Pydantic
-    return {"answer": answer.model_dump()}             # -> dict idéntico al de antes
+    return {"answer": answer.model_dump(), "intentos": state.get("intentos", 0) + 1}
+
+
+def node_validate(state: RAGState) -> dict:
+    """Juez de relevancia + grounding sobre la respuesta. Marca apto / no apto."""
+    veredicto = validar(state["question"], state["answer"], state["formatted_context"])
+    return {"validacion": veredicto}
 
 
 def node_evidence(state: RAGState) -> dict:
@@ -146,8 +170,25 @@ def node_evidence(state: RAGState) -> dict:
     return {"output": output}
 
 
+def node_fallback(state: RAGState) -> dict:
+    """Se agotaron las iteraciones sin respuesta apta: no se muestra la respuesta."""
+    return {"output": MENSAJE_NO_VALIDADA}
+
+
+def route_validacion(state: RAGState) -> str:
+    """Tras validar: si es apta -> formatear; si no y quedan intentos -> regenerar;
+    si se agotaron -> salida segura (no mostrar respuesta no validada)."""
+    if state["validacion"].get("apto", False):
+        return "evidence"
+    if state.get("intentos", 0) >= MAX_ITER:
+        return "fallback"
+    return "generate"
+
+
 # ===========================================================================
-# GRAFO:  START ─▶ rephrase ─▶ retrieve ─▶ rerank ─▶ generate ─▶ evidence ─▶ END
+# GRAFO:  START ─▶ rephrase ─▶ retrieve ─▶ rerank ─▶ generate ─▶ validate ─┬─▶ evidence ─▶ END
+#                                              ▲ (reintento)  │            ├─▶ generate (bucle)
+#                                              └──────────────┘            └─▶ fallback ─▶ END
 # ===========================================================================
 def build_graph():
     builder = StateGraph(RAGState, input_schema=InputState)
@@ -155,14 +196,21 @@ def build_graph():
     builder.add_node("retrieve", node_retrieve)
     builder.add_node("rerank", node_rerank)
     builder.add_node("generate", node_generate)
+    builder.add_node("validate", node_validate)
     builder.add_node("evidence", node_evidence)
+    builder.add_node("fallback", node_fallback)
 
     builder.add_edge(START, "rephrase")
     builder.add_edge("rephrase", "retrieve")
     builder.add_edge("retrieve", "rerank")
     builder.add_edge("rerank", "generate")
-    builder.add_edge("generate", "evidence")
+    builder.add_edge("generate", "validate")
+    # Bucle: validate -> evidence (apto) | generate (reintento) | fallback (agotado)
+    builder.add_conditional_edges("validate", route_validacion,
+                                  {"evidence": "evidence", "generate": "generate",
+                                   "fallback": "fallback"})
     builder.add_edge("evidence", END)
+    builder.add_edge("fallback", END)
     return builder.compile()
 
 

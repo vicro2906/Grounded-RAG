@@ -35,6 +35,7 @@ COLLECTION_HIBRIDA = "guias_vih_hibrida"    # denso + sparse BM25 (Fase 2)
 # (la calidad es crítica); el rephrasing es una tarea simple y va con uno barato.
 MODELO_GENERACION = "gpt-4o"
 MODELO_REPHRASE   = "gpt-4o-mini"
+MODELO_VALIDACION = "gpt-4o-mini"   # juez de grounding/relevancia (red de seguridad)
 
 _bm25 = None
 def _get_bm25() -> SparseTextEmbedding:
@@ -294,3 +295,57 @@ def generate_answer(query:str,context: str):
         raise ValueError("El modelo no devolvió contenido (content=None)")
     else:
         return json.loads(content)
+
+
+# ---------------------------------------------------------------------------
+# VALIDACIÓN — juez LLM que comprueba RELEVANCIA (la respuesta aborda la pregunta)
+# y FIDELIDAD/grounding (toda afirmación está respaldada por el contexto, aunque no
+# sea cita literal). Es la red de seguridad anti-alucinaciones. La integridad de las
+# citas literales NO se valida aquí: ya la maneja evidencias.format_answer.
+# ---------------------------------------------------------------------------
+_VALIDATE_SYS = f"""Eres un VALIDADOR de respuestas clínicas sobre VIH. Recibes una PREGUNTA, un CONTEXTO (fragmentos de guías) y una RESPUESTA. Decide si la respuesta es APTA según DOS criterios:
+
+1. RELEVANCIA: la respuesta aborda realmente lo que pregunta el usuario.
+2. FIDELIDAD (grounding): TODA afirmación clínica de la respuesta está respaldada por el CONTEXTO, aunque no sea una cita literal (basta con apoyo semántico claro). Marca NO apta si hay afirmaciones inventadas, no respaldadas por el contexto o que lo contradigan.
+
+Juzga ÚNICAMENTE con el contexto proporcionado, sin usar conocimiento externo. Las abreviaturas de las guías cuentan como respaldo válido (p.ej. si el contexto dice «BIC» y la respuesta «bictegravir», es el mismo fármaco). Lista (SIGLA = nombre):
+{_LISTA_ABREV}
+
+Devuelve: apto (bool), motivo (explicación breve) y afirmaciones_no_respaldadas (lista de frases de la respuesta sin apoyo en el contexto; vacía si es apta)."""
+
+
+class _Validacion(BaseModel):
+    apto: bool
+    motivo: str
+    afirmaciones_no_respaldadas: list[str]
+
+
+_validate_llm = None
+def _get_validate_llm():
+    """Carga perezosa del LLM-juez (salida estructurada)."""
+    global _validate_llm
+    if _validate_llm is None:
+        _validate_llm = ChatOpenAI(model=MODELO_VALIDACION, temperature=0).with_structured_output(
+            _Validacion, method="json_schema", strict=True
+        )
+    return _validate_llm
+
+
+def validar(question: str, answer: dict, formatted_context: str) -> dict:
+    """Valida relevancia + grounding de la respuesta contra el contexto. Si la
+    respuesta declara información insuficiente, no hay nada que validar (apta).
+    Ante un fallo del juez, no bloquea (apta) pero lo deja constar en el motivo."""
+    if not answer.get("sufficient_information", False):
+        return {"apto": True, "motivo": "Información insuficiente declarada; nada que validar.",
+                "afirmaciones_no_respaldadas": []}
+    try:
+        v = cast(_Validacion, _get_validate_llm().invoke([
+            ("system", _VALIDATE_SYS),
+            ("human", f"PREGUNTA:\n{question}\n\nCONTEXTO:\n{formatted_context}\n\n"
+                      f"RESPUESTA A VALIDAR:\n{answer.get('answer', '')}"),
+        ]))
+        return {"apto": v.apto, "motivo": v.motivo,
+                "afirmaciones_no_respaldadas": v.afirmaciones_no_respaldadas}
+    except Exception:
+        return {"apto": True, "motivo": "Validador no disponible; no se pudo verificar.",
+                "afirmaciones_no_respaldadas": []}

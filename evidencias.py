@@ -7,10 +7,12 @@ import difflib
 
 WIDTH = 72
 
-# ANSI — pon todo a "" si tu terminal no soporta color
+# La respuesta formateada es DATO que consumen varios frontends (LangGraph Studio,
+# una futura web, la API), no solo el terminal. Por eso NO se incrustan códigos de
+# color ANSI: ensuciarían cualquier consumidor que no sea una terminal. El color es
+# una cuestión de presentación al imprimir, no del contenido.
 class C:
-    RESET = "\033[0m"; BOLD = "\033[1m"; DIM = "\033[2m"
-    BLUE = "\033[36m"; GREEN = "\033[32m"; GRAY = "\033[90m"; YELLOW = "\033[33m"
+    RESET = BOLD = DIM = BLUE = GREEN = GRAY = YELLOW = ""
 
 # ───────────────────────────────────────────────────────── normalización
 _EMPH = re.compile(r"[_*`]+")
