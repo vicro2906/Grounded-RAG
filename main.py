@@ -1,25 +1,27 @@
 """
-main.py — Punto de entrada: orquesta el RAG clínico (guías VIH) con LangGraph + LangSmith.
+main.py — Entry point: orchestrates the clinical HIV RAG with LangGraph + LangSmith.
 
-Encadena como nodos de un grafo las funciones del pipeline (rag.py) y el formateo
-de evidencias (evidencias.py), para poder auditar cada paso en LangSmith.
+Chains the pipeline functions (rag.py) and the evidence formatting (evidence.py) as
+graph nodes so every step can be audited in LangSmith.
 
-Flujo:   question ─▶ rephrase ─▶ retrieve ─▶ rerank ─▶ generate ⇄ validate ─▶ evidence ─▶ output
-         (validate reintenta generate si no es apta, hasta MAX_ITER; si se agota, salida segura)
+Flow:   question -> rephrase -> retrieve -> rerank -> generate <-> validate -> evidence -> output
+        - rephrase classifies the domain: if the question is unrelated to HIV, it stops
+          here (direct message) and skips retrieve/rerank/generate/validate.
+        - validate retries generate when not valid, up to MAX_ITER; if exhausted, safe exit.
 
-Trazado (LangSmith):
-    Se activa automáticamente SOLO si defines LANGSMITH_API_KEY en .env. Entonces
-    cada invocación del grafo y cada llamada a OpenAI (chat y embeddings) aparece
-    en https://smith.langchain.com dentro del proyecto LANGSMITH_PROJECT.
-    Sin esa clave, el grafo funciona igual pero sin enviar trazas.
+Tracing (LangSmith):
+    Enabled automatically ONLY if LANGSMITH_API_KEY is set in .env. Then each graph run
+    and each OpenAI call (chat and embeddings) shows up at https://smith.langchain.com
+    inside the LANGSMITH_PROJECT project. Without that key the graph works the same but
+    sends no traces.
 
-Uso:
-    python main.py            # modo interactivo
+Usage:
+    python main.py            # interactive mode
 """
 import os
 import sys
 
-# La consola de Windows usa cp1252 por defecto y rompe acentos/cajas. Forzamos UTF-8.
+# The Windows console uses cp1252 by default and breaks accents/boxes. Force UTF-8.
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 except (AttributeError, ValueError):
@@ -30,22 +32,21 @@ from typing import TypedDict, cast
 from dotenv import load_dotenv
 load_dotenv()
 
-# --- LangSmith: activar trazado solo si hay API key (si no, no estorba) ---
+# --- LangSmith: enable tracing only if there is an API key (otherwise stays out of the way) ---
 TRACING = bool(os.environ.get("LANGSMITH_API_KEY"))
 if TRACING:
     os.environ.setdefault("LANGSMITH_TRACING", "true")
     os.environ.setdefault("LANGSMITH_PROJECT", "chatbot-vih")
 
-# --- Pipeline RAG (funciones de recuperación/generación y clientes) ---
-import rag  # crea los clientes OpenAI/Qdrant al importarse
-from rag import (rephrase, retrieve_hibrido, rerank, build_context, validar,
-                 SYS_PROMPT, build_user_prompt, MODELO_GENERACION)
-from evidencias import format_answer
+# --- RAG pipeline (retrieval/generation functions and clients) ---
+import rag  # creates the OpenAI/Qdrant clients on import
+from rag import (refine, retrieve_hybrid, rerank, build_context, validate,
+                 SYS_PROMPT, build_user_prompt, GENERATION_MODEL)
+from evidence import format_answer
 
-# --- Trazado fino de las llamadas a OpenAI (tokens, latencia) SIN modificar rag.py ---
-# Las funciones de rag leen `rag.client` en tiempo de ejecución, así que reasignar
-# aquí su versión "envuelta" por LangSmith basta para que retrieve() y los embeddings
-# queden trazados dentro del run del grafo.
+# --- Fine-grained tracing of OpenAI calls (tokens, latency) WITHOUT modifying rag.py ---
+# rag's functions read `rag.client` at call time, so reassigning here its LangSmith-wrapped
+# version is enough for retrieve() and the embeddings to be traced inside the graph run.
 if TRACING:
     try:
         from langsmith.wrappers import wrap_openai
@@ -59,11 +60,10 @@ from pydantic import BaseModel
 
 
 # ===========================================================================
-# GENERACIÓN ESTRUCTURADA (LangChain) — sustituye al response_format crudo de
-# main.py. Por debajo usa el MISMO mecanismo de OpenAI (Structured Outputs,
-# json_schema estricto), pero con validación Pydantic y trazado nativo en
-# LangSmith. Devolvemos .model_dump() para que el resto del pipeline siga
-# recibiendo el mismo dict de siempre (uso idéntico, no se toca evidencias.py).
+# STRUCTURED GENERATION (LangChain) — replaces the raw response_format. Under the
+# hood it uses the SAME OpenAI mechanism (Structured Outputs, strict json_schema),
+# but with Pydantic validation and native LangSmith tracing. We return .model_dump()
+# so the rest of the pipeline keeps receiving the same dict as before.
 # ===========================================================================
 class SourceUsed(BaseModel):
     ref: int
@@ -77,66 +77,87 @@ class ClinicalAnswer(BaseModel):
     follow_up_questions: list[str]
 
 
-_structured_llm = ChatOpenAI(model=MODELO_GENERACION, temperature=0.2).with_structured_output(
+_structured_llm = ChatOpenAI(model=GENERATION_MODEL, temperature=0.2).with_structured_output(
     ClinicalAnswer, method="json_schema", strict=True
 )
 
-# Bucle de validación: nº máximo de generaciones (inicial + reintentos).
+# Validation loop: max number of generations (initial + retries).
 MAX_ITER = 2
-MENSAJE_NO_VALIDADA = (
+
+# --- User-facing messages (kept in Spanish: shown to the user) ---
+MSG_NOT_VALIDATED = (
     "No he podido elaborar una respuesta suficientemente fundamentada en las guías "
     "para esta consulta. Te sugiero reformular la pregunta o revisar directamente las "
     "guías; es posible que la información no esté disponible en ellas."
 )
-MENSAJE_ERROR_VALIDACION = (
+MSG_VALIDATION_ERROR = (
     "No he podido validar la respuesta por un problema técnico (no se pudo contactar "
     "con el servicio de validación). Por seguridad no la muestro sin verificar; "
     "inténtalo de nuevo en unos momentos."
 )
+MSG_OUT_OF_DOMAIN = (
+    "Soy un asistente centrado en las guías clínicas de VIH (GeSIDA) y solo puedo "
+    "ayudarte con consultas sobre el manejo clínico del VIH. ¿Tienes alguna pregunta "
+    "sobre ese tema?"
+)
 
 
 # ===========================================================================
-# ESTADO
-#   InputState: lo único que hay que pasar a app.invoke() -> la pregunta.
-#   RAGState:   estado interno completo que viaja por el grafo. Las claves son
-#               requeridas (cada nodo las va rellenando), de modo que acceder a
-#               state["..."] sea seguro a ojos del analizador de tipos. Los nodos
-#               devuelven solo las claves que producen y LangGraph las fusiona.
+# STATE
+#   InputState: the only thing to pass to app.invoke() -> the question.
+#   RAGState:   full internal state that flows through the graph. Keys are required
+#               (each node fills them in) so that accessing state["..."] is safe for
+#               the type checker. Nodes return only the keys they produce and LangGraph
+#               merges them.
 # ===========================================================================
 class InputState(TypedDict):
-    question: str            # entrada del usuario
+    question: str            # user input
 
 
 class RAGState(TypedDict):
-    question: str            # entrada del usuario (original; se usa para generar)
-    search_query: str        # pregunta reescrita/normalizada para el retriever (rephrase)
-    candidates: list         # payloads recuperados (híbrido, ~20) antes de reordenar
-    contexts: list           # payloads finales tras el reranker (top 5)
-    chunk_index: dict        # {nº: chunk} para citar fuentes (build_context)
-    formatted_context: str   # contexto numerado [1]/[2]… para el LLM
-    answer: dict             # respuesta estructurada del LLM (generate_answer)
-    intentos: int            # nº de generaciones hechas (para el bucle de validación)
-    validacion: dict         # veredicto del validador {apto, motivo, ...}
-    output: str              # texto final formateado con fuentes (format_answer)
+    question: str            # user input (original; used for generation)
+    in_domain: bool          # is the question within the HIV domain? (classified in rephrase)
+    search_query: str        # rewritten/normalized query for the retriever (rephrase)
+    candidates: list         # retrieved payloads (hybrid, ~20) before reranking
+    contexts: list           # final payloads after the reranker (top 5)
+    chunk_index: dict        # {n: chunk} for source citation (build_context)
+    formatted_context: str   # numbered context [1]/[2]… for the LLM
+    answer: dict             # structured answer from the LLM (generate_answer)
+    attempts: int            # number of generations done (for the validation loop)
+    validation: dict         # validator verdict {is_valid, reason, ...}
+    output: str              # final formatted text with sources (format_answer)
 
 
 # ===========================================================================
-# NODOS — cada uno envuelve una de tus funciones existentes.
-#   Reciben el estado completo y devuelven SOLO las claves que producen.
+# NODES — each one wraps a pipeline function.
+#   They receive the full state and return ONLY the keys they produce.
 # ===========================================================================
 def node_rephrase(state: RAGState) -> dict:
-    """question -> consulta reescrita/normalizada para el retriever (no añade info)."""
-    return {"search_query": rephrase(state["question"])}
+    """question -> rewritten/normalized query + domain classification (single LLM call).
+    If the question is unrelated to HIV, the pipeline is short-circuited (see
+    route_domain): retrieve, rerank, generate and validate are skipped."""
+    r = refine(state["question"])
+    return {"search_query": r["query"], "in_domain": r["in_domain"]}
+
+
+def node_out_of_domain(state: RAGState) -> dict:
+    """Question outside the HIV domain: direct message, no retrieval or generation."""
+    return {"output": MSG_OUT_OF_DOMAIN}
+
+
+def route_domain(state: RAGState) -> str:
+    """After rephrase: in domain -> retrieve; out of domain -> message and end."""
+    return "retrieve" if state.get("in_domain", True) else "out_of_domain"
 
 
 def node_retrieve(state: RAGState) -> dict:
-    """search_query -> ~20 candidatos por búsqueda híbrida (denso + BM25)."""
-    candidates = retrieve_hibrido(state["search_query"], top_k=20, prefetch_limit=30)
+    """search_query -> ~20 candidates via hybrid search (dense + BM25)."""
+    candidates = retrieve_hybrid(state["search_query"], top_k=20, prefetch_limit=30)
     return {"candidates": candidates}
 
 
 def node_rerank(state: RAGState) -> dict:
-    """candidatos -> top 5 reordenados por el cross-encoder + contexto numerado."""
+    """candidates -> top 5 reordered by the cross-encoder + numbered context."""
     contexts = rerank(state["search_query"], state["candidates"], top_k=5)
     chunk_index, formatted_context = build_context(contexts)
     return {
@@ -147,66 +168,68 @@ def node_rerank(state: RAGState) -> dict:
 
 
 def node_generate(state: RAGState) -> dict:
-    """contexto + pregunta -> respuesta estructurada del LLM. Si hubo un intento
-    previo rechazado por el validador, inyecta su feedback para corregir."""
+    """context + question -> structured answer from the LLM. If a previous attempt was
+    rejected by the validator, inject its feedback to correct it."""
     user = build_user_prompt(state["question"], state["formatted_context"])
-    val = state.get("validacion")
-    if val and not val.get("apto", True):
+    val = state.get("validation")
+    if val and not val.get("is_valid", True):
         user += (
             f"\n\n    REINTENTO: tu respuesta anterior fue RECHAZADA por el validador. "
-            f"Motivo: {val.get('motivo', '')}. Corrige la respuesta para que cada afirmación "
+            f"Motivo: {val.get('reason', '')}. Corrige la respuesta para que cada afirmación "
             f"esté respaldada por el contexto y aborde la pregunta. Si el contexto no respalda "
             f"la respuesta, marca informacion_suficiente=false."
         )
-    mensajes = [("system", SYS_PROMPT), ("human", user)]
-    answer = cast(ClinicalAnswer, _structured_llm.invoke(mensajes))  # validado por Pydantic
-    return {"answer": answer.model_dump(), "intentos": state.get("intentos", 0) + 1}
+    messages = [("system", SYS_PROMPT), ("human", user)]
+    answer = cast(ClinicalAnswer, _structured_llm.invoke(messages))  # validated by Pydantic
+    return {"answer": answer.model_dump(), "attempts": state.get("attempts", 0) + 1}
 
 
 def node_validate(state: RAGState) -> dict:
-    """Juez de relevancia + grounding sobre la respuesta. Marca apto / no apto."""
-    veredicto = validar(state["question"], state["answer"], state["formatted_context"])
-    return {"validacion": veredicto}
+    """Relevance + grounding judge over the answer. Marks valid / not valid."""
+    verdict = validate(state["question"], state["answer"], state["formatted_context"])
+    return {"validation": verdict}
 
 
 def node_evidence(state: RAGState) -> dict:
-    """respuesta + índice -> texto final con panel de fuentes y seguimiento."""
+    """answer + index -> final text with the sources and follow-up panel."""
     output = format_answer(state["answer"], state["chunk_index"])
     return {"output": output}
 
 
 def node_fallback(state: RAGState) -> dict:
-    """No se muestra la respuesta. El mensaje depende del motivo: error técnico del
-    validador vs. no se logró una respuesta apta tras los reintentos."""
-    if state["validacion"].get("error", False):
-        return {"output": MENSAJE_ERROR_VALIDACION}
-    return {"output": MENSAJE_NO_VALIDADA}
+    """The answer is not shown. The message depends on the reason: technical error of
+    the validator vs. no valid answer reached after the retries."""
+    if state["validation"].get("error", False):
+        return {"output": MSG_VALIDATION_ERROR}
+    return {"output": MSG_NOT_VALIDATED}
 
 
-def route_validacion(state: RAGState) -> str:
-    """Tras validar:
-      - error técnico del validador -> fallback (no reintentar; el juez está caído).
-      - apta -> formatear (evidence).
-      - no apta y quedan intentos -> regenerar con feedback.
-      - no apta y agotados -> fallback (salida segura)."""
-    v = state["validacion"]
+def route_validation(state: RAGState) -> str:
+    """After validating:
+      - technical error of the validator -> fallback (do not retry; the judge is down).
+      - valid -> format (evidence).
+      - not valid and attempts left -> regenerate with feedback.
+      - not valid and exhausted -> fallback (safe exit)."""
+    v = state["validation"]
     if v.get("error", False):
         return "fallback"
-    if v.get("apto", False):
+    if v.get("is_valid", False):
         return "evidence"
-    if state.get("intentos", 0) >= MAX_ITER:
+    if state.get("attempts", 0) >= MAX_ITER:
         return "fallback"
     return "generate"
 
 
 # ===========================================================================
-# GRAFO:  START ─▶ rephrase ─▶ retrieve ─▶ rerank ─▶ generate ─▶ validate ─┬─▶ evidence ─▶ END
-#                                              ▲ (reintento)  │            ├─▶ generate (bucle)
-#                                              └──────────────┘            └─▶ fallback ─▶ END
+# GRAPH:  START -> rephrase -┬- out of domain -> out_of_domain -> END
+#                           └- in domain -> retrieve -> rerank -> generate -> validate -┬-> evidence -> END
+#                                                          ▲ (retry)  │                 ├-> generate (loop)
+#                                                          └──────────┘                 └-> fallback -> END
 # ===========================================================================
 def build_graph():
     builder = StateGraph(RAGState, input_schema=InputState)
     builder.add_node("rephrase", node_rephrase)
+    builder.add_node("out_of_domain", node_out_of_domain)
     builder.add_node("retrieve", node_retrieve)
     builder.add_node("rerank", node_rerank)
     builder.add_node("generate", node_generate)
@@ -215,12 +238,15 @@ def build_graph():
     builder.add_node("fallback", node_fallback)
 
     builder.add_edge(START, "rephrase")
-    builder.add_edge("rephrase", "retrieve")
+    # Domain guardrail: in -> retrieve; out -> direct message (cuts the pipeline)
+    builder.add_conditional_edges("rephrase", route_domain,
+                                  {"retrieve": "retrieve", "out_of_domain": "out_of_domain"})
+    builder.add_edge("out_of_domain", END)
     builder.add_edge("retrieve", "rerank")
     builder.add_edge("rerank", "generate")
     builder.add_edge("generate", "validate")
-    # Bucle: validate -> evidence (apto) | generate (reintento) | fallback (agotado)
-    builder.add_conditional_edges("validate", route_validacion,
+    # Loop: validate -> evidence (valid) | generate (retry) | fallback (exhausted)
+    builder.add_conditional_edges("validate", route_validation,
                                   {"evidence": "evidence", "generate": "generate",
                                    "fallback": "fallback"})
     builder.add_edge("evidence", END)
@@ -228,7 +254,7 @@ def build_graph():
     return builder.compile()
 
 
-# Grafo compilado y reutilizable (lo importan tanto el CLI como la evaluación).
+# Compiled, reusable graph (imported by both the CLI and the evaluation).
 app = build_graph()
 
 

@@ -1,14 +1,14 @@
 """
-abreviaturas.py — Diccionario SIGLA -> nombre completo de las guías GeSIDA de VIH.
+abbreviations.py — ABBREVIATION -> full name dictionary from the GeSIDA HIV guidelines.
 
-Lo usa el nodo de rephrasing (rag.rephrase) para normalizar los términos de la
-consulta: como las guías usan TANTO siglas como nombres completos (p.ej. "DTG"
-aparece mucho más que "dolutegravir", pero ambos existen), la consulta se reescribe
-incluyendo AMBAS formas para casar con el texto recuperable.
+Used by the rephrase node (rag.refine) to normalize query terms: since the guidelines
+use both abbreviations and full names (e.g. "DTG" appears far more often than
+"dolutegravir", but both exist), the query is rewritten including BOTH forms to match
+the retrievable text. The values stay in Spanish because they are guideline terms.
 """
 
-ABREVIATURAS = {
-    # --- Fármacos antirretrovirales ---
+ABBREVIATIONS = {
+    # --- Antiretroviral drugs ---
     "3TC": "lamivudina",
     "ABC": "abacavir",
     "ATV": "atazanavir",
@@ -35,7 +35,7 @@ ABREVIATURAS = {
     "TFV": "tenofovir",
     "XTC": "lamivudina o emtricitabina",
 
-    # --- Clases de fármacos ---
+    # --- Drug classes ---
     "FAR": "fármacos antirretrovirales",
     "INI": "inhibidor de la integrasa",
     "IP": "inhibidor de la proteasa",
@@ -43,7 +43,7 @@ ABREVIATURAS = {
     "ITIAN": "inhibidor de la transcriptasa inversa análogo de nucleósido/nucleótido",
     "ITINN": "inhibidor de la transcriptasa inversa no nucleósido",
 
-    # --- Conceptos clínicos ---
+    # --- Clinical concepts ---
     "AP": "acción prolongada",
     "BID": "dos veces al día",
     "QD": "una vez al día",
@@ -63,7 +63,7 @@ ABREVIATURAS = {
     "NPJ": "neumonía por Pneumocystis jirovecii",
     "PrEP": "profilaxis preexposición",
 
-    # --- Virus ---
+    # --- Viruses ---
     "VIH-1": "virus de la inmunodeficiencia humana tipo 1",
     "VIH-2": "virus de la inmunodeficiencia humana tipo 2",
     "VHA": "virus de la hepatitis A",

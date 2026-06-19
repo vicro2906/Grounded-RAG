@@ -1,5 +1,5 @@
 """
-evidencias.py — formateo de respuesta + panel de FUENTES para el RAG de VIH.
+evidence.py — answer formatting + SOURCES panel for the HIV RAG.
 """
 import re
 import textwrap
@@ -7,29 +7,29 @@ import difflib
 
 WIDTH = 72
 
-# La respuesta formateada es DATO que consumen varios frontends (LangGraph Studio,
-# una futura web, la API), no solo el terminal. Por eso NO se incrustan códigos de
-# color ANSI: ensuciarían cualquier consumidor que no sea una terminal. El color es
-# una cuestión de presentación al imprimir, no del contenido.
+# The formatted answer is DATA consumed by several frontends (LangGraph Studio, a
+# future web app, the API), not just the terminal. That is why NO ANSI color codes are
+# embedded: they would clutter any non-terminal consumer. Color is a presentation
+# concern at print time, not part of the content.
 class C:
     RESET = BOLD = DIM = BLUE = GREEN = GRAY = YELLOW = ""
 
-# ───────────────────────────────────────────────────────── normalización
+# ───────────────────────────────────────────────────────── normalization
 _EMPH = re.compile(r"[_*`]+")
 _WS   = re.compile(r"\s+")
 _GRADE_INLINE = re.compile(r"\(\s*[ABC]\s*-?\s*I{1,3}\s*\)")   # (A-I) (AII) (A- I)…
 _PUNCT = re.compile(r"[^\w\s]", re.UNICODE)
 
 def _norm(s: str) -> str:
-    """Minúsculas; quita énfasis markdown, grados en línea y puntuación; colapsa
-    espacios. Se quita puntuación para que diferencias de coma/espacio/errata no
-    bloqueen una coincidencia real."""
+    """Lowercase; strip markdown emphasis, inline grades and punctuation; collapse
+    whitespace. Punctuation is removed so comma/space/typo differences do not block a
+    real match."""
     s = _EMPH.sub("", s or "")
     s = _GRADE_INLINE.sub(" ", s)
     s = _PUNCT.sub(" ", s)
     return _WS.sub(" ", s).strip().lower()
 
-# ───────────────────────────────────────────────────────── grados
+# ───────────────────────────────────────────────────────── grades
 _GRADE = re.compile(r"\(\s*([ABC])\s*-?\s*(I{1,3})\s*\)")
 
 def _grades_in(text: str) -> list:
@@ -40,19 +40,19 @@ def _grades_in(text: str) -> list:
             out.append(g)
     return out
 
-# ─────────────────────────────────────────── partir un bloque en recomendaciones
+# ─────────────────────────────────────────── split a block into recommendations
 _ITEM_SPLIT = re.compile(r"(?:^|\n)\s*(?:\d+[.\-]|•|-)\s+", re.MULTILINE)
 
 def _strip_breadcrumb(text: str) -> str:
-    """Quita la miga de pan inicial 'A > B > C' con la que empieza cada chunk."""
+    """Remove the leading breadcrumb 'A > B > C' that each chunk starts with."""
     parts = text.split("\n\n", 1)
     if parts and " > " in parts[0] and len(parts[0]) < 300:
         return parts[1] if len(parts) > 1 else ""
     return text
 
 def split_items(chunk: dict) -> list:
-    """[{'text': frase, 'grades': [...]}], una por recomendación. Los chunks que
-    no son lista colapsan a un único item."""
+    """[{'text': sentence, 'grades': [...]}], one per recommendation. Chunks that are
+    not a list collapse to a single item."""
     body = _strip_breadcrumb(chunk.get("text", ""))
     pieces = [p.strip() for p in _ITEM_SPLIT.split(body) if p.strip()]
     if len(pieces) <= 1:
@@ -60,11 +60,11 @@ def split_items(chunk: dict) -> list:
         return [{"text": body, "grades": _grades_in(body)}] if body else []
     return [{"text": p, "grades": _grades_in(p)} for p in pieces]
 
-# ─────────────────────────────────────────── grados acotados a la cita
+# ─────────────────────────────────────────── grades scoped to the quote
 def _grades_for_quote(item_text: str, quote: str) -> list:
-    """Dentro del item, conserva solo los grados cuya cláusula está realmente
-    cubierta por la cita (cláusula = tramo que termina en un grado en línea).
-    Si nada encaja, devuelve todos los grados del item."""
+    """Within the item, keep only the grades whose clause is actually covered by the
+    quote (clause = span ending in an inline grade). If nothing matches, return all the
+    grades of the item."""
     nq = _norm(quote)
     segments, last = [], 0
     for m in _GRADE_INLINE.finditer(item_text):
@@ -85,14 +85,14 @@ def _grades_for_quote(item_text: str, quote: str) -> list:
             kept.append(g)
     return kept or _grades_in(item_text)
 
-# ─────────────────────────────────────────── cita -> recomendación
+# ─────────────────────────────────────────── quote -> recommendation
 def attribute(quote: str, chunk: dict):
     """
-    Devuelve (status, frase_a_mostrar, grados):
-      'exact' – la cita aparece literal (tras normalizar) dentro de un item
-      'fuzzy' – la cita encaja por contención (>= .72); se muestra la frase de
-                la guía en vez de la del modelo
-      'miss'  – ningún item encaja; el panel pone una nota discreta
+    Return (status, sentence_to_show, grades):
+      'exact' – the quote appears literally (after normalizing) inside an item
+      'fuzzy' – the quote matches by containment (>= .72); the guideline sentence is
+                shown instead of the model's
+      'miss'  – no item matches; the panel adds a discreet note
     """
     items = split_items(chunk)
     if not items:
@@ -119,14 +119,14 @@ def attribute(quote: str, chunk: dict):
 
     return "miss", "", []
 
-# ─────────────────────────────────────────── etiqueta de sección
+# ─────────────────────────────────────────── section label
 _GENERIC = {"recomendaciones", "recomendaciones:", "recommendations"}
 _NUM_PREFIX = re.compile(r"^\s*(\d+(?:\.\d+)*)\.?\s+(.*)$")
 
 def _breadcrumb_parts(chunk: dict) -> list:
-    """Devuelve la ruta de secciones. Prefiere section_path del payload; si no
-    está, la reconstruye desde la miga de pan 'A > B > C' con la que empieza el
-    texto del chunk (presente en el 100% de los bloques)."""
+    """Return the section path. Prefers section_path from the payload; otherwise
+    reconstructs it from the breadcrumb 'A > B > C' that starts the chunk text
+    (present in 100% of the blocks)."""
     path = chunk.get("section_path") or []
     if path:
         return [re.sub(r"\s+", " ", p).strip() for p in path]
@@ -136,7 +136,7 @@ def _breadcrumb_parts(chunk: dict) -> list:
     return []
 
 def _split_num(part: str):
-    """'3.1. FACTORES...' -> ('3.1', 'FACTORES...'); sin número -> (None, part)."""
+    """'3.1. FACTORES...' -> ('3.1', 'FACTORES...'); without number -> (None, part)."""
     m = _NUM_PREFIX.match(part)
     return (m.group(1), m.group(2).strip()) if m else (None, part.strip())
 
@@ -145,33 +145,33 @@ def section_label(chunk: dict) -> str:
     clean = re.sub(r"^[\d.\s]+", "", heading).strip()
     sec = (chunk.get("section_number") or "").strip()
 
-    # 1) el chunk ya tiene su propio número -> está localizado
+    # 1) the chunk already has its own number -> it is located
     if sec:
         return f"§{sec} · {clean}" if clean else f"§{sec}"
 
-    # 2) heading genérico/sin número (p.ej. RECOMENDACIONES): hace falta el padre
+    # 2) generic/unnumbered heading (e.g. RECOMENDACIONES): the parent is needed
     path = _breadcrumb_parts(chunk)
     if not path:
         return clean
 
-    # hoja = última parte de la ruta; los ancestros la contextualizan
+    # leaf = last part of the path; the ancestors give it context
     leaf = clean or _split_num(path[-1])[1]
     ancestors = path[:-1] if _norm(path[-1]) == _norm(heading) or not clean else path
 
-    # ancestro NUMERADO más cercano -> es el que de verdad desambigua 3.1 vs 4.2
+    # nearest NUMBERED ancestor -> the one that truly disambiguates 3.1 vs 4.2
     for part in reversed(ancestors):
         num, title = _split_num(part)
         if num:
             return f"§{num} {title} › {leaf}"
 
-    # sin ancestro numerado: encadenar lo que haya
+    # no numbered ancestor: chain whatever is available
     chain = " › ".join(_split_num(p)[1] for p in ancestors)
     return f"{chain} › {leaf}" if chain else leaf
 
-# ─────────────────────────────────────────── preguntas de seguimiento
+# ─────────────────────────────────────────── follow-up questions
 def _followup_lines(answer) -> list:
-    """Bloque 'PREGUNTAS DE SEGUIMIENTO' a partir de answer['follow_up_questions'].
-    Devuelve [] si no hay preguntas, para no pintar el panel vacío."""
+    """'PREGUNTAS DE SEGUIMIENTO' block from answer['follow_up_questions']. Returns []
+    if there are no questions, so the empty panel is not drawn."""
     qs = answer.get("follow_up_questions") or []
     qs = [q.strip() for q in qs if isinstance(q, str) and q.strip()]
     if not qs:
@@ -189,24 +189,23 @@ def _followup_lines(answer) -> list:
     return out
 
 
-# ─────────────────────────────────────────── aviso clínico
+# ─────────────────────────────────────────── clinical disclaimer
 _DISCLAIMER_TXT = ("Herramienta de apoyo clínico; no sustituye en ningún caso el "
                    "juicio del profesional sanitario.")
 
 def _disclaimer() -> str:
-    """Aviso discreto al final. Solo se añade cuando hay una respuesta visible:
-    si la información es insuficiente, el sistema no da contenido clínico, así que
-    no aplica."""
+    """Discreet footer. Added only when there is a visible answer: if the information
+    is insufficient the system gives no clinical content, so it does not apply."""
     wrapped = textwrap.fill(_DISCLAIMER_TXT, width=WIDTH - 2,
                             initial_indent="  ", subsequent_indent="  ")
     return f"\n{C.GRAY}{'─'*WIDTH}{C.RESET}\n{C.DIM}{wrapped}{C.RESET}\n"
 
 
-# ─────────────────────────────────────────── formateo final
+# ─────────────────────────────────────────── final formatting
 def format_answer(answer, index):
     if not answer.get("sufficient_information", False):
-        # Sin respuesta no se plantean preguntas de seguimiento: estas deben
-        # relacionarse siempre con la respuesta dada.
+        # With no answer there are no follow-up questions: they must always relate to
+        # a given answer.
         return (
             f"\n{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n"
             f"{C.BOLD}{C.BLUE}  INFORMACIÓN INSUFICIENTE{C.RESET}\n"
@@ -224,7 +223,7 @@ def format_answer(answer, index):
                                        initial_indent="  ", subsequent_indent="  "))
             lines.append("")
 
-    # agrupar por identidad de sección (doc + section_number/heading)
+    # group by section identity (doc + section_number/heading)
     groups, order = {}, []
     for f in answer["sources_used"]:
         chunk = index.get(f["ref"])
