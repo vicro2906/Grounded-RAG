@@ -189,6 +189,19 @@ def _followup_lines(answer) -> list:
     return out
 
 
+# ─────────────────────────────────────────── aviso clínico
+_DISCLAIMER_TXT = ("Herramienta de apoyo clínico; no sustituye en ningún caso el "
+                   "juicio del profesional sanitario.")
+
+def _disclaimer() -> str:
+    """Aviso discreto al final. Solo se añade cuando hay una respuesta visible:
+    si la información es insuficiente, el sistema no da contenido clínico, así que
+    no aplica."""
+    wrapped = textwrap.fill(_DISCLAIMER_TXT, width=WIDTH - 2,
+                            initial_indent="  ", subsequent_indent="  ")
+    return f"\n{C.GRAY}{'─'*WIDTH}{C.RESET}\n{C.DIM}{wrapped}{C.RESET}\n"
+
+
 # ─────────────────────────────────────────── formateo final
 def format_answer(answer, index):
     if not answer.get("sufficient_information", False):
@@ -230,7 +243,7 @@ def format_answer(answer, index):
                 {"status": status, "sentence": sentence, "grades": grades})
 
     if not order:
-        return "\n".join(lines + _followup_lines(answer))
+        return "\n".join(lines + _followup_lines(answer)) + _disclaimer()
 
     lines.append(f"{C.GRAY}{'─'*WIDTH}{C.RESET}")
     lines.append(f"{C.BOLD}  FUENTES{C.RESET} {C.DIM}({len(order)}){C.RESET}")
@@ -263,4 +276,4 @@ def format_answer(answer, index):
         lines.append("")
 
     lines += _followup_lines(answer)
-    return "\n".join(lines)
+    return "\n".join(lines) + _disclaimer()
