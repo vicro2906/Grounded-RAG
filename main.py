@@ -201,7 +201,11 @@ class IterativeState(RAGState, total=False):
 
 
 class GraphState(RAGState, total=False):
-    graph_payloads: list     # chunks from LightRAG entity/relation traversal
+    graph_hl: list           # high-level keywords (-> relations) extracted by the LLM
+    graph_ll: list           # low-level keywords (-> entities) extracted by the LLM
+    graph_entities: list     # entities the cosine/graph search selected (for visibility)
+    graph_relationships: list  # relations the cosine/graph search selected (for visibility)
+    graph_payloads: list     # source chunks gathered from the selected entities/relations
     hybrid_payloads: list    # chunks from our dense+BM25 hybrid complement
     merged: list             # the two sources merged & deduped, before final rerank
 
@@ -249,11 +253,13 @@ def route_domain(state: RAGState, config) -> str:
     }.get(_resolve_mode(config), "retrieve")
 
 
-def route_in_domain(state: RAGState) -> str:
-    """Dedicated graphs only — there is a single retrieval path, so the rephrase branch just
-    decides in-domain vs out-of-domain. The "retrieve" key is mapped by the caller to that
-    graph's actual retrieval entry node."""
-    return "out_of_domain" if not state.get("in_domain", True) else "retrieve"
+def _make_route_in_domain(entries: list):
+    """Dedicated graphs — the rephrase branch only decides in-domain vs out-of-domain. In
+    domain it routes to that graph's retrieval entry node(s): a single node for baseline and
+    iterative, or BOTH parallel entries (graph_keywords + graph_hybrid) for the graph mode."""
+    def route(state: RAGState):
+        return "out_of_domain" if not state.get("in_domain", True) else entries
+    return route
 
 
 def node_retrieve(state: RAGState) -> dict:
@@ -316,23 +322,25 @@ def node_graph_retrieve(state: RAGState) -> dict:
 # ---------------------------------------------------------------------------
 
 # --- Track A (iterative), expanded with a per-sub-question FAN-OUT (Send) ---
-# Each sub-question is its OWN run of iter_retrieve_one, so Studio shows one retrieval (with
-# its own input/output) per sub-question instead of one node looping internally:
-#   iter_plan ─┬─ (single-hop) ─ iter_single ─────────────────────────────┐
-#              └─ (multi-hop)  ─ Send×N ▶ iter_retrieve_one ─ iter_reflect ─┬─ Send×1 ▶ (loop)
-#                                        (parallel, one per sub-question)   └─ iter_rerank ─┐
+# The generation of the sub-questions and their retrieval are SEPARATE nodes, and each
+# sub-question is its OWN run of iter_retrieve_one (Studio shows one retrieval, with its own
+# input/output, per sub-question) instead of one node looping internally:
+#   iter_generate_subquestions ─┬─ (single-hop) ─ iter_single ───────────────────────────┐
+#                               └─ (multi-hop) ─ Send×N ▶ iter_retrieve_one ─ iter_reflect ─┬─ Send×1 ▶ (loop)
+#                                                (parallel, one per sub-question)           └─ iter_rerank ─┐
 #   ...everything converges into generate.  pool/hops accumulate via reducers (see state).
-def node_iter_plan(state: IterativeState) -> dict:
-    """PLAN — generate the sub-questions: decompose the question into normalized sub-queries
-    (or mark it single-hop). They are dispatched one-per-branch by route_iter_plan."""
+def node_iter_generate_subquestions(state: IterativeState) -> dict:
+    """GENERATE SUB-QUESTIONS — decompose the question into normalized sub-queries (or mark it
+    single-hop). This node ONLY generates; the retrieval happens later in iter_retrieve_one.
+    The sub-questions are dispatched one-per-branch by route_iter_generate_subquestions."""
     p = _plan(state["question"])
     return {"is_multihop": p["is_multihop"], "planned": list(p["sub_queries"][:MAX_HOPS]),
             "retrieval_mode": "iterative"}
 
 
-def route_iter_plan(state: IterativeState):
+def route_iter_generate_subquestions(state: IterativeState):
     """Single-hop -> one baseline-style shot. Multi-hop -> FAN OUT: one iter_retrieve_one run
-    per planned sub-question (parallel), each carrying just its own sub-query."""
+    per generated sub-question (parallel), each carrying just its own sub-query."""
     if not state.get("is_multihop"):
         return "iter_single"
     return [Send("iter_retrieve_one", {"subquery": sq}) for sq in (state.get("planned") or [])]
@@ -382,13 +390,30 @@ def node_iter_rerank(state: IterativeState) -> dict:
             "formatted_context": formatted_context}
 
 
-# --- Track B (graph), expanded: traverse -> hybrid -> merge -> rerank ---
-def node_graph_traverse(state: GraphState) -> dict:
-    """TRAVERSE: LightRAG entity/relation traversal (this is where LightRAG's internal LLM
-    extracts keywords) -> source chunks mapped to our payloads. Imported lazily so the other
-    architectures never load LightRAG."""
-    from graph.lightrag_track import graph_traverse
-    return {"graph_payloads": graph_traverse(state["question"]), "retrieval_mode": "graph"}
+# --- Track B (graph), expanded: keywords -> select -> hybrid -> merge -> rerank ---
+# The LightRAG traversal is split so Studio shows what really happens: first the LLM extracts
+# high/low-level keywords; then the vector (cosine) search + graph walk + chunk gathering.
+# (The cosine/nearest-neighbour steps themselves live inside LightRAG's aquery_data and are
+# not separable without forking it, but graph_select surfaces what they selected.) Imported
+# lazily so the other architectures never load LightRAG.
+def node_graph_keywords(state: GraphState) -> dict:
+    """EXTRACT KEYWORDS (LLM): from the question, LightRAG's LLM extracts high-level keywords
+    (-> matched to RELATIONS) and low-level keywords (-> matched to ENTITIES)."""
+    from graph.lightrag_track import graph_extract_keywords
+    kw = graph_extract_keywords(state["question"])
+    return {"graph_hl": kw["hl_keywords"], "graph_ll": kw["ll_keywords"],
+            "retrieval_mode": "graph"}
+
+
+def node_graph_select(state: GraphState) -> dict:
+    """SELECT (vector search + graph walk, NO LLM): cosine similarity of the low-level
+    keywords vs the ENTITY store and high-level vs the RELATION store, walk the graph, and
+    gather the source chunks (via source_id) mapped to our payloads. Also surfaces the
+    selected entities/relations so the traversal is visible in the state."""
+    from graph.lightrag_track import graph_select
+    res = graph_select(state["question"], state.get("graph_hl") or [], state.get("graph_ll") or [])
+    return {"graph_payloads": res["payloads"], "graph_entities": res["entities"],
+            "graph_relationships": res["relationships"]}
 
 
 def node_graph_hybrid(state: GraphState) -> dict:
@@ -540,31 +565,40 @@ def _add_retrieval_expanded(builder: StateGraph, mode: str) -> str:
         builder.add_edge("rerank", "generate")
         return "retrieve"
     if mode == "iterative":
-        # plan -> fan-out one retrieve per sub-question -> reflect ⇄ (fan-out) -> rerank.
-        builder.add_node("iter_plan", node_iter_plan)
+        # generate sub-questions -> fan-out one retrieve per sub-question -> reflect ⇄ rerank.
+        builder.add_node("iter_generate_subquestions", node_iter_generate_subquestions)
         builder.add_node("iter_single", node_iter_single)
         builder.add_node("iter_retrieve_one", node_iter_retrieve_one)
         builder.add_node("iter_reflect", node_iter_reflect)
         builder.add_node("iter_rerank", node_iter_rerank)
         # route functions return Send objects, so we list the reachable targets explicitly.
-        builder.add_conditional_edges("iter_plan", route_iter_plan,
+        builder.add_conditional_edges("iter_generate_subquestions",
+                                      route_iter_generate_subquestions,
                                       ["iter_single", "iter_retrieve_one"])
         builder.add_edge("iter_single", "generate")
         builder.add_edge("iter_retrieve_one", "iter_reflect")  # branches converge on reflect
         builder.add_conditional_edges("iter_reflect", route_iter_reflect,
                                       ["iter_retrieve_one", "iter_rerank"])
         builder.add_edge("iter_rerank", "generate")
-        return "iter_plan"
-    # graph: traverse -> hybrid complement -> merge -> rerank.
-    builder.add_node("graph_traverse", node_graph_traverse)
+        return "iter_generate_subquestions"
+    # graph: TWO parallel retrieval branches from rephrase, merged then reranked:
+    #   rephrase ─┬─ graph_keywords (LLM) ─ graph_select (vector+graph) ─┬─ graph_merge ─ graph_rerank
+    #             └─ graph_hybrid (dense+BM25) ───────────────────────────┘   (defer)
+    # The hybrid branch only needs search_query (not the keywords), so it runs in PARALLEL
+    # with the whole keyword->select chain. Branches write disjoint state keys (no reducer
+    # needed). graph_merge uses defer=True so it runs ONCE, after BOTH branches finish — the
+    # branches have different lengths, and without defer the fan-in node would fire early.
+    builder.add_node("graph_keywords", node_graph_keywords)
+    builder.add_node("graph_select", node_graph_select)
     builder.add_node("graph_hybrid", node_graph_hybrid)
-    builder.add_node("graph_merge", node_graph_merge)
+    builder.add_node("graph_merge", node_graph_merge, defer=True)
     builder.add_node("graph_rerank", node_graph_rerank)
-    builder.add_edge("graph_traverse", "graph_hybrid")
+    builder.add_edge("graph_keywords", "graph_select")
+    builder.add_edge("graph_select", "graph_merge")
     builder.add_edge("graph_hybrid", "graph_merge")
     builder.add_edge("graph_merge", "graph_rerank")
     builder.add_edge("graph_rerank", "generate")
-    return "graph_traverse"
+    return ["graph_keywords", "graph_hybrid"]   # rephrase fans out to BOTH entries
 
 
 # Per-mode state schema for the dedicated graphs (extra intermediate keys; see classes above).
@@ -577,9 +611,10 @@ def build_graph(mode: str = "graph"):
     builder = StateGraph(_STATE_SCHEMA.get(mode, RAGState), input_schema=InputState)
     _add_common(builder)
     entry = _add_retrieval_expanded(builder, mode)
-    # Domain guardrail: in -> the retrieval entry node; out -> direct message.
-    builder.add_conditional_edges("rephrase", route_in_domain,
-                                  {"retrieve": entry, "out_of_domain": "out_of_domain"})
+    entries = entry if isinstance(entry, list) else [entry]  # graph fans out to two entries
+    # Domain guardrail: in -> the retrieval entry node(s); out -> direct message.
+    builder.add_conditional_edges("rephrase", _make_route_in_domain(entries),
+                                  entries + ["out_of_domain"])
     return builder.compile()
 
 

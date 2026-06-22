@@ -124,12 +124,20 @@ citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estrict
     cada uno contiene SOLO su arquitectura, con la recuperación **EXPANDIDA en sus nodos
     reales** (vista didáctica) en vez de esconderla tras un único `retrieve`:
       - baseline: `retrieve → rerank`
-      - iterative: `iter_plan → (iter_single | iter_retrieve → iter_reflect ⇄ iter_retrieve)
-        → iter_rerank` (loop self-ask claro: UNA arista de bucle `reflect→retrieve` y UNA de
-        salida `reflect→rerank`; tope `MAX_HOPS`; single-hop cae a `iter_single` = one-shot
-        baseline). iter_plan genera subpreguntas, iter_retrieve las recupera, iter_reflect
-        decide si faltan aspectos y, si sí, encola la siguiente subpregunta y vuelve a retrieve.
-      - graph: `graph_traverse → graph_hybrid → graph_merge → graph_rerank`
+      - iterative: `iter_generate_subquestions → (iter_single | FAN-OUT Send×N
+        ▶ iter_retrieve_one → iter_reflect ⇄ Send×1) → iter_rerank`. iter_generate_subquestions
+        SOLO genera las subpreguntas; cada subpregunta se recupera en su PROPIA ejecución de
+        `iter_retrieve_one` (patrón `Send`/fan-out → una llamada visible por subpregunta en la
+        traza); convergen en iter_reflect, que decide si falta evidencia y, si sí, hace otro
+        `Send` (otra ronda) o sale a iter_rerank. `pool`/`hops` se acumulan con reducers
+        (`_merge_pool` dedup, `_add_int`). Single-hop → iter_single (one-shot baseline).
+      - graph: DOS ramas PARALELAS desde rephrase que convergen en merge:
+        `rephrase ─┬ graph_keywords (LLM: keywords high-level→relaciones, low-level→entidades)
+        → graph_select (cosine entidades/relaciones + traversía + chunks) ─┬ graph_merge
+        → graph_rerank` y `└ graph_hybrid (denso+BM25) ─┘`. graph_select pasa las keywords ya
+        extraídas a `aquery_data` (LightRAG se salta su LLM interno) y expone entidades/
+        relaciones/chunks en el estado. `graph_merge` usa **`defer=True`** para correr UNA vez
+        tras ambas ramas (de distinta longitud; sin defer el fan-in se dispararía dos veces).
     Cada nodo reusa las MISMAS primitivas que `iterative_search`/`graph_search` (sin cambio
     de comportamiento) y los estados intermedios se ven en Studio (`IterativeState`/
     `GraphState` extienden `RAGState`). Selección: desplegable de grafos de Studio.

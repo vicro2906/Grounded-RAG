@@ -241,6 +241,44 @@ def graph_traverse(query: str, chunk_top_k: int = 20) -> list:
     return _map_to_payloads(graph_chunks)
 
 
+def graph_extract_keywords(query: str, mode: str = "hybrid") -> dict:
+    """STEP 1a (the LLM call inside the graph traversal). LightRAG reads the query and
+    extracts TWO keyword sets that drive the search:
+      - HIGH-LEVEL keywords: global/abstract themes -> matched against the RELATION vectors.
+      - LOW-LEVEL keywords:  specific/concrete terms -> matched against the ENTITY vectors.
+    Exposed on its own so the graph node can show this step (and the two keyword lists)
+    separately, instead of hiding it inside graph_traverse. Replicates exactly how LightRAG
+    calls it internally (global_config = asdict(self), hashing_kv = its LLM cache)."""
+    from dataclasses import asdict
+    from lightrag.operate import extract_keywords_only
+    loop, rag = _ensure_rag()
+    hl, ll = loop.run_until_complete(
+        extract_keywords_only(query, QueryParam(mode=mode),
+                              asdict(rag), hashing_kv=rag.llm_response_cache)
+    )
+    return {"hl_keywords": hl, "ll_keywords": ll}
+
+
+def graph_select(query: str, hl_keywords: list, ll_keywords: list,
+                 chunk_top_k: int = 20) -> dict:
+    """STEP 1b (the vector search + graph walk, NO LLM). With the keywords already extracted,
+    LightRAG: (1) embeds them and does cosine similarity — low-level vs the ENTITY store,
+    high-level vs the RELATION store — to pick the nearest entities/relations; (2) walks the
+    graph around them; (3) gathers, via source_id, the source text chunks. Passing the
+    keywords makes LightRAG SKIP its own extraction (no LLM here). Returns the chunks mapped
+    to our payloads plus the selected entities/relationships (for visibility in the state)."""
+    loop, rag = _ensure_rag()
+    param = QueryParam(mode="hybrid", chunk_top_k=chunk_top_k, enable_rerank=False,
+                       hl_keywords=hl_keywords or [], ll_keywords=ll_keywords or [])
+    data = loop.run_until_complete(rag.aquery_data(query, param=param))
+    d = data.get("data") or {}
+    return {
+        "payloads": _map_to_payloads(d.get("chunks") or []),
+        "entities": d.get("entities") or [],
+        "relationships": d.get("relationships") or [],
+    }
+
+
 def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: int = 10,
                  hybrid_query: str | None = None) -> list:
     """Track B retriever (single-call API, used by evaluation.py and the COMBINED graph) —
