@@ -1,7 +1,10 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "chatbot_vih": "./main.py:app"
+    "baseline": "./main.py:app_baseline",
+    "iterative": "./main.py:app_iterative",
+    "graph": "./main.py:app_graph",
+    "combined": "./main.py:app"
   },
   "env": ".env"
 }

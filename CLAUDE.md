@@ -118,9 +118,33 @@ citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estrict
 - App (CLI interactivo): `.venv\Scripts\python.exe main.py`
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → abre Studio (UE). Ver pasos en
   pestaña **Trace View** (no Turn View).
-- **Estrategia de recuperación (F4):** `RETRIEVAL_MODE` en `main.py`
-  (`baseline`/`iterative`/`graph`); las tres se ven y trazan en Studio (salvo la llamada
-  interna de keywords de LightRAG, que usa su propio cliente OpenAI).
+- **Elegir la estrategia de recuperación (F4):** `main.py` compila CUATRO grafos y
+  `langgraph.json` los registra para que Studio muestre un **selector de grafo**:
+  - **Grafos dedicados** `app_baseline` / `app_iterative` / `app_graph` (build_graph(mode)):
+    cada uno contiene SOLO su arquitectura, con la recuperación **EXPANDIDA en sus nodos
+    reales** (vista didáctica) en vez de esconderla tras un único `retrieve`:
+      - baseline: `retrieve → rerank`
+      - iterative: `iter_plan → (iter_single | iter_hop ⇄ iter_reflect) → iter_rerank`
+        (loop self-ask, tope `MAX_HOPS`; single-hop cae a `iter_single` = one-shot baseline)
+      - graph: `graph_traverse → graph_hybrid → graph_merge → graph_rerank`
+    Cada nodo reusa las MISMAS primitivas que `iterative_search`/`graph_search` (sin cambio
+    de comportamiento) y los estados intermedios se ven en Studio (`IterativeState`/
+    `GraphState` extienden `RAGState`). Selección: desplegable de grafos de Studio.
+  - **Grafo combinado** `app` (build_combined_graph): las tres rutas en un grafo; expone un
+    `context_schema` (`ConfigSchema`) con el campo **`retrieval_mode`** como **desplegable**
+    en el panel de config del run (elección en vivo). Lo usa también el CLI.
+  - **Head/tail compartidos** se factorizan en `_add_common`; la sección de retrieval en
+    `_add_retrieval(mode)`. Esto es lo que hace el pipeline AGNÓSTICO al retrieval: cada nodo
+    de retrieval cumple el MISMO contrato de estado (rellena `contexts`/`chunk_index`/
+    `formatted_context`) y el tail solo lee ese contrato, nunca nada específico del modo.
+  - **Por env / CLI:** `RETRIEVAL_MODE` (env var, por defecto `"graph"`) es el modo por
+    defecto del combinado; o `python main.py iterative` para forzar uno en un run.
+  - **Resolución de modo (combinado), en `_resolve_mode`:** context (Studio) → `configurable`
+    → `RETRIEVAL_MODE`. Valores desconocidos caen al default sin romper.
+  - **Trazas:** el modo usado se registra en el estado (`retrieval_mode`) y, desde el CLI,
+    como tag `mode:<x>` y metadata → filtrables en LangSmith. La llamada LLM interna de
+    keywords de LightRAG SÍ se traza ahora (envuelta con `traceable` en
+    `_make_rag(trace_llm=True)`, solo en consulta, no en el build del índice).
 - **Construir el grafo LightRAG (una vez):** `.venv\Scripts\python.exe -m graph.lightrag_track`
   (extracción de entidades sobre los 517 chunks; reanudable, usa caché de LLM).
 - Evaluación RAGAS / A/B: ajustar `PIPELINE` y `DATASET` en `evaluation.py` y correr

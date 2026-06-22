@@ -73,10 +73,26 @@ async def _embed(texts):
     return await openai_embed(texts, model=EMBEDDING_MODEL)
 
 
-def _make_rag() -> LightRAG:
+def _traceable_llm(func):
+    """At QUERY time, wrap LightRAG's internal LLM (keyword extraction) with LangSmith's
+    @traceable so it nests under the graph run instead of being invisible — LightRAG uses
+    its own OpenAI client, which our wrap_openai in main.py does not reach. No-op when
+    there is no LANGSMITH_API_KEY or langsmith is unavailable, so nothing breaks offline.
+    NOT applied during index BUILD (no parent run to nest under)."""
+    if not os.environ.get("LANGSMITH_API_KEY"):
+        return func
+    try:
+        from langsmith import traceable
+        return traceable(name="lightrag_llm", run_type="llm")(func)
+    except Exception:
+        return func
+
+
+def _make_rag(trace_llm: bool = False) -> LightRAG:
+    llm_func = _traceable_llm(LLM_COMPLETE) if trace_llm else LLM_COMPLETE
     return LightRAG(
         working_dir=WORKING_DIR,
-        llm_model_func=LLM_COMPLETE,
+        llm_model_func=llm_func,
         embedding_func=EmbeddingFunc(
             embedding_dim=EMBEDDING_DIM, max_token_size=8192, func=_embed
         ),
@@ -143,7 +159,7 @@ def _ensure_rag():
                 f".venv\\Scripts\\python.exe -m graph.lightrag_track"
             )
         _loop = asyncio.new_event_loop()
-        _rag = _make_rag()
+        _rag = _make_rag(trace_llm=True)  # query path: trace LightRAG's internal LLM
         _loop.run_until_complete(_rag.initialize_storages())
         _loop.run_until_complete(initialize_pipeline_status())
         atexit.register(_shutdown)
@@ -209,27 +225,37 @@ def _merge_dedup(*lists) -> list:
     return out
 
 
-def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: int = 10,
-                 hybrid_query: str | None = None) -> list:
-    """Track B retriever — TWO complementary sources of chunks, then one rerank:
-
-      1. GRAPH (LightRAG mode='hybrid'): chunks reached via ENTITY + RELATION traversal —
-         the multi-hop signal. NOTE: 'hybrid' is LightRAG's entity+relation mode, NOT vector
-         hybrid; it deliberately drops LightRAG's naive DENSE chunk search so we can plug
-         in our own.
-      2. our HYBRID VECTOR search (`rag.retrieve_hybrid`: dense + sparse BM25, RRF on Qdrant)
-         on the rephrased query — this REPLACES LightRAG's dense-only complement with a
-         dense+lexical one (BM25 helps with the guides' heavy abbreviation use).
-
-    Both are mapped to our payloads, merged (dedup by chunk_id) and reranked to top_k.
-    LightRAG's own rerank stays off (no rerank model there; we rerank ourselves)."""
+def graph_traverse(query: str, chunk_top_k: int = 20) -> list:
+    """STEP 1 of Track B in isolation: run LightRAG's ENTITY + RELATION traversal (mode=
+    'hybrid' = entity+relation, NOT vector hybrid; it deliberately drops LightRAG's naive
+    DENSE chunk search so we plug in our own) and map the reached source chunks back to our
+    payloads. This is where LightRAG calls its internal LLM for keyword extraction (traced
+    via _make_rag(trace_llm=True)). Exposed on its own so the graph node in main.py can show
+    the traversal as a distinct step instead of hiding it inside graph_search."""
     loop, rag = _ensure_rag()
     data = loop.run_until_complete(rag.aquery_data(
         query,
         param=QueryParam(mode="hybrid", chunk_top_k=chunk_top_k, enable_rerank=False),
     ))
     graph_chunks = (data.get("data") or {}).get("chunks") or []
-    graph_payloads = _map_to_payloads(graph_chunks)
+    return _map_to_payloads(graph_chunks)
+
+
+def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: int = 10,
+                 hybrid_query: str | None = None) -> list:
+    """Track B retriever (single-call API, used by evaluation.py and the COMBINED graph) —
+    TWO complementary sources of chunks, then one rerank:
+
+      1. GRAPH (graph_traverse): chunks reached via ENTITY + RELATION traversal — the
+         multi-hop signal.
+      2. our HYBRID VECTOR search (`rag.retrieve_hybrid`: dense + sparse BM25, RRF on Qdrant)
+         on the rephrased query — this REPLACES LightRAG's dense-only complement with a
+         dense+lexical one (BM25 helps with the guides' heavy abbreviation use).
+
+    Both are merged (dedup by chunk_id) and reranked to top_k. The dedicated graph in main.py
+    runs these same three steps as separate, visible nodes (traverse -> hybrid -> merge ->
+    rerank); this function is the collapsed equivalent."""
+    graph_payloads = graph_traverse(query, chunk_top_k=chunk_top_k)
 
     # Hybrid complement (reuse the rephrased query if the caller already computed it).
     hq = hybrid_query or rephrase(query)
