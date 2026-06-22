@@ -19,20 +19,32 @@ Punto de entrada: `main.py` (grafo compilado `app`). Nodos del grafo:
 
 ```
 question ─▶ rephrase ─┬─ fuera de dominio ─▶ out_of_domain ─▶ END
-                      └─ en dominio ─▶ retrieve (híbrido) ─▶ rerank ─▶ generate ⇄ validate ─▶ evidence ─▶ output
-                                                                            (no válido+agotado ─▶ fallback)
+                      └─ en dominio ─▶ [RETRIEVAL_MODE] ─▶ generate ⇄ validate ─▶ evidence ─▶ output
+                             ├─ baseline : retrieve (híbrido) ─▶ rerank (20→5)        (no válido+agotado
+                             ├─ iterative: iterative_retrieve (plan→hop→reflect, →8)    ─▶ fallback)
+                             └─ graph    : graph_retrieve (LightRAG + híbrido propio, →8)  ◀ DEFECTO
 ```
+
+La cabecera (rephrase + guardia de dominio) y la cola (generate→validate→evidence) son
+IDÉNTICAS en los tres modos; solo cambia el nodo de recuperación, elegido por
+`RETRIEVAL_MODE` en `main.py` (por defecto `"graph"` tras el A/B de F4).
 
 - **rephrase** (`rag.refine`, gpt-4o-mini): una llamada que (a) clasifica si la pregunta
   es del dominio VIH (`in_domain`) y (b) reescribe la consulta SIN añadir info, normalizando
   términos en AMBAS formas «nombre completo (SIGLA)» con `abbreviations.py`. Si está fuera
   de dominio → `out_of_domain` (mensaje directo, corta el pipeline). La generación usa la
   pregunta ORIGINAL, no la reescrita.
-- **retrieve** (`rag.retrieve_hybrid`): búsqueda híbrida densa (OpenAI
-  text-embedding-3-large, 3072d) + sparse BM25 (fastembed `Qdrant/bm25`, IDF en Qdrant),
-  fusión RRF. Trae 20 candidatos.
+- **Recuperación — 3 modos seleccionables (`RETRIEVAL_MODE`), todos terminan en el mismo generate:**
+  - **baseline** = `node_retrieve` (`rag.retrieve_hybrid`: densa text-embedding-3-large 3072d +
+    sparse BM25 `Qdrant/bm25`, fusión RRF, 20 candidatos) → `node_rerank` (`rag.rerank`,
+    cross-encoder local, 20→5).
+  - **iterative** (Track A) = `node_iterative_retrieve` → `agentic.iterative.iterative_search`
+    (plan→hop→reflect, top 8). Usa la pregunta ORIGINAL (su propio plan); ignora la reescrita.
+  - **graph** (Track B, POR DEFECTO) = `node_graph_retrieve` → `graph.lightrag_track.graph_search`
+    (grafo entidad+relación `mode="hybrid"` + complemento `retrieve_hybrid` densa+BM25 →
+    fusión dedup → rerank → top 8).
 - **rerank** (`rag.rerank`): cross-encoder local `jinaai/jina-reranker-v2-base-multilingual`
-  (fastembed/ONNX, multilingüe, RGPD-ok). Reordena 20 → top 5.
+  (fastembed/ONNX, multilingüe, RGPD-ok). Lo usan los tres modos para afinar al top final.
 - **generate** (`main._structured_llm`, gpt-4o): salida estructurada con
   `ChatOpenAI.with_structured_output` (Pydantic `ClinicalAnswer`, json_schema estricto).
   Devuelve dict: sufficient_information, answer, sources_used[{ref,quote}], follow_up_questions.
@@ -44,6 +56,31 @@ question ─▶ rephrase ─┬─ fuera de dominio ─▶ out_of_domain ─▶ 
 
 `rag.search()` = rephrase → híbrido → rerank (lo usa la evaluación).
 
+### Recuperación por grafo (LightRAG): qué se usa y qué NO
+
+Indexado (una vez, `graph._build_index`): por cada chunk, gpt-4o-mini extrae **entidades** y
+**relaciones** con **descripción generada por el LLM**; se guardan en `lightrag_store/`:
+`kv_store_full_entities/relations.json` (descripción + chunks de origen `source_id`),
+`vdb_entities/relationships/chunks.json` (embeddings para casar), `kv_store_text_chunks.json`
+(texto literal) y `graph_chunk_entity_relation.graphml` (topología).
+
+Consulta (`graph_search`, modo `hybrid`): (1) LightRAG saca keywords high/low-level de la
+pregunta; (2) low-level → vdb_entities → entidades; high-level → vdb_relationships →
+relaciones; (3) recorre el grafo (vecinos) y, vía `source_id`, junta los **chunks de origen**
+(hasta `chunk_top_k=20`), mapeados a `chunks.jsonl` con `_map_to_payloads` (match exacto +
+fallback por prefijo; en prueba 20/20). (4) **Complemento (sustituye a la densa interna de
+LightRAG):** se añaden los chunks de NUESTRA `retrieve_hybrid` (densa + BM25 RRF) sobre la
+consulta reescrita — el BM25 ayuda con siglas/dosis. (5) Se **fusiona** (dedup por
+`chunk_id`, grafo primero) y el **reranker** afina a top 8.
+
+**Decisión de diseño (clave):** las descripciones de entidades/relaciones SÍ influyen en
+la **selección** (su embedding es lo que casa con la pregunta), pero se **descartan para la
+generación**: a gpt-4o solo le pasamos los **chunks literales**. Motivo = prioridad nº1
+(no alucinar): las descripciones son texto sintético del LLM, no citable y con posibles
+errores de extracción; nuestro `evidence.py` exige cita literal verificable. **Idea abierta
+(A/B-able):** pasar las descripciones de *relaciones* como bloque "mapa de conceptos, NO
+citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estricto + validate.
+
 ## Ficheros clave
 
 - `main.py` — grafo LangGraph + LangSmith + generación estructurada (punto de entrada).
@@ -51,8 +88,11 @@ question ─▶ rephrase ─┬─ fuera de dominio ─▶ out_of_domain ─▶ 
   search, validate, generate_answer (versión cruda), SYS_PROMPT, build_user_prompt, constantes de modelo.
 - `evidence.py` — formateo de respuesta y fuentes.
 - `evaluation.py` — evaluación RAGAS. Dos sets (`GOLDEN_SET` 47 single-hop;
-  `MULTIHOP_SET` 16 multi-hop) y A/B: selector `PIPELINE` (baseline/iterative/graph) +
-  `DATASET`. Mide latencia y vuelca `resultados_ragas_<PIPELINE>.csv`.
+  `MULTIHOP_SET` 16 multi-hop) y A/B: selector `PIPELINE` (baseline/iterative/graph, vía
+  env) + `DATASET`. Modos: completo (faithfulness+precision+recall) o lean por env
+  `RETRIEVAL_ONLY=1` (sin generación gpt-4o; precision+recall) / `RECALL_ONLY=1` (solo
+  recall). `RunConfig(timeout=600, max_workers=8)` anti-timeout. Mide latencia y vuelca
+  `resultados_ragas_<PIPELINE>[_retrieval].csv`.
 - `abbreviations.py` — diccionario SIGLA→nombre de las guías (valores en español).
 - **`agentic/`** — Track A (F4). `iterative.py`: `iterative_search` (plan/hop/reflect).
   Importa los primitivos compartidos de `rag.py` (carpeta padre).
@@ -106,14 +146,14 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
   mensaje seguro; error técnico del juez → `fallback`, sin "fallar abierto"). El validador
   NO re-chequea citas literales (eso ya lo hace `evidence`). La clasificación de tipo de
   pregunta (vector vs grafo) se difiere a F4.
-- **F4 — Multi-hop (EN CURSO).** Dos vías para preguntas multi-salto, comparadas con un
-  A/B sobre `MULTIHOP_SET` (16 preguntas, en `evaluation.py`):
+- **F4 — Multi-hop: DECIDIDA (grafo LightRAG por defecto).** Dos vías para preguntas
+  multi-salto, comparadas con un A/B sobre `MULTIHOP_SET` (16 preguntas, en `evaluation.py`):
   - **Track A — agéntico/iterativo** (`agentic/iterative.py`): bucle self-ask
     plan → recuperar por sub-consulta → reflect (MAX_HOPS=3), reusa hybrid+rerank, cero
     reindexado. HECHO y probado.
   - **Track B — grafo LightRAG** (`graph/lightrag_track.py`): grafo entidad-relación en
     almacenamiento de ficheros (`lightrag_store/`), recupera chunks por traversía y los
-    mapea a nuestros payloads (conserva citas). Índice en construcción.
+    mapea a nuestros payloads (conserva citas). Índice CONSTRUIDO (517 chunks, ~1.5 h).
   - Decisión por el A/B (calidad multi-hop primero; luego velocidad/coste/actualización).
     Ambas vías son seleccionables en el grafo vía `RETRIEVAL_MODE` y en la eval vía
     `PIPELINE`, y terminan en el MISMO generate→validate→evidence.
@@ -125,6 +165,20 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
     concurrencia); n=16, referencias del modelo. El recall alto del grafo podría venir con
     algo menos de precisión (recupera más amplio), mitigado por reranker→top8 + validate.
 - **F5 — UX tipo Claude:** Streamlit/web, streaming, citaciones, memoria multi-turno.
+
+## Pendiente / próximos pasos (a fecha 2026-06-22)
+
+1. **Medir `context_precision` (y faithfulness) del grafo** a baja concurrencia
+   (`RETRIEVAL_ONLY=1`, `max_workers≈4-8`, `timeout=600`) para cerrar el cuadro del A/B:
+   el recall del grafo es altísimo (0.979) y conviene confirmar que la precisión no cae
+   demasiado (recupera amplio). Reusar baseline (recall 0.844) ya medido.
+2. **(Idea) Descripciones de relaciones como "mapa de conceptos" no citable** en el prompt
+   de generación del grafo, para ayudar al razonamiento multi-hop sin romper el grounding.
+   Prototipar tras un flag y A/B contra la versión actual (faithfulness + recall).
+3. **F5 — UX.** Tras cerrar (1).
+
+Artefactos de evaluación versionados: `resultados_ragas.csv` (baseline F0) y
+`resultados_ragas_{baseline,iterative,graph}_retrieval.csv` (A/B F4, context_recall).
 
 ## Hallazgos importantes (no perder)
 
@@ -150,6 +204,22 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
 - Modelos locales (BM25, reranker) con carga perezosa: la 1ª consulta del proceso paga
   ~3.5 s de carga del reranker. Studio lo mantiene cargado entre consultas.
 - generate (gpt-4o) ~5 s: considerar streaming para mejorar latencia percibida (F5).
+- **LÍMITE OpenAI: gpt-4o a 30.000 TPM (bajo).** La generación NO se puede paralelizar:
+  correr varios pipelines a la vez en la eval → `429 RateLimitError` y crash. Correr los
+  pipelines en SECUENCIAL (la generación de `build_dataset` ya es secuencial → no peta).
+- **RAGAS apenas paraleliza** (≈serial aunque subas `max_workers`) y `context_precision` es
+  la métrica pesada/frágil (1 llamada de juez por chunk → con muchos workers da TimeoutError
+  → NaN). `context_recall` es la ligera y robusta. Config estable: `RunConfig(timeout=600,
+  max_workers=8, max_retries=10)`. Para A/B barato usar `RETRIEVAL_ONLY=1` (sin generación
+  gpt-4o) o `RECALL_ONLY=1` (solo recall) en `evaluation.py`.
+- **Build del grafo LightRAG:** cuello de botella = `max_parallel_insert` (default 2 → subido
+  a 8 en `graph.lightrag_track`; también `llm_model_max_async=16`). Aun así ~1.5 h por las
+  ~517 extracciones. Reanudable y con caché de LLM (re-correr es barato).
+- **Suspensión del equipo:** dormir el portátil MATA las corridas largas (cae la conexión).
+  Para jobs largos desactivar suspensión (`powercfg /change standby-timeout-ac/dc 0`) y
+  restaurarla luego. (Pasó: una corrida nocturna murió al dormirse la máquina.)
+- LangSmith + LangGraph Studio **verificados OK** esta sesión (Studio arranca y traza; el
+  endpoint UE responde 204 al enviar metadata).
 
 ## Convenciones
 
@@ -159,5 +229,6 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
   `abbreviations.py`). Al usuario se le habla en español.
 - Toda llamada LLM encapsulada para poder cambiar a Azure OpenAI (GPT-4 privado) sin
   fricción el día que se requiera por cumplimiento.
-- Commits directos a `main` (flujo de un solo dev). Mensajes en español. `.env` y `*.log`
-  y `.langgraph_api/` en .gitignore.
+- Commits directos a `main` (flujo de un solo dev). Mensajes en español. En `.gitignore`:
+  `.env`, `*.log`, `.langgraph_api/` y `lightrag_store/` (el grafo se reconstruye con
+  `python -m graph.lightrag_track`).

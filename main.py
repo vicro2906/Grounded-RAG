@@ -206,7 +206,9 @@ def node_graph_retrieve(state: RAGState) -> dict:
     as the other retrieval nodes so generate/validate/evidence are unchanged. Imported
     lazily so baseline/iterative runs do not load LightRAG."""
     from graph.lightrag_track import graph_search
-    contexts = graph_search(state["question"], top_k=8)
+    # Reuse the query rephrased by node_rephrase for the hybrid-vector complement (BM25
+    # benefits from the normalized abbreviations); avoids a second rephrase call.
+    contexts = graph_search(state["question"], top_k=8, hybrid_query=state.get("search_query"))
     chunk_index, formatted_context = build_context(contexts)
     return {
         "contexts": contexts,

@@ -49,7 +49,7 @@ from lightrag.utils import EmbeddingFunc
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.openai import openai_embed, gpt_4o_mini_complete
 
-from rag import rerank  # shared cross-encoder (parent module)
+from rag import rerank, retrieve_hybrid, rephrase  # shared retrieval primitives (parent module)
 
 # --- Config ---------------------------------------------------------------
 WORKING_DIR = os.path.join(ROOT, "lightrag_store")          # file-based graph + vector store
@@ -196,21 +196,49 @@ def _map_to_payloads(chunks: list[dict]) -> list[dict]:
     return out
 
 
-def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20) -> list:
-    """Track B retriever: LightRAG selects source chunks via graph traversal (mix mode:
-    entities + relations + vector), we map them back to our payloads and apply the same
-    cross-encoder reranker as the other tracks for a comparable top_k. LightRAG's own
-    rerank is disabled (no rerank model configured there; we rerank ourselves)."""
+def _merge_dedup(*lists) -> list:
+    """Concatenate payload lists, dedup by chunk_id (fallback text), preserving order
+    (earlier lists win — graph chunks first, then the hybrid complement)."""
+    out, seen = [], set()
+    for lst in lists:
+        for p in lst:
+            key = p.get("chunk_id") or p.get("text", "")
+            if key and key not in seen:
+                seen.add(key)
+                out.append(p)
+    return out
+
+
+def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: int = 10,
+                 hybrid_query: str | None = None) -> list:
+    """Track B retriever — TWO complementary sources of chunks, then one rerank:
+
+      1. GRAPH (LightRAG mode='hybrid'): chunks reached via ENTITY + RELATION traversal —
+         the multi-hop signal. NOTE: 'hybrid' is LightRAG's entity+relation mode, NOT vector
+         hybrid; it deliberately drops LightRAG's naive DENSE chunk search so we can plug
+         in our own.
+      2. our HYBRID VECTOR search (`rag.retrieve_hybrid`: dense + sparse BM25, RRF on Qdrant)
+         on the rephrased query — this REPLACES LightRAG's dense-only complement with a
+         dense+lexical one (BM25 helps with the guides' heavy abbreviation use).
+
+    Both are mapped to our payloads, merged (dedup by chunk_id) and reranked to top_k.
+    LightRAG's own rerank stays off (no rerank model there; we rerank ourselves)."""
     loop, rag = _ensure_rag()
     data = loop.run_until_complete(rag.aquery_data(
         query,
-        param=QueryParam(mode="mix", chunk_top_k=chunk_top_k, enable_rerank=False),
+        param=QueryParam(mode="hybrid", chunk_top_k=chunk_top_k, enable_rerank=False),
     ))
-    chunks = (data.get("data") or {}).get("chunks") or []
-    payloads = _map_to_payloads(chunks)
-    if not payloads:
+    graph_chunks = (data.get("data") or {}).get("chunks") or []
+    graph_payloads = _map_to_payloads(graph_chunks)
+
+    # Hybrid complement (reuse the rephrased query if the caller already computed it).
+    hq = hybrid_query or rephrase(query)
+    hybrid_payloads = retrieve_hybrid(hq, top_k=hybrid_k, prefetch_limit=30)
+
+    merged = _merge_dedup(graph_payloads, hybrid_payloads)
+    if not merged:
         return []
-    return rerank(query, payloads, top_k=top_k)
+    return rerank(query, merged, top_k=top_k)
 
 
 if __name__ == "__main__":
