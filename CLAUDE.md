@@ -50,8 +50,14 @@ question ─▶ rephrase ─┬─ fuera de dominio ─▶ out_of_domain ─▶ 
 - `rag.py` — pipeline: clientes, embeddings, retrieve/retrieve_hybrid, rerank, refine,
   search, validate, generate_answer (versión cruda), SYS_PROMPT, build_user_prompt, constantes de modelo.
 - `evidence.py` — formateo de respuesta y fuentes.
-- `evaluation.py` — evaluación RAGAS (golden set de 47 preguntas; `RETRIEVER=search`).
+- `evaluation.py` — evaluación RAGAS. Dos sets (`GOLDEN_SET` 47 single-hop;
+  `MULTIHOP_SET` 16 multi-hop) y A/B: selector `PIPELINE` (baseline/iterative/graph) +
+  `DATASET`. Mide latencia y vuelca `resultados_ragas_<PIPELINE>.csv`.
 - `abbreviations.py` — diccionario SIGLA→nombre de las guías (valores en español).
+- **`agentic/`** — Track A (F4). `iterative.py`: `iterative_search` (plan/hop/reflect).
+  Importa los primitivos compartidos de `rag.py` (carpeta padre).
+- **`graph/`** — Track B (F4). `lightrag_track.py`: build del grafo + `graph_search`
+  (importa `rerank` de `rag.py`, corpus de `chunks/`, store en `lightrag_store/`).
 - `chunks/` — `chunk_guias.py` (chunking estructural), `subir_a_qdrant.py` (denso),
   `subir_a_qdrant_hibrido.py` (denso+BM25), `chunks.jsonl` (517 chunks).
 - `markdown/` — las 7 guías en Markdown (fuente del corpus). `pdfs/`, `textos/` — originales.
@@ -72,7 +78,13 @@ question ─▶ rephrase ─┬─ fuera de dominio ─▶ out_of_domain ─▶ 
 - App (CLI interactivo): `.venv\Scripts\python.exe main.py`
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → abre Studio (UE). Ver pasos en
   pestaña **Trace View** (no Turn View).
-- Evaluación RAGAS: `.venv\Scripts\python.exe evaluation.py` (usa el pipeline completo).
+- **Estrategia de recuperación (F4):** `RETRIEVAL_MODE` en `main.py`
+  (`baseline`/`iterative`/`graph`); las tres se ven y trazan en Studio (salvo la llamada
+  interna de keywords de LightRAG, que usa su propio cliente OpenAI).
+- **Construir el grafo LightRAG (una vez):** `.venv\Scripts\python.exe -m graph.lightrag_track`
+  (extracción de entidades sobre los 517 chunks; reanudable, usa caché de LLM).
+- Evaluación RAGAS / A/B: ajustar `PIPELINE` y `DATASET` en `evaluation.py` y correr
+  `.venv\Scripts\python.exe evaluation.py`.
 - **Dependencias: SIEMPRE `uv add` (nunca pip).** `uv` no está en PATH:
   `& "$env:USERPROFILE\.local\bin\uv.exe" add <paquete>`.
 
@@ -94,8 +106,24 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
   mensaje seguro; error técnico del juez → `fallback`, sin "fallar abierto"). El validador
   NO re-chequea citas literales (eso ya lo hace `evidence`). La clasificación de tipo de
   pregunta (vector vs grafo) se difiere a F4.
-- **F4 — Grafo (LightRAG): CONDICIONAL.** Solo si la eval demuestra que hace falta para
-  preguntas abstractas. NO es prioritario (el retrieval ya es fuerte).
+- **F4 — Multi-hop (EN CURSO).** Dos vías para preguntas multi-salto, comparadas con un
+  A/B sobre `MULTIHOP_SET` (16 preguntas, en `evaluation.py`):
+  - **Track A — agéntico/iterativo** (`agentic/iterative.py`): bucle self-ask
+    plan → recuperar por sub-consulta → reflect (MAX_HOPS=3), reusa hybrid+rerank, cero
+    reindexado. HECHO y probado.
+  - **Track B — grafo LightRAG** (`graph/lightrag_track.py`): grafo entidad-relación en
+    almacenamiento de ficheros (`lightrag_store/`), recupera chunks por traversía y los
+    mapea a nuestros payloads (conserva citas). Índice en construcción.
+  - Decisión por el A/B (calidad multi-hop primero; luego velocidad/coste/actualización).
+    Ambas vías son seleccionables en el grafo vía `RETRIEVAL_MODE` y en la eval vía
+    `PIPELINE`, y terminan en el MISMO generate→validate→evidence.
+  - **RESULTADO A/B (16 multi-hop, context_recall, juez gpt-4o-mini): graph 0.979 >>
+    iterative 0.863 > baseline 0.844.** Latencia: graph ~11 s ≈ baseline, iterative ~24 s.
+    **DECISIÓN: graph (LightRAG) por defecto** (`RETRIEVAL_MODE="graph"`). Caveats: solo se
+    midió context_recall limpio (context_precision y faithfulness se cayeron por timeouts
+    del juez con muchos workers → NaN; pendiente medir precision del ganador a baja
+    concurrencia); n=16, referencias del modelo. El recall alto del grafo podría venir con
+    algo menos de precisión (recupera más amplio), mitigado por reranker→top8 + validate.
 - **F5 — UX tipo Claude:** Streamlit/web, streaming, citaciones, memoria multi-turno.
 
 ## Hallazgos importantes (no perder)
@@ -111,14 +139,14 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
 - **El reranker mejora precisión/orden pero NO subió el recall@5** en el set de prueba
   (6/8 igual que el híbrido). Útil pero no imprescindible.
 
-## Optimizaciones / problemas conocidos (PENDIENTE)
+## Optimizaciones / problemas conocidos
 
-- **LATENCIA DEL RERANKER (crítico, sin aplicar):** el rerank tardaba **~128 s** (95% del
-  tiempo total). Causa: el cross-encoder rellena (padding) el lote a la longitud del chunk
-  más largo en CPU. **Fix medido: truncar a ~512 caracteres SOLO el texto que se puntúa
-  (no el que se devuelve/genera) → ~5 s** (con 20 candidatos). Es decir, en `rag.rerank`
-  usar `p["text"][:512]` para puntuar. Reduce el turno de ~140 s a ~12 s. Equipo: 12 cores,
-  sin GPU confirmada (si hubiera GPU NVIDIA, onnxruntime-gpu lo aceleraría 10-50×).
+- **LATENCIA DEL RERANKER (RESUELTO, F4):** el rerank tardaba **~128 s** (95% del tiempo
+  total) porque el cross-encoder rellena (padding) el lote a la longitud del chunk más
+  largo en CPU. **Fix aplicado en `rag.rerank`: se puntúa solo `p["text"][:512]`
+  (constante `RERANK_SCORE_CHARS`) y se devuelven los payloads completos.** Una consulta
+  multi-hop bajó de ~145 s a ~23 s (en frío). Crítico para Track A, que rerankea varias
+  veces. Equipo: 12 cores, sin GPU (con GPU NVIDIA, onnxruntime-gpu aceleraría 10-50×).
 - Modelos locales (BM25, reranker) con carga perezosa: la 1ª consulta del proceso paga
   ~3.5 s de carga del reranker. Studio lo mantiene cargado entre consultas.
 - generate (gpt-4o) ~5 s: considerar streaming para mejorar latencia percibida (F5).

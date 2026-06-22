@@ -13,9 +13,12 @@ Requirements:
     ragas, langchain-openai. Env vars loaded from .env (OPENAI_API_KEY, QDRANT_*).
 """
 
+import os
 import sys
 sys.dont_write_bytecode = True  # avoid creating the __pycache__/ folder
 
+import time
+import statistics
 import warnings
 import pandas as pd
 
@@ -30,15 +33,51 @@ warnings.filterwarnings(
 # --- Existing pipeline ---
 from rag import retrieve, retrieve_hybrid, retrieve_rerank, search, build_context, generate_answer
 
-# Retriever to evaluate:
-#   retrieve        -> dense (baseline F0)
-#   retrieve_hybrid -> hybrid (dense + BM25)
-#   retrieve_rerank -> hybrid + cross-encoder reranker (Phase 2)
-#   search          -> rephrase + hybrid + reranker (full pipeline, Phase 2 + 3)
-RETRIEVER = search
+# ===========================================================================
+# A/B CONFIG (Phase 4) — pick WHICH dataset and WHICH retrieval pipeline to run.
+# Running the SAME questions through different retrievers (generation is shared, so
+# ONLY retrieval varies) is what makes the multi-hop comparison fair.
+#
+#   PIPELINE (retrieval strategy):
+#     "baseline"  -> search: rephrase + hybrid + reranker (Phases 2-3, current system)
+#     "iterative" -> Track A: self-ask / reflect-retrieve loop (rag.iterative_search)
+#     "graph"     -> Track B: LightRAG graph retrieval (graph.lightrag_retrieve)
+#
+#   DATASET is chosen below, after MULTIHOP_SET is defined:
+#     GOLDEN_SET    -> 47 single-hop questions (F0 baseline / regression net)
+#     MULTIHOP_SET  -> multi-hop questions (Phase 4 target)
+# ===========================================================================
+PIPELINE = os.environ.get("PIPELINE", "baseline")   # override per A/B run without editing
+
+# RETRIEVAL_ONLY: skip the gpt-4o generation step and score ONLY the retrieval metrics
+# (context_recall + context_precision). This is the lean multi-hop A/B: it measures exactly
+# what differs between strategies (which chunks each one finds) while avoiding the gpt-4o
+# 30k-TPM bottleneck entirely (no answer is generated). Enable with RETRIEVAL_ONLY=1.
+# RECALL_ONLY: even leaner — only context_recall (the single most decision-relevant metric
+# for multi-hop: "was everything needed retrieved?"). It is the light, robust one;
+# context_precision is heavy (one judge call per chunk) and times out under load. RECALL_ONLY
+# implies RETRIEVAL_ONLY. Enable with RECALL_ONLY=1.
+RECALL_ONLY = os.environ.get("RECALL_ONLY") == "1"
+RETRIEVAL_ONLY = RECALL_ONLY or os.environ.get("RETRIEVAL_ONLY") == "1"
+
+
+def get_pipeline(name: str):
+    """Return the retrieval function for the chosen pipeline. Track A/B retrievers are
+    imported lazily so the baseline keeps working before they exist (and so 'graph' does
+    not require LightRAG to be installed unless you actually run it)."""
+    if name == "baseline":
+        return search
+    if name == "iterative":
+        from agentic.iterative import iterative_search   # Track A package
+        return iterative_search
+    if name == "graph":
+        from graph.lightrag_track import graph_search     # Track B package
+        return graph_search
+    raise SystemExit(f"Unknown PIPELINE: {name!r} (use baseline | iterative | graph)")
 
 # --- RAGAS ---
 from ragas import EvaluationDataset, evaluate
+from ragas.run_config import RunConfig
 from ragas.dataset_schema import EvaluationResult
 from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingsWrapper
@@ -122,11 +161,88 @@ GOLDEN_SET = [
 ]
 
 
-def build_dataset(golden_set: list[dict]) -> EvaluationDataset:
-    """Run each question through the RAG and assemble the dataset RAGAS consumes."""
+# ===========================================================================
+# MULTI-HOP SET (Phase 4)  ->  the target of the A/B comparison.
+#   These questions are deliberately MULTI-HOP: answering each one correctly requires
+#   chaining facts that live in DIFFERENT guides or sections (e.g. mixing the pregnancy
+#   guide with the TB guide and the drug-interaction part of the TAR consensus). Classic
+#   single-shot RAG tends to retrieve evidence for only one hop and miss the rest.
+#
+#   CAVEAT (same as GOLDEN_SET / Phase 0): the references were drafted by the model from
+#   the guidelines, NOT reviewed by a clinician. The absolute scores are indicative; what
+#   matters is the comparison BETWEEN pipelines on the SAME set.
+#
+#   Extra fields per entry (ignored by RAGAS, used to slice results):
+#     - guides: source guides whose content must be combined.
+#     - hops:   number of distinct reasoning steps the question requires.
+#   Guide labels = source_file in chunks.jsonl: TAR_2022, VIH_TB, VIH_embarazo,
+#   adherencia, medicina_preventiva, profilaxis, neurocognitivo.
+# ===========================================================================
+MULTIHOP_SET = [
+    {"question": "En una gestante con VIH que además inicia tratamiento para tuberculosis con rifampicina, ¿qué régimen antirretroviral es preferible y qué interacción hay que evitar?",
+     "reference": "Hay que combinar dos exigencias: un TAR seguro en el embarazo y compatible con rifampicina. La rifampicina es un inductor potente que reduce las concentraciones de la mayoría de antirretrovirales: no pueden usarse bictegravir, elvitegravir/cobicistat ni cabotegravir, y los IP potenciados con ritonavir/cobicistat tampoco. La opción preferida es 2 ITIAN (tenofovir/emtricitabina o abacavir/lamivudina) más un fármaco compatible: dolutegravir con la dosis ajustada a 50 mg/12 h (manteniéndola hasta 2 semanas tras finalizar la rifampicina) o efavirenz a dosis estándar, ambos con experiencia de uso en gestación. Debe vigilarse la carga viral por el riesgo de infradosificación y la transmisión vertical.",
+     "guides": ["VIH_embarazo", "VIH_TB", "TAR_2022"], "hops": 3},
+    {"question": "Un paciente suprimido con tenofovir/emtricitabina + un tercer fármaco y coinfección por VHB quiere simplificar a dolutegravir + lamivudina. ¿Es adecuado?",
+     "reference": "No. La coinfección por VHB exige mantener dos fármacos activos frente al VHB (habitualmente tenofovir —TAF o TDF— junto con 3TC o FTC). La pauta dual DTG/3TC no cubre adecuadamente el VHB y, al retirar el tenofovir, existe riesgo de reactivación de la hepatitis B con posible hepatitis grave. Por tanto, la coinfección por VHB contraindica esta simplificación; debe mantenerse un régimen con cobertura anti-VHB.",
+     "guides": ["TAR_2022"], "hops": 2},
+    {"question": "En un paciente con insuficiencia renal avanzada que además tiene hepatitis B crónica, ¿cómo se resuelve el conflicto para cubrir el VHB sin dañar el riñón?",
+     "reference": "Hay un conflicto: el VHB exige tenofovir (activo frente al VHB), pero el tenofovir disoproxilo (TDF) es nefrotóxico y debe evitarse en insuficiencia renal. La solución es usar tenofovir alafenamida (TAF), que mantiene actividad anti-VHB con mucha menor toxicidad renal y se puede emplear en grados moderados de insuficiencia (con precaución según el filtrado), en lugar de TDF. Deben ajustarse al filtrado glomerular los ITIAN de eliminación renal y recordar que cobicistat eleva la creatinina sin reducir el filtrado real. No debe retirarse la cobertura anti-VHB sin una alternativa activa.",
+     "guides": ["TAR_2022"], "hops": 2},
+    {"question": "Tras una exposición ocupacional de riesgo en una profesional sanitaria embarazada, ¿está indicada la profilaxis postexposición y cómo influye el embarazo en la pauta?",
+     "reference": "El embarazo no contraindica la PEP: si la exposición es de riesgo y la fuente es VIH positiva (o de serología desconocida con riesgo), debe iniciarse cuanto antes, idealmente en las primeras horas y siempre dentro de las 72 horas. Se eligen antirretrovirales con experiencia de seguridad en gestación, evitando los desaconsejados en embarazo, y manteniendo la pauta 4 semanas con seguimiento serológico. Debe valorarse el riesgo-beneficio e informar a la paciente, pero el embarazo en sí no es motivo para no administrar la PEP.",
+     "guides": ["profilaxis", "VIH_embarazo"], "hops": 2},
+    {"question": "En un paciente con tuberculosis y CD4 muy bajos, ¿cuándo iniciar el TAR y cómo evitar a la vez el síndrome de reconstitución inmune y las interacciones con la rifampicina?",
+     "reference": "Con CD4 muy bajos (<50 cél/µL) el TAR debe iniciarse precozmente, dentro de las primeras 2 semanas del tratamiento antituberculoso, para reducir la mortalidad; con CD4 más altos puede diferirse hasta unas 8 semanas. La excepción es la meningitis tuberculosa, donde se retrasa el inicio por el alto riesgo de SIRI grave. Para evitar las interacciones con la rifampicina (inductor potente), se eligen fármacos compatibles: efavirenz a dosis estándar o dolutegravir 50 mg/12 h, evitando bictegravir, elvitegravir/cobicistat, cabotegravir y los IP potenciados.",
+     "guides": ["VIH_TB", "TAR_2022"], "hops": 3},
+    {"question": "En un paciente que inicia TAR con CD4 muy bajos y va a viajar a una zona con fiebre amarilla, ¿puede vacunarse y cuándo?",
+     "reference": "La vacuna de la fiebre amarilla es de virus vivos atenuados y está contraindicada con inmunodepresión grave (CD4 <200 cél/µL o <15%). Por tanto, en un paciente con CD4 muy bajos no debe administrarse de inicio: hay que esperar a la recuperación inmune con el TAR (CD4 ≥200 de forma estable) y entonces valorar la vacunación antes del viaje. Mientras tanto, las vacunas inactivadas sí son seguras, aunque su respuesta puede estar disminuida con CD4 bajos.",
+     "guides": ["medicina_preventiva", "TAR_2022"], "hops": 2},
+    {"question": "En un paciente con deterioro neurocognitivo y escape virológico en LCR pese a carga viral plasmática indetectable, ¿qué hay que tener en cuenta al elegir el TAR?",
+     "reference": "El escape viral en LCR refleja replicación compartimentada en el SNC por penetración insuficiente de los fármacos o resistencia local, y puede causar daño neurocognitivo pese a la supresión plasmática. Al elegir el TAR conviene tener en cuenta la penetración de los fármacos en el SNC y orientar el régimen, idealmente guiado por un estudio de resistencias en LCR, hacia fármacos con buena penetración en el sistema nervioso central. Debe confirmarse y monitorizarse la carga viral en LCR.",
+     "guides": ["neurocognitivo", "TAR_2022"], "hops": 2},
+    {"question": "Un paciente con adherencia irregular y antecedente de fracaso con un ITINN quiere pasarse a la pauta inyectable de cabotegravir + rilpivirina. ¿Es buena idea?",
+     "reference": "No. La pauta inyectable de cabotegravir + rilpivirina está contraindicada si hay evidencia actual o previa de resistencia o fracaso a los ITINN o a los inhibidores de integrasa, como es el caso (fracaso previo a un ITINN), aunque ahora esté suprimido, por el alto riesgo de fracaso y de resistencias. Además, en adherencia irregular se prefieren regímenes con alta barrera genética (dolutegravir, bictegravir); el inyectable de acción prolongada no resuelve por sí solo el problema de adherencia y exige cumplimiento estricto de las visitas.",
+     "guides": ["adherencia", "TAR_2022"], "hops": 2},
+    {"question": "En una gestante con VIH y adherencia irregular, ¿qué riesgos añade la mala adherencia y qué hay que reforzar para prevenir la transmisión vertical?",
+     "reference": "La adherencia irregular impide alcanzar y mantener la supresión virológica, lo que aumenta el riesgo de transmisión vertical (que es mínimo con carga viral indetectable) y el de selección de resistencias. Hay que reforzar intensamente la adherencia, monitorizar estrechamente la carga viral —en especial cerca del parto—, y si la viremia no está controlada al final de la gestación valorar medidas adicionales de profilaxis de la transmisión vertical (incluida la pauta intraparto y la profilaxis al recién nacido) y la vía del parto según la carga viral.",
+     "guides": ["VIH_embarazo", "adherencia"], "hops": 2},
+    {"question": "En un paciente con fracaso virológico y múltiples resistencias que además desarrolla tuberculosis, ¿cómo se diseña el rescate teniendo en cuenta la rifampicina?",
+     "reference": "El principio del rescate es construir un régimen con al menos dos (preferiblemente tres) fármacos plenamente activos según el estudio de resistencias histórico y actual, sin añadir nunca un solo fármaco activo a un régimen que fracasa. La tuberculosis añade la restricción de la rifampicina: hay que evitar los antirretrovirales cuyas concentraciones reduce (bictegravir, elvitegravir/cobicistat, cabotegravir, IP potenciados) y, si se necesitan, valorar sustituir la rifampicina por rifabutina para poder usar IP potenciados, o ajustar dolutegravir a 50 mg/12 h. La selección de fármacos activos manda, y se adapta la pauta antituberculosa para hacerla compatible.",
+     "guides": ["TAR_2022", "VIH_TB"], "hops": 3},
+    {"question": "En un paciente polimedicado con riesgo cardiovascular que quiere simplificar el TAR, ¿qué clase de antirretrovirales facilita el manejo y qué considerar por el perfil metabólico?",
+     "reference": "Los inhibidores de integrasa sin potenciador (dolutegravir, bictegravir, raltegravir) tienen menos interacciones que las pautas potenciadas con ritonavir/cobicistat o que los ITINN, por lo que son la opción más fácil en pacientes polimedicados. Por el perfil metabólico hay que tener en cuenta que algunos inhibidores de integrasa y el TAF se asocian a aumento de peso y dislipemia, lo que importa en un paciente con riesgo cardiovascular; conviene elegir la pauta de menor impacto metabólico y adecuada barrera genética, valorando también el riesgo cardiovascular residual asociado a la propia infección. Antes de simplificar deben descartarse resistencias previas, coinfección por VHB y garantizar la adherencia.",
+     "guides": ["TAR_2022"], "hops": 2},
+    {"question": "¿Por qué un paciente con buen control inmunovirológico (CD4 altos, carga viral indetectable) puede aun así presentar deterioro neurocognitivo, y qué relación tiene esto con la adherencia?",
+     "reference": "El buen control periférico no garantiza el control en el SNC: pueden persistir trastornos neurocognitivos (HAND) por establecimiento temprano del reservorio en el SNC, neuroinflamación crónica, penetración variable del TAR, daño acumulado por un nadir de CD4 bajo y comorbilidades. Esto se relaciona con la adherencia en doble sentido: el deterioro cognitivo dificulta la adherencia al tratamiento (olvidos, errores de dosis), y a su vez una adherencia subóptima favorece la replicación residual y el daño; por ello conviene detectar el deterioro cognitivo y reforzar y simplificar la adherencia en estos pacientes.",
+     "guides": ["neurocognitivo", "adherencia"], "hops": 2},
+    {"question": "En una gestante que llega al tercer trimestre con carga viral detectable, ¿qué medidas de profilaxis de la transmisión vertical deben adoptarse?",
+     "reference": "Con carga viral detectable cerca del parto el riesgo de transmisión vertical aumenta y deben reforzarse las medidas: optimizar y reforzar el TAR materno y la adherencia, repetir la carga viral, administrar zidovudina intravenosa intraparto, valorar la cesárea electiva si la carga viral permanece elevada (en torno a >1000 copias/mL) y aplicar profilaxis antirretroviral al recién nacido (combinada si el riesgo es alto). El objetivo es alcanzar la máxima reducción posible de la viremia antes del parto.",
+     "guides": ["VIH_embarazo"], "hops": 2},
+    {"question": "Tras una exposición sexual de riesgo, ¿cuándo NO está indicada la PEP y qué seguimiento se hace si sí se indica?",
+     "reference": "No se indica PEP cuando no hay riesgo apreciable: fuente VIH negativa o con carga viral indetectable confirmada, contacto con fluidos no infecciosos, exposición sobre piel intacta, o cuando han transcurrido más de 72 horas. Si está indicada, se inicia cuanto antes (idealmente en las primeras horas, siempre <72 h) con una pauta de tres fármacos durante 4 semanas y se realiza seguimiento serológico del VIH (basal y a las 4-6 semanas y 3 meses, con esquemas según la prueba), además de cribado de otras ITS y de VHB/VHC y valoración de adherencia y tolerancia.",
+     "guides": ["profilaxis"], "hops": 2},
+    {"question": "En un paciente con VIH-2 que además requiere un régimen donde se usarían ITINN, ¿qué limitación hay y cómo afecta a la elección del tratamiento?",
+     "reference": "El VIH-2 es intrínsecamente resistente a los ITINN (y a la enfuvirtida) y responde peor a algunos inhibidores de la proteasa, por lo que cualquier estrategia basada en ITINN es inválida frente al VIH-2. El tratamiento debe basarse en 2 ITIAN combinados con un inhibidor de integrasa (o un IP/p activo), evitando los ITINN. La monitorización es más compleja por la falta de cargas virales estandarizadas para el VIH-2.",
+     "guides": ["TAR_2022"], "hops": 2},
+    {"question": "En un paciente con tuberculosis que necesita un inhibidor de la proteasa potenciado en su TAR, ¿cómo se compatibiliza con el tratamiento antituberculoso?",
+     "reference": "La rifampicina no puede combinarse con inhibidores de la proteasa potenciados con ritonavir o cobicistat porque reduce drásticamente sus concentraciones. Para compatibilizarlos se sustituye la rifampicina por rifabutina (ajustando su dosis), que tiene mucha menor inducción enzimática y permite mantener el IP potenciado. Alternativamente, si se conserva la rifampicina, debe rediseñarse el TAR hacia fármacos compatibles (efavirenz a dosis estándar o dolutegravir 50 mg/12 h) en lugar del IP potenciado.",
+     "guides": ["VIH_TB", "TAR_2022"], "hops": 2},
+]
+
+
+# Dataset under evaluation: GOLDEN_SET (single-hop regression) or MULTIHOP_SET (Phase 4).
+DATASET = MULTIHOP_SET
+
+
+def build_dataset(dataset: list[dict], retriever) -> tuple[EvaluationDataset, list[float]]:
+    """Run each question through `retriever` + the shared generator and assemble the
+    dataset RAGAS consumes. Only retrieval varies between pipelines (generation is fixed)
+    so the comparison is fair. Also returns the per-question latency (retrieval +
+    generation) for the velocity axis of the A/B."""
     rows = []
     omitted = []
-    for i, case in enumerate(golden_set, 1):
+    latencies = []
+    for i, case in enumerate(dataset, 1):
         question = case["question"].strip()
         reference = case.get("reference", "").strip()
 
@@ -134,30 +250,40 @@ def build_dataset(golden_set: list[dict]) -> EvaluationDataset:
             omitted.append(i)
             continue
 
-        # --- pipeline, identical to main() ---
-        payloads = RETRIEVER(question)                      # list[dict]
-        _, formatted_context = build_context(payloads)
-        output = generate_answer(question, formatted_context)
+        # --- pipeline: swappable retrieval + (optional) shared generation ---
+        t0 = time.perf_counter()
+        payloads = retriever(question)                      # list[dict]
+        # In RETRIEVAL_ONLY we skip generation: the kept metrics (recall/precision) only
+        # need the retrieved contexts + reference, not a generated answer.
+        answer_text = ""
+        if not RETRIEVAL_ONLY:
+            _, formatted_context = build_context(payloads)
+            answer_text = generate_answer(question, formatted_context)["answer"]
+        dt = time.perf_counter() - t0
+        latencies.append(dt)
 
         rows.append({
             "user_input": question,
             "retrieved_contexts": [p["text"] for p in payloads if p],
-            "response": output["answer"],
+            "response": answer_text,
             "reference": reference,
         })
-        print(f"[{i}/{len(golden_set)}] processed")
+        print(f"[{i}/{len(dataset)}] processed ({dt:.1f}s)")
 
     if omitted:
         print(f"\nSkipped (no reference filled in): {omitted}")
     if not rows:
-        raise SystemExit("No question has a reference. Fill in the GOLDEN_SET.")
+        raise SystemExit("No question has a reference. Fill in the dataset.")
 
     print(f"\n{len(rows)} questions ready to evaluate.\n")
-    return EvaluationDataset.from_list(rows)
+    return EvaluationDataset.from_list(rows), latencies
 
 
 def main():
-    dataset = build_dataset(GOLDEN_SET)
+    retriever = get_pipeline(PIPELINE)
+    mode = "retrieval-only" if RETRIEVAL_ONLY else "full"
+    print(f"Pipeline: {PIPELINE} | mode: {mode} | dataset: {len(DATASET)} preguntas\n")
+    dataset, latencies = build_dataset(DATASET, retriever)
 
     print(f"Evaluating with judge: {JUDGE_MODEL}\n")
     evaluator_llm = LangchainLLMWrapper(ChatOpenAI(model=JUDGE_MODEL))
@@ -165,18 +291,27 @@ def main():
         OpenAIEmbeddings(model="text-embedding-3-large")
     )
 
-    metrics = [
-        Faithfulness(),                          # does the answer stick to the context? (no reference)
-        ResponseRelevancy(),                     # does it answer the question? (no reference)
-        LLMContextPrecisionWithReference(),      # retriever: is the relevant context ranked high? (uses reference)
-        LLMContextRecall(),                      # retriever: was everything needed retrieved? (uses reference)
-    ]
+    # answer_relevancy omitted on purpose: it is misleading on Spanish answers (Phase 0
+    # artifact ~0.42) and adds cost without signal. The retrieval metrics (precision/recall)
+    # are the axes a multi-hop A/B turns on; faithfulness (grounding) is only added in the
+    # full run, since it needs the generated answer.
+    if RECALL_ONLY:
+        metrics = [LLMContextRecall()]
+    elif RETRIEVAL_ONLY:
+        metrics = [LLMContextPrecisionWithReference(), LLMContextRecall()]
+    else:
+        metrics = [Faithfulness(), LLMContextPrecisionWithReference(), LLMContextRecall()]
 
+    # Default RAGAS concurrency (16 workers, 180s timeout) overwhelms the judge -> NaN.
+    # 8 workers + a long timeout + retries is the stable point (16 still timed out on the
+    # heavy precision metric). Generation (gpt-4o) is sequential anyway in build_dataset.
+    run_config = RunConfig(timeout=600, max_workers=8, max_retries=10)
     result = evaluate(
         dataset=dataset,
         metrics=metrics,
         llm=evaluator_llm,
         embeddings=evaluator_embeddings,
+        run_config=run_config,
     )
     assert isinstance(result, EvaluationResult)
 
@@ -184,12 +319,20 @@ def main():
     print(result)
 
     df = result.to_pandas()
-    df.to_csv("resultados_ragas.csv", index=False)
-    print("\nDetail saved to resultados_ragas.csv")
+    suffix = f"{PIPELINE}_retrieval" if RETRIEVAL_ONLY else PIPELINE
+    out_csv = f"resultados_ragas_{suffix}.csv"     # per-pipeline/mode file so runs don't clash
+    df.to_csv(out_csv, index=False)
+    print(f"\nDetail saved to {out_csv}")
 
     pd.set_option("display.max_colwidth", 60)
     print("\n=== Means per metric ===")
     print(df.select_dtypes("number").mean())
+
+    # Velocity axis of the A/B: latency per query (retrieval + generation).
+    if latencies:
+        print("\n=== Latency (s/query) ===")
+        print(f"mean={statistics.mean(latencies):.1f}  median={statistics.median(latencies):.1f}  "
+              f"max={max(latencies):.1f}  total={sum(latencies):.0f}")
 
 
 if __name__ == "__main__":

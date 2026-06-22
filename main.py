@@ -42,6 +42,7 @@ if TRACING:
 import rag  # creates the OpenAI/Qdrant clients on import
 from rag import (refine, retrieve_hybrid, rerank, build_context, validate,
                  SYS_PROMPT, build_user_prompt, GENERATION_MODEL)
+from agentic.iterative import iterative_search   # Track A (agentic, multi-hop)
 from evidence import format_answer
 
 # --- Fine-grained tracing of OpenAI calls (tokens, latency) WITHOUT modifying rag.py ---
@@ -83,6 +84,18 @@ _structured_llm = ChatOpenAI(model=GENERATION_MODEL, temperature=0.2).with_struc
 
 # Validation loop: max number of generations (initial + retries).
 MAX_ITER = 2
+
+# Retrieval strategy (Phase 4) — switch here (also works live in LangGraph Studio):
+#   "baseline"  -> hybrid + reranker (single-shot, current system)
+#   "iterative" -> Track A (agentic): self-ask / reflect-retrieve loop for multi-hop
+#                  (single-hop questions fall back to baseline inside iterative_search)
+#   "graph"     -> Track B: LightRAG entity-relation graph retrieval (needs the index
+#                  built once: python -m graph.lightrag_track)
+# All three feed the SAME generate -> validate -> evidence, so citations and the
+# anti-hallucination validator are identical across strategies.
+# F4 A/B decision: "graph" wins context_recall on the multi-hop set (0.98 vs 0.86
+# iterative vs 0.84 baseline) at baseline-level latency (~11s), so it is the default.
+RETRIEVAL_MODE = "graph"
 
 # --- User-facing messages (kept in Spanish: shown to the user) ---
 MSG_NOT_VALIDATED = (
@@ -146,8 +159,14 @@ def node_out_of_domain(state: RAGState) -> dict:
 
 
 def route_domain(state: RAGState) -> str:
-    """After rephrase: in domain -> retrieve; out of domain -> message and end."""
-    return "retrieve" if state.get("in_domain", True) else "out_of_domain"
+    """After rephrase: out of domain -> message and end; in domain -> the configured
+    retrieval strategy (baseline single-shot, Track A iterative, or Track B graph)."""
+    if not state.get("in_domain", True):
+        return "out_of_domain"
+    return {
+        "iterative": "iterative_retrieve",
+        "graph": "graph_retrieve",
+    }.get(RETRIEVAL_MODE, "retrieve")
 
 
 def node_retrieve(state: RAGState) -> dict:
@@ -159,6 +178,35 @@ def node_retrieve(state: RAGState) -> dict:
 def node_rerank(state: RAGState) -> dict:
     """candidates -> top 5 reordered by the cross-encoder + numbered context."""
     contexts = rerank(state["search_query"], state["candidates"], top_k=5)
+    chunk_index, formatted_context = build_context(contexts)
+    return {
+        "contexts": contexts,
+        "chunk_index": chunk_index,
+        "formatted_context": formatted_context,
+    }
+
+
+def node_iterative_retrieve(state: RAGState) -> dict:
+    """Track A: multi-hop retrieval (plan -> hop retrieve -> reflect) producing the same
+    numbered-context shape the baseline rerank node yields, so generate/validate/evidence
+    (and the literal-citation panel) work unchanged. Uses the ORIGINAL question; the
+    iterative search does its own decomposition and normalization."""
+    contexts = iterative_search(state["question"], top_k=8)
+    chunk_index, formatted_context = build_context(contexts)
+    return {
+        "contexts": contexts,
+        "chunk_index": chunk_index,
+        "formatted_context": formatted_context,
+    }
+
+
+def node_graph_retrieve(state: RAGState) -> dict:
+    """Track B: LightRAG graph retrieval. Selects source chunks via entity/relation
+    traversal and maps them back to our payloads, yielding the same numbered-context shape
+    as the other retrieval nodes so generate/validate/evidence are unchanged. Imported
+    lazily so baseline/iterative runs do not load LightRAG."""
+    from graph.lightrag_track import graph_search
+    contexts = graph_search(state["question"], top_k=8)
     chunk_index, formatted_context = build_context(contexts)
     return {
         "contexts": contexts,
@@ -232,6 +280,8 @@ def build_graph():
     builder.add_node("out_of_domain", node_out_of_domain)
     builder.add_node("retrieve", node_retrieve)
     builder.add_node("rerank", node_rerank)
+    builder.add_node("iterative_retrieve", node_iterative_retrieve)
+    builder.add_node("graph_retrieve", node_graph_retrieve)
     builder.add_node("generate", node_generate)
     builder.add_node("validate", node_validate)
     builder.add_node("evidence", node_evidence)
@@ -240,10 +290,15 @@ def build_graph():
     builder.add_edge(START, "rephrase")
     # Domain guardrail: in -> retrieve; out -> direct message (cuts the pipeline)
     builder.add_conditional_edges("rephrase", route_domain,
-                                  {"retrieve": "retrieve", "out_of_domain": "out_of_domain"})
+                                  {"retrieve": "retrieve",
+                                   "iterative_retrieve": "iterative_retrieve",
+                                   "graph_retrieve": "graph_retrieve",
+                                   "out_of_domain": "out_of_domain"})
     builder.add_edge("out_of_domain", END)
     builder.add_edge("retrieve", "rerank")
     builder.add_edge("rerank", "generate")
+    builder.add_edge("iterative_retrieve", "generate")
+    builder.add_edge("graph_retrieve", "generate")
     builder.add_edge("generate", "validate")
     # Loop: validate -> evidence (valid) | generate (retry) | fallback (exhausted)
     builder.add_conditional_edges("validate", route_validation,

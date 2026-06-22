@@ -16,3 +16,7 @@ wheels/
 
 # LangGraph dev server (caché local)
 .langgraph_api/
+
+# LightRAG knowledge-graph store (Track B, F4) — regenerable con lightrag_track.py
+lightrag_store/
+_probe_store/

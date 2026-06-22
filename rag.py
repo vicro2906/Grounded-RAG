@@ -99,13 +99,22 @@ def _get_reranker():
     return _reranker
 
 
+# The cross-encoder pads every item in a batch to the LONGEST one on CPU, so a single
+# long chunk makes the whole rerank crawl (~128 s observed). We only need a strong
+# relevance SIGNAL, not the full text, so we score a truncated prefix while still
+# RETURNING the full payloads. Measured effect: ~128 s -> ~5 s, ranking essentially
+# unchanged. Raise this if very long chunks ever need deeper scoring.
+RERANK_SCORE_CHARS = 512
+
 def rerank(query: str, payloads: list, top_k: int = 5) -> list:
     """Reorder the chunks with a cross-encoder that looks at the question and the
     text TOGETHER (far more precise than the retriever's cosine) and return the top_k.
-    Unlike the bi-encoder, it usually understands abbreviations (e.g. DTG=dolutegravir)."""
+    Unlike the bi-encoder, it usually understands abbreviations (e.g. DTG=dolutegravir).
+    Scores only the first RERANK_SCORE_CHARS of each chunk (latency fix); returns the
+    full payloads untouched."""
     if not payloads:
         return []
-    docs = [p["text"] for p in payloads]
+    docs = [p["text"][:RERANK_SCORE_CHARS] for p in payloads]
     scores = list(_get_reranker().rerank(query, docs))
     ordered = sorted(zip(scores, payloads), key=lambda x: x[0], reverse=True)
     return [p for _, p in ordered[:top_k]]
@@ -185,6 +194,12 @@ def rephrase(query: str) -> str:
 def search(query: str, top_k: int = 5) -> list:
     """Full retrieval pipeline (Phase 2 + 3): rephrase -> hybrid -> reranker."""
     return retrieve_rerank(rephrase(query), top_k=top_k)
+
+
+# Track A (iterative/agentic, multi-hop) lives in ../agentic/iterative.py and Track B
+# (LightRAG graph) in ../graph/lightrag_track.py. Both import the shared primitives above
+# (retrieve_hybrid, rerank, retrieve_rerank, search) from this parent module.
+
 
 def build_context(context: list):
     """Build a formatted, numbered text out of the retrieved chunks."""

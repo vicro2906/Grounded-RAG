@@ -10,6 +10,7 @@ dependencies = [
     "langgraph>=1.2.5",
     "langgraph-cli[inmem]>=0.4.30",
     "langsmith>=0.8.16",
+    "lightrag-hku>=1.4.9.3",
     "openai>=2.41.1",
     "pandas>=3.0.3",
     "python-dotenv>=1.2.2",
