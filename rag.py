@@ -37,12 +37,20 @@ GENERATION_MODEL = "gpt-4o"
 REPHRASE_MODEL   = "gpt-4o-mini"
 VALIDATION_MODEL = "gpt-4o-mini"   # grounding/relevance judge (safety net)
 
+# A lock guards the lazy model loads: retrieval now runs sub-queries / branches in parallel
+# (iterative fan-out, graph traverse∥hybrid), so two threads could hit a cold model at once.
+# Double-checked locking keeps the fast path lock-free once the model is loaded.
+import threading
+_model_lock = threading.Lock()
+
 _bm25 = None
 def _get_bm25() -> SparseTextEmbedding:
-    """Lazy-load the BM25 model (instantiated/downloaded only once)."""
+    """Lazy-load the BM25 model (instantiated/downloaded only once; thread-safe)."""
     global _bm25
     if _bm25 is None:
-        _bm25 = SparseTextEmbedding("Qdrant/bm25")
+        with _model_lock:
+            if _bm25 is None:
+                _bm25 = SparseTextEmbedding("Qdrant/bm25")
     return _bm25
 
 def get_embedding(text: str):
@@ -96,29 +104,45 @@ RERANKER_MODEL = "jinaai/jina-reranker-v2-base-multilingual"
 RERANK_DEVICE = os.environ.get("RERANK_DEVICE", "cpu").lower()  # "cpu" | "cuda" | "auto"
 _reranker = None
 def _get_reranker():
-    """Lazy-load the cross-encoder (downloaded/instantiated only once)."""
+    """Lazy-load the cross-encoder (downloaded/instantiated only once; thread-safe)."""
     global _reranker
     if _reranker is None:
-        from fastembed.rerank.cross_encoder import TextCrossEncoder
-        try:
-            if RERANK_DEVICE == "cuda":
-                _reranker = TextCrossEncoder(RERANKER_MODEL, cuda=True)
-            elif RERANK_DEVICE == "auto":
-                _reranker = TextCrossEncoder(RERANKER_MODEL)  # fastembed picks the device
-            else:
-                _reranker = TextCrossEncoder(RERANKER_MODEL, cuda=False)
-        except Exception:
-            # CUDA asked for but no GPU provider available -> safe CPU fallback.
-            _reranker = TextCrossEncoder(RERANKER_MODEL, cuda=False)
+        with _model_lock:
+            if _reranker is None:
+                from fastembed.rerank.cross_encoder import TextCrossEncoder
+                try:
+                    if RERANK_DEVICE == "cuda":
+                        _reranker = TextCrossEncoder(RERANKER_MODEL, cuda=True)
+                    elif RERANK_DEVICE == "auto":
+                        _reranker = TextCrossEncoder(RERANKER_MODEL)  # fastembed picks device
+                    else:
+                        _reranker = TextCrossEncoder(RERANKER_MODEL, cuda=False)
+                except Exception:
+                    # CUDA asked for but no GPU provider available -> safe CPU fallback.
+                    _reranker = TextCrossEncoder(RERANKER_MODEL, cuda=False)
     return _reranker
+
+
+def warmup() -> None:
+    """Preload the local models (reranker + BM25) so the FIRST query does not pay their
+    ~3.5s load. Safe to call repeatedly and from a background thread (lazy + locked)."""
+    try:
+        _get_reranker()
+        _get_bm25()
+    except Exception:
+        pass
 
 
 # The cross-encoder pads every item in a batch to the LONGEST one on CPU, so a single
 # long chunk makes the whole rerank crawl (~128 s observed). We only need a strong
 # relevance SIGNAL, not the full text, so we score a truncated prefix while still
-# RETURNING the full payloads. Measured effect: ~128 s -> ~5 s, ranking essentially
-# unchanged. Raise this if very long chunks ever need deeper scoring.
-RERANK_SCORE_CHARS = 512
+# RETURNING the full payloads. Measured effect: ~128 s -> ~5 s.
+# This is the dominant cost of retrieval on CPU and scales ~linearly with the length:
+# 20 docs take ~3.8 s @512, ~1.8 s @256, ~1.0 s @128. Tunable via RERANK_SCORE_CHARS, but
+# the DEFAULT stays 512 because lowering it shifts the top-8 (measured: 256 changes up to
+# ~3/8 chunks on some queries) and quality/no-hallucination is priority #1. The real fix for
+# rerank latency is the GPU (see RERANK_DEVICE) — it cuts each call ~10-50x.
+RERANK_SCORE_CHARS = int(os.environ.get("RERANK_SCORE_CHARS", "512"))
 
 def rerank(query: str, payloads: list, top_k: int = 5) -> list:
     """Reorder the chunks with a cross-encoder that looks at the question and the

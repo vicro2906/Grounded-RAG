@@ -235,14 +235,36 @@ Artefactos de evaluación versionados: `resultados_ragas.csv` (baseline F0) y
   largo en CPU. **Fix aplicado en `rag.rerank`: se puntúa solo `p["text"][:512]`
   (constante `RERANK_SCORE_CHARS`) y se devuelven los payloads completos.** Una consulta
   multi-hop bajó de ~145 s a ~23 s (en frío). Crítico para Track A, que rerankea varias
-  veces. Equipo: 12 cores. **GPU (opt-in):** `rag._get_reranker` acepta `RERANK_DEVICE`
-  (`cpu` por defecto / `cuda` / `auto`) y cae a CPU si no hay GPU. Para usar la GPU hace
-  falta sustituir `onnxruntime` (CPU) por **`onnxruntime-gpu`** + CUDA/cuDNN en el sistema
-  (la GTX 1060 vale, modelo pequeño). Ganancia hoy MARGINAL: el cuello ya no es el reranker
-  (lo arregló el truncado a 512), sino gpt-4o (~5 s, remoto) y LightRAG; la GPU solo acelera
-  este modelo local.
-- Modelos locales (BM25, reranker) con carga perezosa: la 1ª consulta del proceso paga
-  ~3.5 s de carga del reranker. Studio lo mantiene cargado entre consultas.
+  veces. Equipo: 12 cores. `RERANK_SCORE_CHARS` ahora es env-configurable (default 512).
+- **EL RERANKER SIGUE SIENDO EL CUELLO DE LA RECUPERACIÓN (medido):** `retrieve_hybrid`
+  (embed+Qdrant+BM25) ~0.44 s vs `rerank` de 20 docs **~3.8 s @512** (escala ~lineal:
+  ~1.8 s @256, ~1.0 s @128). Se llama 1× (baseline/graph) hasta 4× (iterative: 3 subpreguntas
+  + final). Bajar a 256 da ~2× pero **cambia el top-8** (hasta ~3/8 en algunas consultas) →
+  no se baja el default (prioridad nº1: no alucinar). **La paralelización rinde poco en
+  iterative (~1.1×)** porque 3 rerankers en CPU saturan los núcleos; sí ayuda en graph
+  (traversía ∥ híbrido = recursos distintos).
+- **Optimizaciones aplicadas (esta sesión):** (1) `iterative_search` recupera las
+  subpreguntas planificadas EN PARALELO (`ThreadPoolExecutor`); (2) `graph_search` corre
+  traversía ∥ híbrido en paralelo; (3) `rag.warmup()` precarga reranker+BM25 y `main.py` lo
+  lanza en un hilo daemon al importar (mata el ~3.5 s de la 1ª consulta); (4) locks
+  thread-safe en las cargas perezosas de modelos. Los grafos dedicados de Studio ya
+  paralelizaban (Send / ramas).
+- **LA PALANCA REAL DE VELOCIDAD ES LA GPU** (corrige la nota previa de "marginal"): medido,
+  el reranker domina la recuperación y en CPU no paraleliza. En la GTX 1060 cada `rerank`
+  pasaría de ~3.8 s a ~0.1-0.3 s (10-50×), beneficiando sobre todo a iterative (4 reranks).
+  Activar: `onnxruntime-gpu` + CUDA/cuDNN y `RERANK_DEVICE=cuda` (hook ya puesto, fallback
+  a CPU). Pendiente porque requiere setup de sistema (CUDA en Windows).
+- **El coste del reranker es IRREDUCIBLE en CPU sin perder calidad (medido).** Probado:
+  (a) bajar chars 512→256 cambia top‑8 (hasta 3/8); (b) reranquear menos candidatos (top15
+  vs top20) cambia top‑5 (24/30 coinciden; alguna consulta 2/5); (c) una sola pasada de
+  rerank en iterative cambia top‑8 (3‑6/8). El cross-encoder reordena fuerte (un chunk en
+  el puesto 18 del híbrido entra a su top‑5), así que necesita los 20 candidatos @512. NO
+  aplicadas: degradarían la evidencia (prioridad nº1). La única vía real es la GPU.
+- **GPU disponible: GTX 1650 4 GB, driver 511.09 (CUDA máx 11.6).** Para `onnxruntime-gpu`
+  hay que ACTUALIZAR driver (≥522 para CUDA 11.8, o ≥528 para CUDA 12) + CUDA toolkit +
+  cuDNN, luego `RERANK_DEVICE=cuda`. Setup de sistema (admin), no inmediato.
+- Modelos locales (BM25, reranker) con carga perezosa + `warmup()`: sin warm-up, la 1ª
+  consulta paga ~3.5 s de carga. Studio mantiene los modelos cargados entre consultas.
 - generate (gpt-4o) ~5 s: considerar streaming para mejorar latencia percibida (F5).
 - **LÍMITE OpenAI: gpt-4o a 30.000 TPM (bajo).** La generación NO se puede paralelizar:
   correr varios pipelines a la vez en la eval → `429 RateLimitError` y crash. Correr los

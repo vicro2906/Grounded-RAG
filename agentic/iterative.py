@@ -14,12 +14,14 @@ Phase-4 approaches (agentic here, graph in ../graph/) stay cleanly separated whi
 the same retrieval core and the same downstream generate -> validate -> evidence.
 """
 from typing import cast
+from concurrent.futures import ThreadPoolExecutor
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 # Shared retrieval core lives in the parent module.
-from rag import retrieve_rerank, rerank, search, REPHRASE_MODEL, _ABBREV_LIST
+from rag import (retrieve_rerank, rerank, search, REPHRASE_MODEL, _ABBREV_LIST,
+                 _get_reranker, _get_bm25)
 
 MAX_HOPS = 3        # total retrieval rounds (initial sub-queries + reflect follow-ups)
 PER_HOP  = 5        # chunks kept per sub-query before pooling
@@ -132,10 +134,15 @@ def iterative_search(query: str, top_k: int = 8, max_hops: int = MAX_HOPS,
         return search(query, top_k=top_k)
 
     pool: dict = {}
-    rounds = 0
-    for sq in plan["sub_queries"][:max_hops]:
-        _accumulate(pool, retrieve_rerank(sq, top_k=per_hop))
-        rounds += 1
+    subs = plan["sub_queries"][:max_hops]
+    # The planned sub-queries are independent, so retrieve+rerank them IN PARALLEL (each does
+    # an embedding + Qdrant + cross-encoder). Pre-warm the local models first so the workers
+    # don't race on the lazy load. ex.map preserves input order -> dedup is deterministic.
+    _get_reranker(); _get_bm25()
+    with ThreadPoolExecutor(max_workers=max(1, len(subs))) as ex:
+        for payloads in ex.map(lambda sq: retrieve_rerank(sq, top_k=per_hop), subs):
+            _accumulate(pool, payloads)
+    rounds = len(subs)
 
     while rounds < max_hops:
         r = _reflect(query, pool)

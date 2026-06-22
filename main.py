@@ -642,6 +642,12 @@ app_iterative = build_graph("iterative")
 app_graph     = build_graph("graph")
 app = build_combined_graph()
 
+# Preload the local models (reranker + BM25) in the background so the first real query does
+# not pay their ~3.5s load. Daemon thread: never blocks import or shutdown, and warmup()
+# swallows its own errors. (LightRAG stays lazy on purpose — only loaded if graph mode runs.)
+import threading as _threading
+_threading.Thread(target=rag.warmup, daemon=True).start()
+
 
 def main_cli():
     # Optional first arg picks the retrieval mode for this run (e.g. `python main.py graph`).

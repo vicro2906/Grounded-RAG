@@ -49,7 +49,10 @@ from lightrag.utils import EmbeddingFunc
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.openai import openai_embed, gpt_4o_mini_complete
 
-from rag import rerank, retrieve_hybrid, rephrase  # shared retrieval primitives (parent module)
+from concurrent.futures import ThreadPoolExecutor
+
+from rag import (rerank, retrieve_hybrid, rephrase,  # shared retrieval primitives (parent)
+                 _get_reranker, _get_bm25)
 
 # --- Config ---------------------------------------------------------------
 WORKING_DIR = os.path.join(ROOT, "lightrag_store")          # file-based graph + vector store
@@ -291,13 +294,19 @@ def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: in
          dense+lexical one (BM25 helps with the guides' heavy abbreviation use).
 
     Both are merged (dedup by chunk_id) and reranked to top_k. The dedicated graph in main.py
-    runs these same three steps as separate, visible nodes (traverse -> hybrid -> merge ->
-    rerank); this function is the collapsed equivalent."""
-    graph_payloads = graph_traverse(query, chunk_top_k=chunk_top_k)
-
-    # Hybrid complement (reuse the rephrased query if the caller already computed it).
-    hq = hybrid_query or rephrase(query)
-    hybrid_payloads = retrieve_hybrid(hq, top_k=hybrid_k, prefetch_limit=30)
+    runs these same steps as separate, visible nodes; this function is the collapsed
+    equivalent. The graph traversal and the hybrid complement are independent (hybrid only
+    needs the rephrased query), so they run IN PARALLEL: the graph walk uses LightRAG's event
+    loop while the hybrid branch hits Qdrant/OpenAI on another thread."""
+    _get_reranker(); _get_bm25()  # pre-warm local models before the parallel branches
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fut_graph = ex.submit(graph_traverse, query, chunk_top_k)
+        # reuse the caller's rephrased query when available; else rephrase inside the thread
+        fut_hybrid = ex.submit(
+            lambda: retrieve_hybrid(hybrid_query or rephrase(query),
+                                    top_k=hybrid_k, prefetch_limit=30))
+        graph_payloads = fut_graph.result()
+        hybrid_payloads = fut_hybrid.result()
 
     merged = _merge_dedup(graph_payloads, hybrid_payloads)
     if not merged:
