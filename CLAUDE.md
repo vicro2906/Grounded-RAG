@@ -124,8 +124,11 @@ citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estrict
     cada uno contiene SOLO su arquitectura, con la recuperación **EXPANDIDA en sus nodos
     reales** (vista didáctica) en vez de esconderla tras un único `retrieve`:
       - baseline: `retrieve → rerank`
-      - iterative: `iter_plan → (iter_single | iter_hop ⇄ iter_reflect) → iter_rerank`
-        (loop self-ask, tope `MAX_HOPS`; single-hop cae a `iter_single` = one-shot baseline)
+      - iterative: `iter_plan → (iter_single | iter_retrieve → iter_reflect ⇄ iter_retrieve)
+        → iter_rerank` (loop self-ask claro: UNA arista de bucle `reflect→retrieve` y UNA de
+        salida `reflect→rerank`; tope `MAX_HOPS`; single-hop cae a `iter_single` = one-shot
+        baseline). iter_plan genera subpreguntas, iter_retrieve las recupera, iter_reflect
+        decide si faltan aspectos y, si sí, encola la siguiente subpregunta y vuelve a retrieve.
       - graph: `graph_traverse → graph_hybrid → graph_merge → graph_rerank`
     Cada nodo reusa las MISMAS primitivas que `iterative_search`/`graph_search` (sin cambio
     de comportamiento) y los estados intermedios se ven en Studio (`IterativeState`/
@@ -224,7 +227,12 @@ Artefactos de evaluación versionados: `resultados_ragas.csv` (baseline F0) y
   largo en CPU. **Fix aplicado en `rag.rerank`: se puntúa solo `p["text"][:512]`
   (constante `RERANK_SCORE_CHARS`) y se devuelven los payloads completos.** Una consulta
   multi-hop bajó de ~145 s a ~23 s (en frío). Crítico para Track A, que rerankea varias
-  veces. Equipo: 12 cores, sin GPU (con GPU NVIDIA, onnxruntime-gpu aceleraría 10-50×).
+  veces. Equipo: 12 cores. **GPU (opt-in):** `rag._get_reranker` acepta `RERANK_DEVICE`
+  (`cpu` por defecto / `cuda` / `auto`) y cae a CPU si no hay GPU. Para usar la GPU hace
+  falta sustituir `onnxruntime` (CPU) por **`onnxruntime-gpu`** + CUDA/cuDNN en el sistema
+  (la GTX 1060 vale, modelo pequeño). Ganancia hoy MARGINAL: el cuello ya no es el reranker
+  (lo arregló el truncado a 512), sino gpt-4o (~5 s, remoto) y LightRAG; la GPU solo acelera
+  este modelo local.
 - Modelos locales (BM25, reranker) con carga perezosa: la 1ª consulta del proceso paga
   ~3.5 s de carga del reranker. Studio lo mantiene cargado entre consultas.
 - generate (gpt-4o) ~5 s: considerar streaming para mejorar latencia percibida (F5).

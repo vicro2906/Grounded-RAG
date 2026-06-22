@@ -38,7 +38,7 @@ try:
 except (AttributeError, ValueError):
     pass
 
-from typing import Literal, TypedDict, cast
+from typing import Annotated, Literal, TypedDict, cast
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -69,6 +69,7 @@ if TRACING:
         pass
 
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Send   # fan-out: one parallel node run per sub-question
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
@@ -171,11 +172,32 @@ class RAGState(TypedDict):
 
 # Extra state for the DEDICATED expanded graphs (the teaching views). Subclassing keeps the
 # base RAGState clean: these intermediate keys only exist in the iterative / graph graphs.
+
+# Reducers let parallel branches (the per-sub-question fan-out) and successive loop rounds
+# accumulate into the SAME state keys: pool dedups as it grows, hops counts the sub-queries.
+def _merge_pool(existing: list | None, update: list | None) -> list:
+    """Append payloads not already present (dedup by chunk_id, fallback text)."""
+    pool = list(existing or [])
+    seen = {(p.get("chunk_id") or p.get("text", "")) for p in pool}
+    for p in (update or []):
+        key = p.get("chunk_id") or p.get("text", "")
+        if key and key not in seen:
+            seen.add(key)
+            pool.append(p)
+    return pool
+
+
+def _add_int(a: int | None, b: int | None) -> int:
+    return (a or 0) + (b or 0)
+
+
 class IterativeState(RAGState, total=False):
-    is_multihop: bool        # did the planner decide the question is multi-hop?
-    pending: list            # queue of sub-queries still to retrieve (plan + reflect refills)
-    pool: list               # payloads accumulated across hops (deduped), before final rerank
-    hops: int                # retrieval rounds done so far (capped at MAX_HOPS)
+    is_multihop: bool                      # did the planner decide the question is multi-hop?
+    planned: list                          # sub-questions produced by the planner
+    subquery: str                          # the single sub-question handed to one fan-out branch
+    next_query: str                        # follow-up sub-question requested by reflect ("" = done)
+    pool: Annotated[list, _merge_pool]     # payloads accumulated across all branches/rounds
+    hops: Annotated[int, _add_int]         # sub-queries retrieved so far (capped at MAX_HOPS)
 
 
 class GraphState(RAGState, total=False):
@@ -293,28 +315,27 @@ def node_graph_retrieve(state: RAGState) -> dict:
 # collapsed nodes above.
 # ---------------------------------------------------------------------------
 
-# --- Track A (iterative), expanded: plan -> hop(s) <-> reflect -> rerank ---
-def _dedup_extend(pool: list, new: list) -> list:
-    """Append payloads not already in pool (dedup by chunk_id, fallback text)."""
-    seen = {(p.get("chunk_id") or p.get("text", "")) for p in pool}
-    for p in new:
-        key = p.get("chunk_id") or p.get("text", "")
-        if key and key not in seen:
-            seen.add(key)
-            pool.append(p)
-    return pool
-
-
+# --- Track A (iterative), expanded with a per-sub-question FAN-OUT (Send) ---
+# Each sub-question is its OWN run of iter_retrieve_one, so Studio shows one retrieval (with
+# its own input/output) per sub-question instead of one node looping internally:
+#   iter_plan ─┬─ (single-hop) ─ iter_single ─────────────────────────────┐
+#              └─ (multi-hop)  ─ Send×N ▶ iter_retrieve_one ─ iter_reflect ─┬─ Send×1 ▶ (loop)
+#                                        (parallel, one per sub-question)   └─ iter_rerank ─┐
+#   ...everything converges into generate.  pool/hops accumulate via reducers (see state).
 def node_iter_plan(state: IterativeState) -> dict:
-    """PLAN: decompose the question into normalized sub-queries (or mark it single-hop)."""
+    """PLAN — generate the sub-questions: decompose the question into normalized sub-queries
+    (or mark it single-hop). They are dispatched one-per-branch by route_iter_plan."""
     p = _plan(state["question"])
-    return {"is_multihop": p["is_multihop"], "pending": list(p["sub_queries"][:MAX_HOPS]),
-            "pool": [], "hops": 0, "retrieval_mode": "iterative"}
+    return {"is_multihop": p["is_multihop"], "planned": list(p["sub_queries"][:MAX_HOPS]),
+            "retrieval_mode": "iterative"}
 
 
-def route_iter_plan(state: IterativeState) -> str:
-    """Single-hop -> one baseline-style shot; multi-hop -> enter the hop/reflect loop."""
-    return "hop" if state.get("is_multihop") else "single"
+def route_iter_plan(state: IterativeState):
+    """Single-hop -> one baseline-style shot. Multi-hop -> FAN OUT: one iter_retrieve_one run
+    per planned sub-question (parallel), each carrying just its own sub-query."""
+    if not state.get("is_multihop"):
+        return "iter_single"
+    return [Send("iter_retrieve_one", {"subquery": sq}) for sq in (state.get("planned") or [])]
 
 
 def node_iter_single(state: IterativeState) -> dict:
@@ -325,41 +346,36 @@ def node_iter_single(state: IterativeState) -> dict:
             "formatted_context": formatted_context}
 
 
-def node_iter_hop(state: IterativeState) -> dict:
-    """HOP: take the next pending sub-query, retrieve+rerank it, accumulate into the pool."""
-    pending = list(state.get("pending") or [])
-    sq = pending.pop(0)
-    pool = _dedup_extend(list(state.get("pool") or []), retrieve_rerank(sq, top_k=PER_HOP))
-    return {"pending": pending, "pool": pool, "hops": state.get("hops", 0) + 1}
-
-
-def route_iter_hop(state: IterativeState) -> str:
-    """After a hop: stop if we hit MAX_HOPS; else drain remaining planned sub-queries; once
-    the planned queue is empty, hand over to reflect (self-ask for what is still missing)."""
-    if state.get("hops", 0) >= MAX_HOPS:
-        return "rerank"
-    return "hop" if state.get("pending") else "reflect"
+def node_iter_retrieve_one(state: IterativeState) -> dict:
+    """RETRIEVE ONE SUB-QUESTION — runs once per sub-question (fan-out branch). Retrieves +
+    reranks for its single sub-query; the reducers merge its hits into the shared pool (dedup)
+    and add 1 to the hop count. This is the node you see executed N times in the trace."""
+    hits = retrieve_rerank(state["subquery"], top_k=PER_HOP)
+    return {"pool": hits, "hops": 1}
 
 
 def node_iter_reflect(state: IterativeState) -> dict:
-    """REFLECT: judge whether the pooled evidence suffices; if not, queue the next sub-query."""
+    """REFLECT — self-ask whether the pooled evidence covers every aspect of the question.
+    Emits next_query="" when it is enough (or the hop budget MAX_HOPS is spent -> we skip the
+    LLM call, faithful to the original `while rounds < MAX_HOPS` guard); otherwise next_query
+    is the follow-up sub-question that route_iter_reflect fans out for another round."""
+    if state.get("hops", 0) >= MAX_HOPS:
+        return {"next_query": ""}
     pool_dict = {(p.get("chunk_id") or p.get("text", "")): p for p in (state.get("pool") or [])}
     r = _reflect(state["question"], pool_dict)
-    pending = list(state.get("pending") or [])
-    if not r["sufficient"] and r["next_query"]:
-        pending.append(r["next_query"])
-    return {"pending": pending}
+    return {"next_query": r["next_query"] if (not r["sufficient"] and r["next_query"]) else ""}
 
 
-def route_iter_reflect(state: IterativeState) -> str:
-    """Loop back to hop if reflect asked for more (and budget remains); else go rerank."""
-    if state.get("hops", 0) >= MAX_HOPS:
-        return "rerank"
-    return "hop" if state.get("pending") else "rerank"
+def route_iter_reflect(state: IterativeState):
+    """A follow-up was requested -> fan out one more iter_retrieve_one (loop); else -> rerank."""
+    nq = state.get("next_query")
+    if nq:
+        return [Send("iter_retrieve_one", {"subquery": nq})]
+    return "iter_rerank"
 
 
 def node_iter_rerank(state: IterativeState) -> dict:
-    """Final precision pass: rerank the pooled union against the ORIGINAL question -> top 8."""
+    """RERANK — final precision pass: rerank the pooled union against the ORIGINAL question."""
     contexts = rerank(state["question"], state.get("pool") or [], top_k=8)
     chunk_index, formatted_context = build_context(contexts)
     return {"contexts": contexts, "chunk_index": chunk_index,
@@ -524,20 +540,19 @@ def _add_retrieval_expanded(builder: StateGraph, mode: str) -> str:
         builder.add_edge("rerank", "generate")
         return "retrieve"
     if mode == "iterative":
-        # plan -> hop(s) <-> reflect -> rerank  (self-ask loop, capped at MAX_HOPS).
+        # plan -> fan-out one retrieve per sub-question -> reflect ⇄ (fan-out) -> rerank.
         builder.add_node("iter_plan", node_iter_plan)
         builder.add_node("iter_single", node_iter_single)
-        builder.add_node("iter_hop", node_iter_hop)
+        builder.add_node("iter_retrieve_one", node_iter_retrieve_one)
         builder.add_node("iter_reflect", node_iter_reflect)
         builder.add_node("iter_rerank", node_iter_rerank)
+        # route functions return Send objects, so we list the reachable targets explicitly.
         builder.add_conditional_edges("iter_plan", route_iter_plan,
-                                      {"single": "iter_single", "hop": "iter_hop"})
+                                      ["iter_single", "iter_retrieve_one"])
         builder.add_edge("iter_single", "generate")
-        builder.add_conditional_edges("iter_hop", route_iter_hop,
-                                      {"hop": "iter_hop", "reflect": "iter_reflect",
-                                       "rerank": "iter_rerank"})
+        builder.add_edge("iter_retrieve_one", "iter_reflect")  # branches converge on reflect
         builder.add_conditional_edges("iter_reflect", route_iter_reflect,
-                                      {"hop": "iter_hop", "rerank": "iter_rerank"})
+                                      ["iter_retrieve_one", "iter_rerank"])
         builder.add_edge("iter_rerank", "generate")
         return "iter_plan"
     # graph: traverse -> hybrid complement -> merge -> rerank.

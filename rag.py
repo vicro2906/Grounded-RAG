@@ -89,13 +89,27 @@ def retrieve_hybrid(query: str, top_k: int = 5, prefetch_limit: int = 20):
 
 # --- Reranker (local, multilingual cross-encoder) ---
 RERANKER_MODEL = "jinaai/jina-reranker-v2-base-multilingual"
+# Device for the cross-encoder. Default "cpu" = current behaviour. Set RERANK_DEVICE=cuda to
+# run it on an NVIDIA GPU (needs `onnxruntime-gpu` + CUDA/cuDNN installed; see CLAUDE.md). It
+# only helps THIS local model — embeddings are OpenAI (remote) and generation is gpt-4o. If
+# CUDA is requested but unavailable, we fall back to CPU instead of crashing.
+RERANK_DEVICE = os.environ.get("RERANK_DEVICE", "cpu").lower()  # "cpu" | "cuda" | "auto"
 _reranker = None
 def _get_reranker():
     """Lazy-load the cross-encoder (downloaded/instantiated only once)."""
     global _reranker
     if _reranker is None:
         from fastembed.rerank.cross_encoder import TextCrossEncoder
-        _reranker = TextCrossEncoder(RERANKER_MODEL)
+        try:
+            if RERANK_DEVICE == "cuda":
+                _reranker = TextCrossEncoder(RERANKER_MODEL, cuda=True)
+            elif RERANK_DEVICE == "auto":
+                _reranker = TextCrossEncoder(RERANKER_MODEL)  # fastembed picks the device
+            else:
+                _reranker = TextCrossEncoder(RERANKER_MODEL, cuda=False)
+        except Exception:
+            # CUDA asked for but no GPU provider available -> safe CPU fallback.
+            _reranker = TextCrossEncoder(RERANKER_MODEL, cuda=False)
     return _reranker
 
 
