@@ -33,6 +33,41 @@ qdrant = QdrantClient(
     timeout = 30,
 )
 
+# --- GPU enablement for the cross-encoder (must run BEFORE onnxruntime/fastembed import) ---
+def _init_cuda_dlls() -> None:
+    """Make onnxruntime-gpu find the pip-installed CUDA/cuDNN DLLs on Windows. The nvidia-*
+    wheels drop their DLLs under site-packages/nvidia/*/bin, which is NOT on the default DLL
+    search path, so the CUDA provider silently fails to load and falls back to CPU. We add
+    those dirs AND pre-load the DLLs into the process (so dependency resolution matches them
+    by already-loaded module name) — that combination is what reliably initializes the CUDA
+    session. No-op off Windows or if the nvidia wheels / GPU are not present.
+    Requires onnxruntime-gpu matching the CUDA major of the nvidia-*-cuXX wheels (here CUDA 12:
+    onnxruntime-gpu 1.22.x + nvidia-*-cu12). Enabled only when RERANK_DEVICE is cuda/auto."""
+    if sys.platform != "win32":
+        return
+    import glob, ctypes
+    try:
+        base = os.path.dirname(__import__("nvidia").__file__)
+    except Exception:
+        return  # nvidia CUDA wheels not installed -> stay on CPU
+    bins = glob.glob(os.path.join(base, "*", "bin"))
+    for d in bins:
+        try:
+            os.add_dll_directory(d)
+        except Exception:
+            pass
+    dlls = [f for d in bins for f in glob.glob(os.path.join(d, "*.dll"))]
+    for _ in range(3):  # a few passes so inter-DLL deps resolve regardless of load order
+        for f in dlls:
+            try:
+                ctypes.WinDLL(f)
+            except Exception:
+                pass
+
+
+if os.environ.get("RERANK_DEVICE", "cpu").lower() in ("cuda", "auto"):
+    _init_cuda_dlls()
+
 # --- Hybrid search (dense semantic + sparse lexical BM25) ---
 from fastembed import SparseTextEmbedding
 

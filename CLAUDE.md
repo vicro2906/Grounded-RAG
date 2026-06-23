@@ -249,11 +249,24 @@ Artefactos de evaluación versionados: `resultados_ragas.csv` (baseline F0) y
   lanza en un hilo daemon al importar (mata el ~3.5 s de la 1ª consulta); (4) locks
   thread-safe en las cargas perezosas de modelos. Los grafos dedicados de Studio ya
   paralelizaban (Send / ramas).
-- **LA PALANCA REAL DE VELOCIDAD ES LA GPU** (corrige la nota previa de "marginal"): medido,
-  el reranker domina la recuperación y en CPU no paraleliza. En la GTX 1060 cada `rerank`
-  pasaría de ~3.8 s a ~0.1-0.3 s (10-50×), beneficiando sobre todo a iterative (4 reranks).
-  Activar: `onnxruntime-gpu` + CUDA/cuDNN y `RERANK_DEVICE=cuda` (hook ya puesto, fallback
-  a CPU). Pendiente porque requiere setup de sistema (CUDA en Windows).
+- **RERANKER EN GPU (HECHO, la mayor mejora de latencia).** Medido: `rerank` 20 docs pasó de
+  **~3.8 s (CPU) a ~0.45 s (GPU GTX 1650)** → retrieval: baseline 7.6→5.5 s, **iterative
+  15.8→4.9 s (~3.2×, tenía 4 reranks)**, graph 11.5→7.7 s. Ahora el tiempo restante son las
+  llamadas LLM (rephrase/plan) y `graph_select` (LightRAG), no el reranker. Setup (Windows):
+  - Driver NVIDIA reciente (610.62, soporta CUDA 13.3). **OJO:** la actualización dejó el
+    servicio `nvlddmkm` deshabilitado (`Start=4`) y archivos del driver a medias →
+    reinstalación limpia del driver lo arregló.
+  - **`onnxruntime-gpu==1.22.0`** (build CUDA **12**; el 1.27 de PyPI es CUDA **13** y no casa)
+    + wheels `nvidia-cudnn-cu12`, `nvidia-cublas-cu12`, `nvidia-cuda-runtime-cu12`,
+    `nvidia-cufft-cu12`, `nvidia-curand-cu12` (NO el CUDA Toolkit completo). Versión de
+    onnxruntime-gpu debe casar con la CUDA major de las wheels (ver qué `cublas64_XX`/`cufft64_XX`
+    importa `onnxruntime_providers_cuda.dll`).
+  - **Truco clave (Windows):** las DLLs de las wheels (`site-packages/nvidia/*/bin`) NO están
+    en el search path, así que `_init_cuda_dlls()` en `rag.py` las añade Y las **pre-carga**
+    con `ctypes.WinDLL` antes de importar fastembed (sin esto el provider CUDA falla y cae a
+    CPU en silencio). Se ejecuta solo si `RERANK_DEVICE` es `cuda`/`auto`.
+  - Activar: `RERANK_DEVICE=cuda` en `.env` (gitignored; específico de esta máquina). Quitarlo
+    o `cpu` vuelve a CPU. `onnxruntime-gpu` NO va en `pyproject` (rompería máquinas sin GPU).
 - **El coste del reranker es IRREDUCIBLE en CPU sin perder calidad (medido).** Probado:
   (a) bajar chars 512→256 cambia top‑8 (hasta 3/8); (b) reranquear menos candidatos (top15
   vs top20) cambia top‑5 (24/30 coinciden; alguna consulta 2/5); (c) una sola pasada de
