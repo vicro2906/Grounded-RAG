@@ -20,9 +20,17 @@ QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 client = OpenAI(api_key = OPENAI_API_KEY)
+# Qdrant Cloud exposes the REST API on BOTH 6333 (the client's default) and 443. We default
+# to 443 because restrictive networks (corporate/campus WiFi, some VPNs) often block the
+# non-standard 6333 outbound while 443 is universally open — symptom is
+# `ResponseHandlingException(ConnectTimeout('timed out'))` on every query. Override with
+# QDRANT_PORT if needed (e.g. 6333 for a self-hosted instance).
+QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "443"))
 qdrant = QdrantClient(
     url = QDRANT_URL,
-    api_key = QDRANT_API_KEY
+    port = QDRANT_PORT,
+    api_key = QDRANT_API_KEY,
+    timeout = 30,
 )
 
 # --- Hybrid search (dense semantic + sparse lexical BM25) ---
