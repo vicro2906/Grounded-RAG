@@ -19,21 +19,36 @@ Punto de entrada: `main.py` (grafo compilado `app`). Nodos del grafo:
 
 ```
 question ─▶ rephrase ─┬─ fuera de dominio ─▶ out_of_domain ─▶ END
-                      └─ en dominio ─▶ [RETRIEVAL_MODE] ─▶ generate ⇄ validate ─▶ evidence ─▶ output
-                             ├─ baseline : retrieve (híbrido) ─▶ rerank (20→5)        (no válido+agotado
-                             ├─ iterative: iterative_retrieve (plan→hop→reflect, →8)    ─▶ fallback)
-                             └─ graph    : graph_retrieve (LightRAG + híbrido propio, →8)  ◀ DEFECTO
+                      └─ en dominio ─▶ [RETRIEVAL_MODE] ─▶ assess_context ─┬─ clarify (interrupt) ⟲
+                             ├─ baseline : retrieve (híbrido) ─▶ rerank (20→5)   └─ generate ⇄ validate
+                             ├─ iterative: iterative_retrieve (plan→hop→reflect, →8)   ─▶ evidence ─▶ output
+                             └─ graph    : graph_retrieve (LightRAG + híbrido propio, →8) ◀ DEFECTO
+                                                              (no válido+agotado ─▶ fallback)
 ```
 
-La cabecera (rephrase + guardia de dominio) y la cola (generate→validate→evidence) son
-IDÉNTICAS en los tres modos; solo cambia el nodo de recuperación, elegido por
+La cabecera (rephrase + guardia de dominio) y la cola (assess_context→generate→validate→evidence)
+son IDÉNTICAS en los tres modos; solo cambia el nodo de recuperación, elegido por
 `RETRIEVAL_MODE` en `main.py` (por defecto `"graph"` tras el A/B de F4).
 
 - **rephrase** (`rag.refine`, gpt-4o-mini): una llamada que (a) clasifica si la pregunta
-  es del dominio VIH (`in_domain`) y (b) reescribe la consulta SIN añadir info, normalizando
-  términos en AMBAS formas «nombre completo (SIGLA)» con `abbreviations.py`. Si está fuera
-  de dominio → `out_of_domain` (mensaje directo, corta el pipeline). La generación usa la
-  pregunta ORIGINAL, no la reescrita.
+  es del dominio VIH (`in_domain`); (b) reescribe la consulta SIN añadir info, normalizando
+  términos en AMBAS formas «nombre completo (SIGLA)» con `abbreviations.py`; y (c) **criba**
+  los datos del paciente ya presentes (`known_facts`→`clinical_facts`) y los modificadores
+  clínicos que la pregunta podría necesitar (`candidate_modifiers`) — la mitad barata del paso
+  de clarificación. Si está fuera de dominio → `out_of_domain` (mensaje directo, corta el
+  pipeline). La generación usa la pregunta ORIGINAL, no la reescrita.
+- **assess_context + clarify** (`rag.assess`, gpt-4o-mini; nodos en `main.py`): **puerta de
+  clarificación interactiva** (F5, slot-filling) entre la recuperación y `generate`. La mitad
+  anclada en evidencia del esquema híbrido: dado el contexto recuperado + `clinical_facts`,
+  decide (razonando en campos `branches_on`/`already_covered`/`questions`) si la guía
+  recuperada **bifurca** por un dato del paciente aún desconocido (semana de gestación, función
+  renal, coinfección VHB/VHC, CD4/CV, resistencias, pauta actual). Si sí → `clarify` **pausa**
+  el grafo con `interrupt()` y pregunta al médico; al reanudar, la respuesta se funde en
+  `clinical_facts` (reducer `_merge_facts`) y vuelve a `assess_context`. Cota dura
+  `CLARIFY_MAX_ROUNDS=1` (no interrogar). Los `clinical_facts` entran en `generate` como bloque
+  **"DATOS APORTADOS POR EL MÉDICO" NO citable** (solo seleccionan la rama de la guía; las citas
+  literales siguen saliendo de los chunks). Si no falta nada → directo a `generate`. Requiere
+  checkpointer: lo provee `langgraph dev`/Studio (no se compila uno propio en los grafos).
 - **Recuperación — 3 modos seleccionables (`RETRIEVAL_MODE`), todos terminan en el mismo generate:**
   - **baseline** = `node_retrieve` (`rag.retrieve_hybrid`: densa text-embedding-3-large 3072d +
     sparse BM25 `Qdrant/bm25`, fusión RRF, 20 candidatos) → `node_rerank` (`rag.rerank`,
@@ -200,8 +215,18 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
     concurrencia); n=16, referencias del modelo. El recall alto del grafo podría venir con
     algo menos de precisión (recupera más amplio), mitigado por reranker→top8 + validate.
 - **F5 — UX tipo Claude:** Streamlit/web, streaming, citaciones, memoria multi-turno.
+  - **EN CURSO — preguntas de clarificación (slot-filling): HECHO (validación en Studio).**
+    Puerta `assess_context`/`clarify` entre retrieval y generate (ver Arquitectura). Esquema
+    **híbrido**: cribado en `refine` (`known_facts`/`candidate_modifiers`) + confirmación
+    anclada en la evidencia en `rag.assess` (razonamiento estructurado
+    `branches_on`/`already_covered`/`questions`, gpt-4o-mini). Pausa con `interrupt()`, funde
+    respuestas en `clinical_facts` (no citable, dirige la generación), cota `CLARIFY_MAX_ROUNDS=1`.
+    Probado end-to-end (baseline + MemorySaver) y casos unitarios de `assess` (condicional /
+    dato ya conocido en cualquier unidad / no condicional). Validación final: LangGraph Studio
+    (`langgraph dev`, persistencia la pone la plataforma). PENDIENTE: streaming, web, memoria
+    multi-turno de conversación, y (opcional) re-recuperación enriquecida con los nuevos datos.
 
-## Pendiente / próximos pasos (a fecha 2026-06-22)
+## Pendiente / próximos pasos (a fecha 2026-06-23)
 
 1. **Medir `context_precision` (y faithfulness) del grafo** a baja concurrencia
    (`RETRIEVAL_ONLY=1`, `max_workers≈4-8`, `timeout=600`) para cerrar el cuadro del A/B:
@@ -210,7 +235,9 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
 2. **(Idea) Descripciones de relaciones como "mapa de conceptos" no citable** en el prompt
    de generación del grafo, para ayudar al razonamiento multi-hop sin romper el grounding.
    Prototipar tras un flag y A/B contra la versión actual (faithfulness + recall).
-3. **F5 — UX.** Tras cerrar (1).
+3. **F5 — UX.** Clarificación interactiva HECHA (validar en Studio); seguir con streaming, web
+   (Streamlit/Chainlit), memoria multi-turno y navegación por conceptos. Opcional: re-recuperar
+   con los `clinical_facts` antes de generar (hoy solo dirigen la generación, no la recuperación).
 
 Artefactos de evaluación versionados: `resultados_ragas.csv` (baseline F0) y
 `resultados_ragas_{baseline,iterative,graph}_retrieval.csv` (A/B F4, context_recall).

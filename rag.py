@@ -232,15 +232,21 @@ B) REESCRIBIR la consulta para el buscador (campo rewritten_query; solo importa 
    2. Aclara la redacción si es ambigua o coloquial, manteniéndola concisa y en español, como una sola consulta.
    3. NORMALIZACIÓN DE TÉRMINOS: para CUALQUIER fármaco o término que aparezca en la lista de abreviaturas de abajo (escrito como sigla o como nombre completo), inclúyelo SIEMPRE en AMBAS formas, con el patrón «nombre completo (SIGLA)». Ejemplos: "bictegravir" -> "bictegravir (BIC)"; "TAF" -> "tenofovir alafenamida (TAF)". Solo los términos de la lista; no inventes siglas.
 
+C) CRIBADO de datos del paciente (cribado barato, NO respondas; solo importa si in_domain=true):
+   1. known_facts: extrae los datos clínicos del PACIENTE que YA aparecen explícitos en la pregunta, como pares «atributo: valor». Ejemplos: "embarazo: sí", "semana_gestacion: 12", "aclaramiento_renal: 25 ml/min", "coinfeccion_VHB: sí", "CD4: 200", "carga_viral: indetectable", "pauta_actual: BIC/FTC/TAF". Solo lo dicho explícitamente; NO inventes ni infieras valores.
+   2. candidate_modifiers: lista de modificadores clínicos que esta pregunta PODRÍA necesitar para una recomendación precisa y que NO están ya resueltos en known_facts. Elige de esta lista cerrada cuando apliquen: "gestacion", "funcion_renal", "funcion_hepatica", "coinfeccion_VHB", "coinfeccion_VHC", "cd4", "carga_viral", "resistencias", "pauta_actual", "interacciones", "edad_pediatrica", "lactancia". No es una decisión final (eso lo confirma otro componente con la evidencia recuperada); aquí solo señalas candidatos plausibles. Si la pregunta es general/definitoria y no depende de datos del paciente, devuelve lista vacía.
+
 LISTA DE ABREVIATURAS (SIGLA = nombre):
 {_ABBREV_LIST}
 
-Devuelve in_domain (bool) y rewritten_query (str)."""
+Devuelve in_domain (bool), rewritten_query (str), known_facts (lista de strings "atributo: valor") y candidate_modifiers (lista de strings)."""
 
 
 class _Refined(BaseModel):
     in_domain: bool
     rewritten_query: str
+    known_facts: list[str]
+    candidate_modifiers: list[str]
 
 
 _refine_llm = None
@@ -254,17 +260,36 @@ def _get_refine_llm():
     return _refine_llm
 
 
+def _facts_to_dict(facts: list[str]) -> dict:
+    """Parse the LLM's "atributo: valor" strings into a {attribute: value} dict (the shape
+    the clinical profile uses). Lines without a colon are kept under their own key."""
+    out: dict = {}
+    for f in facts or []:
+        if not isinstance(f, str) or not f.strip():
+            continue
+        key, sep, val = f.partition(":")
+        key = key.strip()
+        if key:
+            out[key] = val.strip() if sep else ""
+    return out
+
+
 def refine(query: str) -> dict:
     """Single LLM call that (a) rewrites the query for the retriever without adding
-    info and normalizing terms, and (b) classifies whether it belongs to the HIV
-    domain. Returns {"query": str, "in_domain": bool}. On LLM failure it does not
-    block: returns the original query and in_domain=True."""
+    info and normalizing terms, (b) classifies whether it belongs to the HIV domain, and
+    (c) screens the patient data already present in the question (known_facts) and the
+    clinical modifiers the question might still need (candidate_modifiers) — the cheap half
+    of the hybrid clarification step. Returns
+    {"query": str, "in_domain": bool, "known_facts": dict, "candidate_modifiers": list}.
+    On LLM failure it does not block: returns the original query, in_domain=True, no facts."""
     try:
         out = cast(_Refined,
                    _get_refine_llm().invoke([("system", _REPHRASE_SYS), ("human", query)]))
-        return {"query": out.rewritten_query.strip() or query, "in_domain": out.in_domain}
+        return {"query": out.rewritten_query.strip() or query, "in_domain": out.in_domain,
+                "known_facts": _facts_to_dict(out.known_facts),
+                "candidate_modifiers": list(out.candidate_modifiers or [])}
     except Exception:
-        return {"query": query, "in_domain": True}
+        return {"query": query, "in_domain": True, "known_facts": {}, "candidate_modifiers": []}
 
 
 def rephrase(query: str) -> str:
@@ -304,6 +329,7 @@ SYS_PROMPT = """
     4. Si el contexto es parcial o insuficiente, indícalo explícitamente dentro de la propia respuesta.
     5. Si hay conflicto entre fragmentos, menciona ambas versiones sin resolverlo por tu cuenta.
     6. Lenguaje clínico, preciso y estructurado.
+    6 bis. Si el usuario incluye un bloque "DATOS APORTADOS POR EL MÉDICO", úsalos ÚNICAMENTE para seleccionar entre las recomendaciones del contexto la que aplica a ese paciente (p. ej. la rama de gestación, de insuficiencia renal o de coinfección). Esos datos NO son una fuente: no los cites, no los incluyas en "fragmentos_usados" ni en "cita_textual", y toda afirmación clínica debe seguir respaldada por los fragmentos del contexto. Si el contexto no cubre el escenario indicado por esos datos, dilo explícitamente y marca "informacion_suficiente" según corresponda.
 
     REDACCIÓN DE LA RESPUESTA:
     7. Redacta una respuesta completa, cohesionada y bien estructurada en prosa, con los párrafos que requiera la pregunta. No la trocees artificialmente; desarrolla la idea con naturalidad clínica, integrando la justificación dentro de la propia explicación.
@@ -338,13 +364,28 @@ SYS_PROMPT = """
     """ + _ABBREV_LIST
 
 
-def build_user_prompt(query: str, context: str) -> str:
-    """User prompt with the numbered context and the clinical question."""
+def _format_clinical_facts(clinical_facts: dict | None) -> str:
+    """Render the doctor-provided patient data as a NON-CITABLE block for the prompt. Returns
+    "" when there are no facts, so the prompt is unchanged for questions that did not clarify."""
+    facts = {k: v for k, v in (clinical_facts or {}).items() if k}
+    if not facts:
+        return ""
+    lines = "\n".join(f"    - {k}: {v}" if v else f"    - {k}" for k, v in facts.items())
+    return (
+        "\n    DATOS APORTADOS POR EL MÉDICO (NO citable; úsalos SOLO para seleccionar la "
+        "recomendación aplicable, nunca como fuente ni en cita_textual):\n"
+        f"{lines}\n"
+    )
+
+
+def build_user_prompt(query: str, context: str, clinical_facts: dict | None = None) -> str:
+    """User prompt with the numbered context, the clinical question and (optionally) the
+    patient data the doctor supplied through the clarification step."""
     return f"""
     CONTEXTO (fragmentos de guías clínicas sobre VIH,numerados):
 
     {context}
-
+{_format_clinical_facts(clinical_facts)}
     PREGUNTA CLÍNICA:
     {query}
 
@@ -459,3 +500,70 @@ def validate(question: str, answer: dict, formatted_context: str) -> dict:
         return {"is_valid": False, "error": True,
                 "reason": "Could not reach the validation service (technical error).",
                 "unsupported_claims": []}
+
+
+# ---------------------------------------------------------------------------
+# CLARIFICATION ASSESSMENT — the evidence-grounded half of the hybrid clarification step.
+# Given the question, the RETRIEVED context and the patient data already known, it decides
+# whether the answer depends on a clinical modifier that the GUIDES THEMSELVES branch on
+# (gestation week, renal function, HBV/HCV coinfection, CD4/viral load, resistances, current
+# regimen…) and that the doctor has not provided yet. Only then does it propose clarifying
+# questions. This keeps the questions as defensible as the answers: we never ask for data the
+# retrieved guidance does not actually condition on. The cheap screen (candidate_modifiers,
+# known_facts) is done earlier in refine(); here we confirm against the evidence.
+# ---------------------------------------------------------------------------
+_ASSESS_SYS = f"""Eres un componente que decide si, ANTES de responder, conviene pedir al médico algún dato del paciente. Recibes una PREGUNTA, el CONTEXTO recuperado (fragmentos de guías de VIH), los DATOS YA CONOCIDOS del paciente y unos MODIFICADORES CANDIDATOS detectados en un cribado previo. NO respondas la pregunta.
+
+Razona en TRES pasos, rellenando los campos EN ORDEN:
+1. branches_on: lista las dimensiones clínicas del paciente para las que el CONTEXTO da recomendaciones DISTINTAS (p. ej. "gestación", "función renal", "coinfección VHB", "CD4", "carga viral", "resistencias", "pauta actual"). Si el contexto no da recomendaciones que dependan de ningún dato del paciente, déjala vacía. Los MODIFICADORES CANDIDATOS son solo pistas; lo que manda es lo que el contexto realmente condiciona.
+2. already_covered: de las dimensiones de branches_on, lista las que los DATOS YA CONOCIDOS ya determinan en CUALQUIER forma o unidad equivalente (p. ej. si se conoce "semana_gestacion" o "trimestre", la gestación está cubierta; si se conoce "aclaramiento_renal", la función renal está cubierta; si se conoce el CD4, está cubierto). Sé generoso: una dimensión está cubierta si cualquier dato conocido permite deducirla.
+3. questions: UNA pregunta por cada dimensión que esté en branches_on pero NO en already_covered. Concretas, en español, terminadas en "?", pidiendo UN dato cada una (p. ej. "¿En qué semana de gestación se encuentra la paciente?"). Máximo 3. Si no queda ninguna dimensión pendiente, deja la lista vacía.
+
+needs_clarification = true SOLO si questions no está vacía.
+
+Las abreviaturas de las guías cuentan como el mismo término (lista SIGLA = nombre):
+{_ABBREV_LIST}
+
+Devuelve branches_on (lista), already_covered (lista), questions (lista) y needs_clarification (bool)."""
+
+
+class _Assessment(BaseModel):
+    branches_on: list[str]      # patient dimensions the retrieved context branches on
+    already_covered: list[str]  # those already pinned by the known facts (forces subtraction)
+    questions: list[str]        # one per pending dimension (branches_on minus already_covered)
+    needs_clarification: bool
+
+
+_assess_llm = None
+def _get_assess_llm():
+    """Lazy-load the clarification-assessment LLM (structured output)."""
+    global _assess_llm
+    if _assess_llm is None:
+        _assess_llm = ChatOpenAI(model=VALIDATION_MODEL, temperature=0).with_structured_output(
+            _Assessment, method="json_schema", strict=True
+        )
+    return _assess_llm
+
+
+def assess(question: str, formatted_context: str, known_facts: dict | None = None,
+           candidate_modifiers: list | None = None) -> dict:
+    """Decide whether to ask the doctor for missing patient data before answering. Returns
+    {"needs_clarification": bool, "questions": list[str]}. On LLM failure it does NOT block
+    the pipeline: returns needs_clarification=False (we would rather answer than get stuck
+    interrogating)."""
+    facts = {k: v for k, v in (known_facts or {}).items() if k}
+    facts_txt = ("\n".join(f"- {k}: {v}" if v else f"- {k}" for k, v in facts.items())
+                 or "(ninguno aportado)")
+    cands_txt = ", ".join(candidate_modifiers or []) or "(ninguno)"
+    try:
+        a = cast(_Assessment, _get_assess_llm().invoke([
+            ("system", _ASSESS_SYS),
+            ("human", f"PREGUNTA:\n{question}\n\nCONTEXTO:\n{formatted_context}\n\n"
+                      f"DATOS YA CONOCIDOS:\n{facts_txt}\n\n"
+                      f"MODIFICADORES CANDIDATOS:\n{cands_txt}"),
+        ]))
+        qs = [q.strip() for q in (a.questions or []) if isinstance(q, str) and q.strip()][:3]
+        needs = bool(a.needs_clarification and qs)
+        return {"needs_clarification": needs, "questions": qs if needs else []}
+    except Exception:
+        return {"needs_clarification": False, "questions": []}

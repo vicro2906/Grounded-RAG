@@ -4,11 +4,15 @@ main.py — Entry point: orchestrates the clinical HIV RAG with LangGraph + Lang
 Chains the pipeline functions (rag.py) and the evidence formatting (evidence.py) as
 graph nodes so every step can be audited in LangSmith.
 
-Flow:   question -> rephrase -> [retrieval mode] -> generate <-> validate -> evidence -> output
+Flow:   question -> rephrase -> [retrieval] -> assess_context -> generate <-> validate -> evidence -> output
         - rephrase classifies the domain: if the question is unrelated to HIV, it stops
           here (direct message) and skips retrieve/rerank/generate/validate.
         - the retrieval step is one of three interchangeable modes (baseline / iterative /
-          graph); they all feed the SAME generate -> validate -> evidence tail.
+          graph); they all feed the SAME assess -> generate -> validate -> evidence tail.
+        - assess_context is the clarification gate: if the retrieved guidance branches on a
+          patient datum that is still unknown (gestation week, renal function, coinfection…),
+          it pauses (interrupt) to ask the doctor and folds the answer into clinical_facts,
+          which then steers generation (non-citable). Capped at CLARIFY_MAX_ROUNDS rounds.
         - validate retries generate when not valid, up to MAX_ITER; if exhausted, safe exit.
 
 Choosing the retrieval mode:
@@ -52,7 +56,7 @@ if TRACING:
 # --- RAG pipeline (retrieval/generation functions and clients) ---
 import rag  # creates the OpenAI/Qdrant clients on import
 from rag import (refine, retrieve_hybrid, rerank, retrieve_rerank, search, build_context,
-                 validate, SYS_PROMPT, build_user_prompt, GENERATION_MODEL)
+                 validate, assess, SYS_PROMPT, build_user_prompt, GENERATION_MODEL)
 from agentic.iterative import iterative_search   # Track A (agentic, multi-hop) — collapsed API
 # Track A primitives, reused to expose the iterative loop as visible graph nodes:
 from agentic.iterative import _plan, _reflect, MAX_HOPS, PER_HOP
@@ -69,7 +73,7 @@ if TRACING:
         pass
 
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import Send   # fan-out: one parallel node run per sub-question
+from langgraph.types import Send, interrupt   # fan-out (Send) + human-in-the-loop pause (interrupt)
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
@@ -98,6 +102,10 @@ _structured_llm = ChatOpenAI(model=GENERATION_MODEL, temperature=0.2).with_struc
 
 # Validation loop: max number of generations (initial + retries).
 MAX_ITER = 2
+
+# Clarification loop: max rounds of clarifying questions before we answer anyway (so the
+# doctor is never trapped in an interrogation). 1 = ask at most once, then generate.
+CLARIFY_MAX_ROUNDS = 1
 
 # Retrieval strategy (Phase 4) — three interchangeable modes:
 #   "baseline"  -> hybrid + reranker (single-shot, current system)
@@ -155,6 +163,20 @@ class InputState(TypedDict):
     question: str            # user input
 
 
+# Reducers used by RAGState. _add_int also serves the dedicated graphs' hop counter below.
+# Defined here (before RAGState) because Annotated evaluates them at class-creation time.
+def _add_int(a: int | None, b: int | None) -> int:
+    return (a or 0) + (b or 0)
+
+
+# Clinical profile reducer: merge dicts so facts known from the question and facts the doctor
+# supplies in the clarification round accumulate into the same key.
+def _merge_facts(existing: dict | None, update: dict | None) -> dict:
+    merged = dict(existing or {})
+    merged.update(update or {})
+    return merged
+
+
 class RAGState(TypedDict):
     question: str            # user input (original; used for generation)
     retrieval_mode: str      # which retrieval architecture ran (set by the retrieval node)
@@ -164,6 +186,11 @@ class RAGState(TypedDict):
     contexts: list           # final payloads after the reranker (top 5)
     chunk_index: dict        # {n: chunk} for source citation (build_context)
     formatted_context: str   # numbered context [1]/[2]… for the LLM
+    # --- Clarification (slot-filling): patient data steers generation, never cited ---
+    clinical_facts: Annotated[dict, _merge_facts]  # accumulated patient data {attr: value}
+    candidate_modifiers: list  # cheap screen (refine): modifiers the question might need
+    pending_clarifications: list  # questions assess wants the doctor to answer (interrupt)
+    clarify_rounds: Annotated[int, _add_int]  # clarification rounds done (capped, see route)
     answer: dict             # structured answer from the LLM (generate_answer)
     attempts: int            # number of generations done (for the validation loop)
     validation: dict         # validator verdict {is_valid, reason, ...}
@@ -173,8 +200,9 @@ class RAGState(TypedDict):
 # Extra state for the DEDICATED expanded graphs (the teaching views). Subclassing keeps the
 # base RAGState clean: these intermediate keys only exist in the iterative / graph graphs.
 
-# Reducers let parallel branches (the per-sub-question fan-out) and successive loop rounds
-# accumulate into the SAME state keys: pool dedups as it grows, hops counts the sub-queries.
+# Reducer let parallel branches (the per-sub-question fan-out) and successive loop rounds
+# accumulate into the SAME pool key: it dedups as it grows. (The hop counter reuses _add_int,
+# defined above for RAGState.)
 def _merge_pool(existing: list | None, update: list | None) -> list:
     """Append payloads not already present (dedup by chunk_id, fallback text)."""
     pool = list(existing or [])
@@ -185,10 +213,6 @@ def _merge_pool(existing: list | None, update: list | None) -> list:
             seen.add(key)
             pool.append(p)
     return pool
-
-
-def _add_int(a: int | None, b: int | None) -> int:
-    return (a or 0) + (b or 0)
 
 
 class IterativeState(RAGState, total=False):
@@ -216,10 +240,14 @@ class GraphState(RAGState, total=False):
 # ===========================================================================
 def node_rephrase(state: RAGState) -> dict:
     """question -> rewritten/normalized query + domain classification (single LLM call).
-    If the question is unrelated to HIV, the pipeline is short-circuited (see
-    route_domain): retrieve, rerank, generate and validate are skipped."""
+    Also the cheap half of the hybrid clarification step: seeds clinical_facts with the
+    patient data already stated in the question and the candidate modifiers it might need
+    (confirmed later against the evidence in assess_context). If the question is unrelated
+    to HIV, the pipeline is short-circuited (see route_domain)."""
     r = refine(state["question"])
-    return {"search_query": r["query"], "in_domain": r["in_domain"]}
+    return {"search_query": r["query"], "in_domain": r["in_domain"],
+            "clinical_facts": r.get("known_facts", {}),
+            "candidate_modifiers": r.get("candidate_modifiers", [])}
 
 
 def node_out_of_domain(state: RAGState) -> dict:
@@ -439,10 +467,46 @@ def node_graph_rerank(state: GraphState) -> dict:
             "formatted_context": formatted_context}
 
 
+def node_assess_context(state: RAGState) -> dict:
+    """Evidence-grounded half of the hybrid clarification: given the retrieved context and the
+    patient data already known, decide whether the answer hinges on a clinical modifier the
+    GUIDES branch on (gestation, renal function, coinfection…) that the doctor has not provided.
+    If so, propose clarifying questions; otherwise the pipeline goes straight to generate. Once
+    the clarification budget is spent we stop asking (route_assess), so this can run again after
+    a clarify round and simply find nothing missing."""
+    if state.get("clarify_rounds", 0) >= CLARIFY_MAX_ROUNDS:
+        return {"pending_clarifications": []}   # budget spent: do not ask again
+    a = assess(state["question"], state["formatted_context"],
+               known_facts=state.get("clinical_facts"),
+               candidate_modifiers=state.get("candidate_modifiers"))
+    return {"pending_clarifications": a["questions"] if a["needs_clarification"] else []}
+
+
+def node_clarify(state: RAGState) -> dict:
+    """Pause the run and ask the doctor the pending clarifying questions (LangGraph interrupt;
+    Studio shows them and waits). On resume, the doctor's answers are merged into clinical_facts
+    (the reducer accumulates them) and the round counter is bumped; control returns to
+    assess_context, which — now that the data is known — will route to generate."""
+    answers = interrupt({"questions": state.get("pending_clarifications", [])})
+    facts = answers if isinstance(answers, dict) else {"respuesta_medico": str(answers)}
+    return {"clinical_facts": facts, "clarify_rounds": 1, "pending_clarifications": []}
+
+
+def route_assess(state: RAGState) -> str:
+    """Ask for clarification only if assess flagged missing data AND the budget is not spent;
+    otherwise generate."""
+    if state.get("pending_clarifications") and state.get("clarify_rounds", 0) < CLARIFY_MAX_ROUNDS:
+        return "clarify"
+    return "generate"
+
+
 def node_generate(state: RAGState) -> dict:
-    """context + question -> structured answer from the LLM. If a previous attempt was
-    rejected by the validator, inject its feedback to correct it."""
-    user = build_user_prompt(state["question"], state["formatted_context"])
+    """context + question -> structured answer from the LLM. The patient data gathered through
+    the clarification step (clinical_facts) is passed in as a non-citable block that selects
+    the applicable branch of the guides. If a previous attempt was rejected by the validator,
+    inject its feedback to correct it."""
+    user = build_user_prompt(state["question"], state["formatted_context"],
+                             clinical_facts=state.get("clinical_facts"))
     val = state.get("validation")
     if val and not val.get("is_valid", True):
         user += (
@@ -509,9 +573,11 @@ def route_validation(state: RAGState) -> str:
 #     runtime by route_domain via the `retrieval_mode` context field. Exposed as `app`.
 #
 # Shape:  START -> rephrase -┬- out of domain -> out_of_domain -> END
-#                            └- in domain -> [retrieval] -> generate -> validate -┬-> evidence -> END
-#                                                            ▲ (retry)  │          ├-> generate (loop)
-#                                                            └──────────┘          └-> fallback -> END
+#                            └- in domain -> [retrieval] -> assess_context -┬- clarify (interrupt) ─┐
+#                                                                           │   ◀── (resume) ───────┘
+#                                                           (data known /   └- generate -> validate -┬-> evidence -> END
+#                                                            budget spent)               ▲ (retry) │ ├-> generate (loop)
+#                                                                                        └─────────┘ └-> fallback -> END
 # ===========================================================================
 def _add_common(builder: StateGraph) -> None:
     """Add the head (rephrase, out_of_domain) and the tail (generate/validate/evidence/
@@ -519,6 +585,8 @@ def _add_common(builder: StateGraph) -> None:
     are added by the caller (they are the only mode-dependent parts)."""
     builder.add_node("rephrase", node_rephrase)
     builder.add_node("out_of_domain", node_out_of_domain)
+    builder.add_node("assess_context", node_assess_context)
+    builder.add_node("clarify", node_clarify)
     builder.add_node("generate", node_generate)
     builder.add_node("validate", node_validate)
     builder.add_node("evidence", node_evidence)
@@ -526,6 +594,12 @@ def _add_common(builder: StateGraph) -> None:
 
     builder.add_edge(START, "rephrase")
     builder.add_edge("out_of_domain", END)
+    # Clarification gate (between retrieval and generate): assess the retrieved evidence and,
+    # if it branches on missing patient data, pause to ask; otherwise generate. clarify loops
+    # back to assess_context, which then (data known / budget spent) routes to generate.
+    builder.add_conditional_edges("assess_context", route_assess,
+                                  {"clarify": "clarify", "generate": "generate"})
+    builder.add_edge("clarify", "assess_context")
     builder.add_edge("generate", "validate")
     # Loop: validate -> evidence (valid) | generate (retry) | fallback (exhausted)
     builder.add_conditional_edges("validate", route_validation,
@@ -543,14 +617,14 @@ def _add_retrieval_collapsed(builder: StateGraph, mode: str) -> str:
         builder.add_node("retrieve", node_retrieve)
         builder.add_node("rerank", node_rerank)
         builder.add_edge("retrieve", "rerank")
-        builder.add_edge("rerank", "generate")
+        builder.add_edge("rerank", "assess_context")
         return "retrieve"
     if mode == "iterative":
         builder.add_node("iterative_retrieve", node_iterative_retrieve)
-        builder.add_edge("iterative_retrieve", "generate")
+        builder.add_edge("iterative_retrieve", "assess_context")
         return "iterative_retrieve"
     builder.add_node("graph_retrieve", node_graph_retrieve)
-    builder.add_edge("graph_retrieve", "generate")
+    builder.add_edge("graph_retrieve", "assess_context")
     return "graph_retrieve"
 
 
@@ -562,7 +636,7 @@ def _add_retrieval_expanded(builder: StateGraph, mode: str) -> str:
         builder.add_node("retrieve", node_retrieve)
         builder.add_node("rerank", node_rerank)
         builder.add_edge("retrieve", "rerank")
-        builder.add_edge("rerank", "generate")
+        builder.add_edge("rerank", "assess_context")
         return "retrieve"
     if mode == "iterative":
         # generate sub-questions -> fan-out one retrieve per sub-question -> reflect ⇄ rerank.
@@ -575,11 +649,11 @@ def _add_retrieval_expanded(builder: StateGraph, mode: str) -> str:
         builder.add_conditional_edges("iter_generate_subquestions",
                                       route_iter_generate_subquestions,
                                       ["iter_single", "iter_retrieve_one"])
-        builder.add_edge("iter_single", "generate")
+        builder.add_edge("iter_single", "assess_context")
         builder.add_edge("iter_retrieve_one", "iter_reflect")  # branches converge on reflect
         builder.add_conditional_edges("iter_reflect", route_iter_reflect,
                                       ["iter_retrieve_one", "iter_rerank"])
-        builder.add_edge("iter_rerank", "generate")
+        builder.add_edge("iter_rerank", "assess_context")
         return "iter_generate_subquestions"
     # graph: TWO parallel retrieval branches from rephrase, merged then reranked:
     #   rephrase ─┬─ graph_keywords (LLM) ─ graph_select (vector+graph) ─┬─ graph_merge ─ graph_rerank
@@ -597,7 +671,7 @@ def _add_retrieval_expanded(builder: StateGraph, mode: str) -> str:
     builder.add_edge("graph_select", "graph_merge")
     builder.add_edge("graph_hybrid", "graph_merge")
     builder.add_edge("graph_merge", "graph_rerank")
-    builder.add_edge("graph_rerank", "generate")
+    builder.add_edge("graph_rerank", "assess_context")
     return ["graph_keywords", "graph_hybrid"]   # rephrase fans out to BOTH entries
 
 
