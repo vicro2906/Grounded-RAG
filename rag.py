@@ -503,34 +503,41 @@ def validate(question: str, answer: dict, formatted_context: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# CLARIFICATION ASSESSMENT — the evidence-grounded half of the hybrid clarification step.
-# Given the question, the RETRIEVED context and the patient data already known, it decides
-# whether the answer depends on a clinical modifier that the GUIDES THEMSELVES branch on
-# (gestation week, renal function, HBV/HCV coinfection, CD4/viral load, resistances, current
-# regimen…) and that the doctor has not provided yet. Only then does it propose clarifying
-# questions. This keeps the questions as defensible as the answers: we never ask for data the
-# retrieved guidance does not actually condition on. The cheap screen (candidate_modifiers,
-# known_facts) is done earlier in refine(); here we confirm against the evidence.
+# CLARIFICATION ASSESSMENT — decides whether to ask the doctor for missing patient data
+# before answering. It reasons from TWO sources, in priority order:
+#   (1) EVIDENCE-GROUNDED (branches_on): dimensions the RETRIEVED guidance actually branches
+#       on. The most defensible: we ask only what the guides themselves condition on.
+#   (2) IMPLICIT CLINICAL KNOWLEDGE (clinically_relevant): well-established modifiers that
+#       typically change the answer to THIS question but are NOT visible in the current
+#       context — a SAFETY NET for retrieval misses (the conditional passage may simply not
+#       have been retrieved). This is sound because the doctor's answer is never used as a
+#       cited source: it only steers which branch applies AND re-triggers retrieval
+#       (node_re_retrieve), so the conditional evidence gets pulled before generation, and
+#       validate still guards grounding. Extra first-hand data can only help.
+# already_covered subtracts what the known facts already pin (forces the model to not re-ask).
+# The cheap screen (candidate_modifiers, known_facts) is done earlier in refine().
 # ---------------------------------------------------------------------------
 _ASSESS_SYS = f"""Eres un componente que decide si, ANTES de responder, conviene pedir al médico algún dato del paciente. Recibes una PREGUNTA, el CONTEXTO recuperado (fragmentos de guías de VIH), los DATOS YA CONOCIDOS del paciente y unos MODIFICADORES CANDIDATOS detectados en un cribado previo. NO respondas la pregunta.
 
-Razona en TRES pasos, rellenando los campos EN ORDEN:
-1. branches_on: lista las dimensiones clínicas del paciente para las que el CONTEXTO da recomendaciones DISTINTAS (p. ej. "gestación", "función renal", "coinfección VHB", "CD4", "carga viral", "resistencias", "pauta actual"). Si el contexto no da recomendaciones que dependan de ningún dato del paciente, déjala vacía. Los MODIFICADORES CANDIDATOS son solo pistas; lo que manda es lo que el contexto realmente condiciona.
-2. already_covered: de las dimensiones de branches_on, lista las que los DATOS YA CONOCIDOS ya determinan en CUALQUIER forma o unidad equivalente (p. ej. si se conoce "semana_gestacion" o "trimestre", la gestación está cubierta; si se conoce "aclaramiento_renal", la función renal está cubierta; si se conoce el CD4, está cubierto). Sé generoso: una dimensión está cubierta si cualquier dato conocido permite deducirla.
-3. questions: UNA pregunta por cada dimensión que esté en branches_on pero NO en already_covered. Concretas, en español, terminadas en "?", pidiendo UN dato cada una (p. ej. "¿En qué semana de gestación se encuentra la paciente?"). Máximo 3. Si no queda ninguna dimensión pendiente, deja la lista vacía.
+Razona en CUATRO pasos, rellenando los campos EN ORDEN:
+1. branches_on (vía EVIDENCIA): dimensiones clínicas del paciente para las que el CONTEXTO recuperado da recomendaciones DISTINTAS (p. ej. "gestación", "función renal", "coinfección VHB", "CD4", "carga viral", "resistencias", "pauta actual"). Si el contexto no condiciona por ningún dato del paciente, déjala vacía. Los MODIFICADORES CANDIDATOS son solo pistas; aquí manda lo que el contexto realmente condiciona.
+2. clinically_relevant (vía CONOCIMIENTO CLÍNICO, red de seguridad): dimensiones que, por conocimiento clínico ESTABLECIDO del VIH, suelen cambiar la respuesta a ESTA pregunta pero que NO aparecen condicionadas en el contexto actual (puede que el fragmento no se haya recuperado). Sé CONSERVADOR: solo modificadores de impacto reconocido y pertinentes a la pregunta (gestación/lactancia, función renal, función hepática, coinfección VHB/VHC, interacciones farmacológicas, CD4/carga viral, resistencias, edad pediátrica). NO incluyas dimensiones irrelevantes para la pregunta ni para preguntas generales/definitorias.
+3. already_covered: de las dimensiones de branches_on Y clinically_relevant, las que los DATOS YA CONOCIDOS ya determinan en CUALQUIER forma o unidad equivalente (si se conoce "semana_gestacion" o "trimestre" → gestación cubierta; "aclaramiento_renal" → función renal cubierta; valor de CD4 → CD4 cubierto). Sé generoso: cubierta si cualquier dato conocido permite deducirla.
+4. questions: UNA pregunta por cada dimensión pendiente = (branches_on ∪ clinically_relevant) − already_covered. PRIORIZA primero las de branches_on (más defendibles). Concretas, en español, terminadas en "?", pidiendo UN dato cada una. Máximo 3. Si no queda ninguna pendiente, lista vacía.
 
 needs_clarification = true SOLO si questions no está vacía.
 
 Las abreviaturas de las guías cuentan como el mismo término (lista SIGLA = nombre):
 {_ABBREV_LIST}
 
-Devuelve branches_on (lista), already_covered (lista), questions (lista) y needs_clarification (bool)."""
+Devuelve branches_on, clinically_relevant, already_covered, questions (listas) y needs_clarification (bool)."""
 
 
 class _Assessment(BaseModel):
-    branches_on: list[str]      # patient dimensions the retrieved context branches on
-    already_covered: list[str]  # those already pinned by the known facts (forces subtraction)
-    questions: list[str]        # one per pending dimension (branches_on minus already_covered)
+    branches_on: list[str]         # dims the retrieved context branches on (evidence-grounded)
+    clinically_relevant: list[str] # dims clinical knowledge flags but the context misses (net)
+    already_covered: list[str]     # dims already pinned by known facts (forces subtraction)
+    questions: list[str]           # one per pending dim ((branches_on ∪ relevant) − covered)
     needs_clarification: bool
 
 
@@ -548,9 +555,11 @@ def _get_assess_llm():
 def assess(question: str, formatted_context: str, known_facts: dict | None = None,
            candidate_modifiers: list | None = None) -> dict:
     """Decide whether to ask the doctor for missing patient data before answering. Returns
-    {"needs_clarification": bool, "questions": list[str]}. On LLM failure it does NOT block
-    the pipeline: returns needs_clarification=False (we would rather answer than get stuck
-    interrogating)."""
+    {"needs_clarification": bool, "questions": [...], "branches_on": [...],
+    "clinically_relevant": [...], "already_covered": [...]} — the reasoning fields are kept
+    for transparency (visible in the trace: which dimensions came from the evidence vs from
+    clinical knowledge). On LLM failure it does NOT block the pipeline: returns
+    needs_clarification=False (we would rather answer than get stuck interrogating)."""
     facts = {k: v for k, v in (known_facts or {}).items() if k}
     facts_txt = ("\n".join(f"- {k}: {v}" if v else f"- {k}" for k, v in facts.items())
                  or "(ninguno aportado)")
@@ -564,6 +573,10 @@ def assess(question: str, formatted_context: str, known_facts: dict | None = Non
         ]))
         qs = [q.strip() for q in (a.questions or []) if isinstance(q, str) and q.strip()][:3]
         needs = bool(a.needs_clarification and qs)
-        return {"needs_clarification": needs, "questions": qs if needs else []}
+        return {"needs_clarification": needs, "questions": qs if needs else [],
+                "branches_on": list(a.branches_on or []),
+                "clinically_relevant": list(a.clinically_relevant or []),
+                "already_covered": list(a.already_covered or [])}
     except Exception:
-        return {"needs_clarification": False, "questions": []}
+        return {"needs_clarification": False, "questions": [],
+                "branches_on": [], "clinically_relevant": [], "already_covered": []}

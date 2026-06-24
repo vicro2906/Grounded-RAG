@@ -11,8 +11,9 @@ Flow:   question -> rephrase -> [retrieval] -> assess_context -> generate <-> va
           graph); they all feed the SAME assess -> generate -> validate -> evidence tail.
         - assess_context is the clarification gate: if the retrieved guidance branches on a
           patient datum that is still unknown (gestation week, renal function, coinfection…),
-          it pauses (interrupt) to ask the doctor and folds the answer into clinical_facts,
-          which then steers generation (non-citable). Capped at CLARIFY_MAX_ROUNDS rounds.
+          it pauses (interrupt) to ask the doctor; re_retrieve then folds the answer into the
+          query to pull the conditional passages, and the answer also steers generation as a
+          non-citable block (clinical_facts). Capped at CLARIFY_MAX_ROUNDS rounds.
         - validate retries generate when not valid, up to MAX_ITER; if exhausted, safe exit.
 
 Choosing the retrieval mode:
@@ -189,6 +190,7 @@ class RAGState(TypedDict):
     # --- Clarification (slot-filling): patient data steers generation, never cited ---
     clinical_facts: Annotated[dict, _merge_facts]  # accumulated patient data {attr: value}
     candidate_modifiers: list  # cheap screen (refine): modifiers the question might need
+    assessment: dict           # assess reasoning {branches_on, clinically_relevant, already_covered}
     pending_clarifications: list  # questions assess wants the doctor to answer (interrupt)
     clarify_rounds: Annotated[int, _add_int]  # clarification rounds done (capped, see route)
     answer: dict             # structured answer from the LLM (generate_answer)
@@ -479,17 +481,55 @@ def node_assess_context(state: RAGState) -> dict:
     a = assess(state["question"], state["formatted_context"],
                known_facts=state.get("clinical_facts"),
                candidate_modifiers=state.get("candidate_modifiers"))
-    return {"pending_clarifications": a["questions"] if a["needs_clarification"] else []}
+    return {"pending_clarifications": a["questions"] if a["needs_clarification"] else [],
+            "assessment": {k: a.get(k) for k in
+                           ("branches_on", "clinically_relevant", "already_covered")}}
 
 
 def node_clarify(state: RAGState) -> dict:
     """Pause the run and ask the doctor the pending clarifying questions (LangGraph interrupt;
     Studio shows them and waits). On resume, the doctor's answers are merged into clinical_facts
-    (the reducer accumulates them) and the round counter is bumped; control returns to
-    assess_context, which — now that the data is known — will route to generate."""
+    (the reducer accumulates them) and the round counter is bumped; control goes to re_retrieve
+    (fold the new data into the query) and back to assess_context, which — now that the data is
+    known — routes to generate."""
     answers = interrupt({"questions": state.get("pending_clarifications", [])})
     facts = answers if isinstance(answers, dict) else {"respuesta_medico": str(answers)}
     return {"clinical_facts": facts, "clarify_rounds": 1, "pending_clarifications": []}
+
+
+def _facts_phrase(clinical_facts: dict | None) -> str:
+    """Compact inline rendering of the patient data, to enrich the retrieval query."""
+    facts = {k: v for k, v in (clinical_facts or {}).items() if k}
+    return "; ".join(f"{k}: {v}" if v else k for k, v in facts.items())
+
+
+def node_re_retrieve(state: RAGState, config) -> dict:
+    """After a clarification round, re-run retrieval with the patient data folded into the
+    query, so the doctor's answers actually PULL the conditional passages (e.g. the HBV-
+    coinfection or first-trimester branch) instead of only steering generation over the chunks
+    fetched before we knew them. Dispatches on the mode that already ran and reuses the SAME
+    collapsed retrieval functions as the first pass (even in the dedicated expanded graphs:
+    behaviour-equivalent and far simpler than re-entering the sub-graph), overwriting contexts
+    so assess/generate see the enriched evidence. No-ops if there are no facts to add."""
+    facts = _facts_phrase(state.get("clinical_facts"))
+    if not facts:
+        return {}   # nothing new to enrich with: keep the original retrieval
+    mode = state.get("retrieval_mode") or _resolve_mode(config)
+    patient = f"Contexto del paciente: {facts}"
+    if mode == "iterative":
+        contexts = iterative_search(f"{state['question']}\n{patient}", top_k=8)
+    elif mode == "graph":
+        from graph.lightrag_track import graph_search
+        enriched_hybrid = f"{state.get('search_query') or state['question']}\n{patient}"
+        contexts = graph_search(f"{state['question']}\n{patient}", top_k=8,
+                                hybrid_query=enriched_hybrid)
+    else:  # baseline
+        enriched = f"{state.get('search_query') or state['question']}\n{patient}"
+        candidates = retrieve_hybrid(enriched, top_k=20, prefetch_limit=30)
+        contexts = rerank(enriched, candidates, top_k=5)
+    chunk_index, formatted_context = build_context(contexts)
+    return {"contexts": contexts, "chunk_index": chunk_index,
+            "formatted_context": formatted_context}
 
 
 def route_assess(state: RAGState) -> str:
@@ -573,8 +613,9 @@ def route_validation(state: RAGState) -> str:
 #     runtime by route_domain via the `retrieval_mode` context field. Exposed as `app`.
 #
 # Shape:  START -> rephrase -┬- out of domain -> out_of_domain -> END
-#                            └- in domain -> [retrieval] -> assess_context -┬- clarify (interrupt) ─┐
-#                                                                           │   ◀── (resume) ───────┘
+#                            └- in domain -> [retrieval] -> assess_context -┬- clarify (interrupt)
+#                                                                           │     -> re_retrieve ─┐
+#                                                                           │   ◀── (enriched) ───┘
 #                                                           (data known /   └- generate -> validate -┬-> evidence -> END
 #                                                            budget spent)               ▲ (retry) │ ├-> generate (loop)
 #                                                                                        └─────────┘ └-> fallback -> END
@@ -587,6 +628,7 @@ def _add_common(builder: StateGraph) -> None:
     builder.add_node("out_of_domain", node_out_of_domain)
     builder.add_node("assess_context", node_assess_context)
     builder.add_node("clarify", node_clarify)
+    builder.add_node("re_retrieve", node_re_retrieve)
     builder.add_node("generate", node_generate)
     builder.add_node("validate", node_validate)
     builder.add_node("evidence", node_evidence)
@@ -595,11 +637,13 @@ def _add_common(builder: StateGraph) -> None:
     builder.add_edge(START, "rephrase")
     builder.add_edge("out_of_domain", END)
     # Clarification gate (between retrieval and generate): assess the retrieved evidence and,
-    # if it branches on missing patient data, pause to ask; otherwise generate. clarify loops
-    # back to assess_context, which then (data known / budget spent) routes to generate.
+    # if it branches on missing patient data, pause to ask; otherwise generate. After asking,
+    # re_retrieve folds the answers into the query and pulls the conditional passages, then
+    # assess_context runs again (data known / budget spent) and routes to generate.
     builder.add_conditional_edges("assess_context", route_assess,
                                   {"clarify": "clarify", "generate": "generate"})
-    builder.add_edge("clarify", "assess_context")
+    builder.add_edge("clarify", "re_retrieve")
+    builder.add_edge("re_retrieve", "assess_context")
     builder.add_edge("generate", "validate")
     # Loop: validate -> evidence (valid) | generate (retry) | fallback (exhausted)
     builder.add_conditional_edges("validate", route_validation,

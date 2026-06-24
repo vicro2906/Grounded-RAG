@@ -38,15 +38,30 @@ son IDÉNTICAS en los tres modos; solo cambia el nodo de recuperación, elegido 
   de clarificación. Si está fuera de dominio → `out_of_domain` (mensaje directo, corta el
   pipeline). La generación usa la pregunta ORIGINAL, no la reescrita.
 - **assess_context + clarify** (`rag.assess`, gpt-4o-mini; nodos en `main.py`): **puerta de
-  clarificación interactiva** (F5, slot-filling) entre la recuperación y `generate`. La mitad
-  anclada en evidencia del esquema híbrido: dado el contexto recuperado + `clinical_facts`,
-  decide (razonando en campos `branches_on`/`already_covered`/`questions`) si la guía
-  recuperada **bifurca** por un dato del paciente aún desconocido (semana de gestación, función
-  renal, coinfección VHB/VHC, CD4/CV, resistencias, pauta actual). Si sí → `clarify` **pausa**
+  clarificación interactiva** (F5, slot-filling) entre la recuperación y `generate`. Razona en
+  campos estructurados (orden = CoT) por DOS vías: **(1) evidencia** (`branches_on`: dimensiones
+  por las que el contexto recuperado da recomendaciones distintas — la más defendible) y
+  **(2) conocimiento clínico implícito** (`clinically_relevant`: modificadores establecidos que
+  suelen cambiar la respuesta pero NO aparecen en el contexto — RED DE SEGURIDAD ante fallos de
+  recuperación; conservadora). Resta `already_covered` (lo que `clinical_facts` ya fija en
+  cualquier unidad) y emite `questions` (una por dimensión pendiente, prioriza evidencia, tope
+  3). El razonamiento se expone en el estado (`assessment`) para verlo en la traza. La vía (2)
+  es segura porque el dato NO se cita: solo dirige la rama Y re-dispara la recuperación
+  (`re_retrieve`), de modo que la evidencia condicional se recupera antes de generar y `validate`
+  sigue exigiendo grounding. Si hay preguntas → `clarify` **pausa**
   el grafo con `interrupt()` y pregunta al médico; al reanudar, la respuesta se funde en
-  `clinical_facts` (reducer `_merge_facts`) y vuelve a `assess_context`. Cota dura
-  `CLARIFY_MAX_ROUNDS=1` (no interrogar). Los `clinical_facts` entran en `generate` como bloque
-  **"DATOS APORTADOS POR EL MÉDICO" NO citable** (solo seleccionan la rama de la guía; las citas
+  `clinical_facts` (reducer `_merge_facts`). Número de preguntas VARIABLE (una por dimensión
+  pendiente, tope 3); cota dura `CLARIFY_MAX_ROUNDS=1` (no interrogar). El número de preguntas
+  es variable porque se generan tantas como dimensiones pendientes haya (`branches_on` −
+  `already_covered`).
+- **re_retrieve** (nodo en `main.py`): tras `clarify`, **re-recupera con los `clinical_facts`
+  inyectados en la consulta** (despacha según `retrieval_mode`, reusa las funciones colapsadas
+  baseline/iterative/graph) y SOBRESCRIBE `contexts` → así el dato del médico TIRA de los
+  pasajes condicionales (rama de VHB, de primer trimestre…), no solo dirige la generación.
+  Luego vuelve a `assess_context` (cap agotado → `generate`). No-op si no hay datos nuevos.
+  Probado: con "coinfección VHB" entran al top-5 los chunks específicos de VHB.
+  Los `clinical_facts` entran ADEMÁS en `generate` como bloque
+  **"DATOS APORTADOS POR EL MÉDICO" NO citable** (seleccionan la rama de la guía; las citas
   literales siguen saliendo de los chunks). Si no falta nada → directo a `generate`. Requiere
   checkpointer: lo provee `langgraph dev`/Studio (no se compila uno propio en los grafos).
 - **Recuperación — 3 modos seleccionables (`RETRIEVAL_MODE`), todos terminan en el mismo generate:**
@@ -223,8 +238,13 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
     respuestas en `clinical_facts` (no citable, dirige la generación), cota `CLARIFY_MAX_ROUNDS=1`.
     Probado end-to-end (baseline + MemorySaver) y casos unitarios de `assess` (condicional /
     dato ya conocido en cualquier unidad / no condicional). Validación final: LangGraph Studio
-    (`langgraph dev`, persistencia la pone la plataforma). PENDIENTE: streaming, web, memoria
-    multi-turno de conversación, y (opcional) re-recuperación enriquecida con los nuevos datos.
+    (`langgraph dev`, persistencia la pone la plataforma).
+  - **Re-recuperación enriquecida: HECHO** (nodo `re_retrieve`, incremento 1). Tras clarificar,
+    los `clinical_facts` se inyectan en la consulta y re-disparan la recuperación → el dato del
+    médico tira de los pasajes condicionales antes de generar (probado: VHB cambia el top-5).
+    PENDIENTE: streaming, web, memoria multi-turno de conversación, y (incremento 2) vía de
+    "modificadores por conocimiento implícito" en `assess` (marcada y siempre seguida de
+    re-retrieval + validate) como red de seguridad ante fallos de recuperación.
 
 ## Pendiente / próximos pasos (a fecha 2026-06-23)
 
@@ -235,9 +255,10 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
 2. **(Idea) Descripciones de relaciones como "mapa de conceptos" no citable** en el prompt
    de generación del grafo, para ayudar al razonamiento multi-hop sin romper el grounding.
    Prototipar tras un flag y A/B contra la versión actual (faithfulness + recall).
-3. **F5 — UX.** Clarificación interactiva HECHA (validar en Studio); seguir con streaming, web
-   (Streamlit/Chainlit), memoria multi-turno y navegación por conceptos. Opcional: re-recuperar
-   con los `clinical_facts` antes de generar (hoy solo dirigen la generación, no la recuperación).
+3. **F5 — UX.** Clarificación interactiva + re-recuperación enriquecida HECHAS (validar en
+   Studio); seguir con streaming, web (Streamlit/Chainlit), memoria multi-turno y navegación
+   por conceptos. Incremento 2 pendiente: vía de "modificadores por conocimiento implícito" en
+   `assess` (marcada y siempre seguida de re-retrieval + validate).
 
 Artefactos de evaluación versionados: `resultados_ragas.csv` (baseline F0) y
 `resultados_ragas_{baseline,iterative,graph}_retrieval.csv` (A/B F4, context_recall).
