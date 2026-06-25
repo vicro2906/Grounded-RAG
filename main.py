@@ -104,9 +104,13 @@ _structured_llm = ChatOpenAI(model=GENERATION_MODEL, temperature=0.2).with_struc
 # Validation loop: max number of generations (initial + retries).
 MAX_ITER = 2
 
-# Clarification loop: max rounds of clarifying questions before we answer anyway (so the
-# doctor is never trapped in an interrogation). 1 = ask at most once, then generate.
-CLARIFY_MAX_ROUNDS = 1
+# Clarification loop knobs (so the doctor is never trapped in an interrogation):
+#   - CLARIFY_MAX_ROUNDS: max pauses to ask; after that we answer anyway.
+#   - CLARIFY_QUESTIONS_PER_ROUND: questions shown per pause (assess orders them by priority).
+# With ROUNDS=3 and PER_ROUND=1 the doctor is asked ONE question at a time, at most 3 times.
+# Each round re-assesses on the enriched context; already_covered stops re-asking answered data.
+CLARIFY_MAX_ROUNDS = 3
+CLARIFY_QUESTIONS_PER_ROUND = 1
 
 # Retrieval strategy (Phase 4) — three interchangeable modes:
 #   "baseline"  -> hybrid + reranker (single-shot, current system)
@@ -164,18 +168,9 @@ class InputState(TypedDict):
     question: str            # user input
 
 
-# Reducers used by RAGState. _add_int also serves the dedicated graphs' hop counter below.
-# Defined here (before RAGState) because Annotated evaluates them at class-creation time.
+# Reducer for the dedicated graphs' hop counter (see IterativeState below).
 def _add_int(a: int | None, b: int | None) -> int:
     return (a or 0) + (b or 0)
-
-
-# Clinical profile reducer: merge dicts so facts known from the question and facts the doctor
-# supplies in the clarification round accumulate into the same key.
-def _merge_facts(existing: dict | None, update: dict | None) -> dict:
-    merged = dict(existing or {})
-    merged.update(update or {})
-    return merged
 
 
 class RAGState(TypedDict):
@@ -188,11 +183,16 @@ class RAGState(TypedDict):
     chunk_index: dict        # {n: chunk} for source citation (build_context)
     formatted_context: str   # numbered context [1]/[2]… for the LLM
     # --- Clarification (slot-filling): patient data steers generation, never cited ---
-    clinical_facts: Annotated[dict, _merge_facts]  # accumulated patient data {attr: value}
+    # NO reducers here: these are reset per question in node_rephrase (Studio threads persist
+    # state across questions, so accumulating reducers would leak last patient's data / spent
+    # round budget into the next question). Within ONE question, node_clarify merges/increments
+    # by hand (reads current state), which is enough — they are only written sequentially.
+    clinical_facts: dict       # patient data {attr: value}: seeded in rephrase, merged in clarify
     candidate_modifiers: list  # cheap screen (refine): modifiers the question might need
     assessment: dict           # assess reasoning {branches_on, clinically_relevant, already_covered}
     pending_clarifications: list  # questions assess wants the doctor to answer (interrupt)
-    clarify_rounds: Annotated[int, _add_int]  # clarification rounds done (capped, see route)
+    asked_questions: list      # every clarifying question already asked (so assess never repeats)
+    clarify_rounds: int        # clarification rounds done THIS question (reset in rephrase)
     answer: dict             # structured answer from the LLM (generate_answer)
     attempts: int            # number of generations done (for the validation loop)
     validation: dict         # validator verdict {is_valid, reason, ...}
@@ -245,11 +245,17 @@ def node_rephrase(state: RAGState) -> dict:
     Also the cheap half of the hybrid clarification step: seeds clinical_facts with the
     patient data already stated in the question and the candidate modifiers it might need
     (confirmed later against the evidence in assess_context). If the question is unrelated
-    to HIV, the pipeline is short-circuited (see route_domain)."""
+    to HIV, the pipeline is short-circuited (see route_domain).
+
+    Runs at the start of EVERY question, so it RESETS the clarification cycle: Studio threads
+    persist state across questions, and without this reset the previous question's spent round
+    budget and patient data would leak into the new one (assess_context would skip asking)."""
     r = refine(state["question"])
     return {"search_query": r["query"], "in_domain": r["in_domain"],
-            "clinical_facts": r.get("known_facts", {}),
-            "candidate_modifiers": r.get("candidate_modifiers", [])}
+            "clinical_facts": r.get("known_facts", {}),          # overwrites (no reducer): fresh
+            "candidate_modifiers": r.get("candidate_modifiers", []),
+            "pending_clarifications": [], "clarify_rounds": 0, "assessment": {},
+            "asked_questions": []}
 
 
 def node_out_of_domain(state: RAGState) -> dict:
@@ -480,7 +486,9 @@ def node_assess_context(state: RAGState) -> dict:
         return {"pending_clarifications": []}   # budget spent: do not ask again
     a = assess(state["question"], state["formatted_context"],
                known_facts=state.get("clinical_facts"),
-               candidate_modifiers=state.get("candidate_modifiers"))
+               candidate_modifiers=state.get("candidate_modifiers"),
+               asked_questions=state.get("asked_questions"),
+               max_questions=CLARIFY_QUESTIONS_PER_ROUND)
     return {"pending_clarifications": a["questions"] if a["needs_clarification"] else [],
             "assessment": {k: a.get(k) for k in
                            ("branches_on", "clinically_relevant", "already_covered")}}
@@ -489,12 +497,25 @@ def node_assess_context(state: RAGState) -> dict:
 def node_clarify(state: RAGState) -> dict:
     """Pause the run and ask the doctor the pending clarifying questions (LangGraph interrupt;
     Studio shows them and waits). On resume, the doctor's answers are merged into clinical_facts
-    (the reducer accumulates them) and the round counter is bumped; control goes to re_retrieve
-    (fold the new data into the query) and back to assess_context, which — now that the data is
-    known — routes to generate."""
-    answers = interrupt({"questions": state.get("pending_clarifications", [])})
-    facts = answers if isinstance(answers, dict) else {"respuesta_medico": str(answers)}
-    return {"clinical_facts": facts, "clarify_rounds": 1, "pending_clarifications": []}
+    and the round counter is bumped (by hand, since these fields carry no reducer — see RAGState);
+    control goes to re_retrieve (fold the new data into the query) and back to assess_context,
+    which — now that the data is known — routes to generate (or asks the remaining dimensions if
+    rounds are left)."""
+    pending = state.get("pending_clarifications", [])
+    answers = interrupt({"questions": pending})
+    if isinstance(answers, dict):
+        new_facts = answers                       # structured answer: merge as-is
+    else:
+        text = str(answers).strip()
+        # Plain answer: key it by the QUESTION asked, not a fixed key — otherwise each round's
+        # answer would overwrite the previous one (collapse) and assess would re-ask. With one
+        # question per round this maps the answer to exactly what was asked.
+        new_facts = ({pending[0]: text} if (len(pending) == 1 and text)
+                     else ({"respuesta_medico": text} if text else {}))
+    merged = {**(state.get("clinical_facts") or {}), **new_facts}   # accumulate within this question
+    asked = list(state.get("asked_questions") or []) + list(pending)
+    return {"clinical_facts": merged, "clarify_rounds": state.get("clarify_rounds", 0) + 1,
+            "pending_clarifications": [], "asked_questions": asked}
 
 
 def _facts_phrase(clinical_facts: dict | None) -> str:

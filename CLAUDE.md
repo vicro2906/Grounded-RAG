@@ -49,11 +49,16 @@ son IDÉNTICAS en los tres modos; solo cambia el nodo de recuperación, elegido 
   es segura porque el dato NO se cita: solo dirige la rama Y re-dispara la recuperación
   (`re_retrieve`), de modo que la evidencia condicional se recupera antes de generar y `validate`
   sigue exigiendo grounding. Si hay preguntas → `clarify` **pausa**
-  el grafo con `interrupt()` y pregunta al médico; al reanudar, la respuesta se funde en
-  `clinical_facts` (reducer `_merge_facts`). Número de preguntas VARIABLE (una por dimensión
-  pendiente, tope 3); cota dura `CLARIFY_MAX_ROUNDS=1` (no interrogar). El número de preguntas
-  es variable porque se generan tantas como dimensiones pendientes haya (`branches_on` −
-  `already_covered`).
+  el grafo con `interrupt()` y pregunta al médico; al reanudar, `clarify` funde la respuesta en
+  `clinical_facts` (merge a mano) y suma 1 a `clarify_rounds`. Dos cotas: `CLARIFY_MAX_ROUNDS`
+  (=3, nº de pausas) y `CLARIFY_QUESTIONS_PER_ROUND` (=1, preguntas por pausa) → por defecto se
+  pregunta UNA cosa cada vez, como mucho 3 veces. `assess` ordena las pendientes por prioridad
+  (evidencia primero) y se toman las `max_questions` primeras.
+  **`clinical_facts`/`clarify_rounds` NO llevan reducer**: se REINICIAN por pregunta en
+  `node_rephrase` (Studio persiste el estado del thread; con reducers acumulativos los datos del
+  paciente anterior y el presupuesto de rondas gastado se filtraban a la siguiente pregunta y
+  `assess_context` se saltaba). Dentro de UNA pregunta el merge/incremento lo hace `clarify` a
+  mano (lectura del estado), suficiente porque se escriben en secuencia.
 - **re_retrieve** (nodo en `main.py`): tras `clarify`, **re-recupera con los `clinical_facts`
   inyectados en la consulta** (despacha según `retrieval_mode`, reusa las funciones colapsadas
   baseline/iterative/graph) y SOBRESCRIBE `contexts` → así el dato del médico TIRA de los

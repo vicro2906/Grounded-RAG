@@ -522,8 +522,8 @@ _ASSESS_SYS = f"""Eres un componente que decide si, ANTES de responder, conviene
 Razona en CUATRO pasos, rellenando los campos EN ORDEN:
 1. branches_on (vía EVIDENCIA): dimensiones clínicas del paciente para las que el CONTEXTO recuperado da recomendaciones DISTINTAS (p. ej. "gestación", "función renal", "coinfección VHB", "CD4", "carga viral", "resistencias", "pauta actual"). Si el contexto no condiciona por ningún dato del paciente, déjala vacía. Los MODIFICADORES CANDIDATOS son solo pistas; aquí manda lo que el contexto realmente condiciona.
 2. clinically_relevant (vía CONOCIMIENTO CLÍNICO, red de seguridad): dimensiones que, por conocimiento clínico ESTABLECIDO del VIH, suelen cambiar la respuesta a ESTA pregunta pero que NO aparecen condicionadas en el contexto actual (puede que el fragmento no se haya recuperado). Sé CONSERVADOR: solo modificadores de impacto reconocido y pertinentes a la pregunta (gestación/lactancia, función renal, función hepática, coinfección VHB/VHC, interacciones farmacológicas, CD4/carga viral, resistencias, edad pediátrica). NO incluyas dimensiones irrelevantes para la pregunta ni para preguntas generales/definitorias.
-3. already_covered: de las dimensiones de branches_on Y clinically_relevant, las que los DATOS YA CONOCIDOS ya determinan en CUALQUIER forma o unidad equivalente (si se conoce "semana_gestacion" o "trimestre" → gestación cubierta; "aclaramiento_renal" → función renal cubierta; valor de CD4 → CD4 cubierto). Sé generoso: cubierta si cualquier dato conocido permite deducirla.
-4. questions: UNA pregunta por cada dimensión pendiente = (branches_on ∪ clinically_relevant) − already_covered. PRIORIZA primero las de branches_on (más defendibles). Concretas, en español, terminadas en "?", pidiendo UN dato cada una. Máximo 3. Si no queda ninguna pendiente, lista vacía.
+3. already_covered: de las dimensiones de branches_on Y clinically_relevant, las que YA ESTÁN RESUELTAS por cualquiera de estas dos fuentes: (a) los DATOS YA CONOCIDOS las determinan en CUALQUIER forma o unidad equivalente (si se conoce "semana_gestacion" o "trimestre" → gestación cubierta; "aclaramiento_renal" → función renal cubierta; valor de CD4 → CD4 cubierto); o (b) la dimensión YA FUE PREGUNTADA (aparece en PREGUNTAS YA FORMULADAS), aunque el dato siga incompleto. Sé generoso: cubierta si cualquier dato conocido permite deducirla o si ya se preguntó.
+4. questions: UNA pregunta por cada dimensión pendiente = (branches_on ∪ clinically_relevant) − already_covered. PRIORIZA primero las de branches_on (más defendibles). Concretas, en español, terminadas en "?", pidiendo UN dato cada una. Máximo 3. NUNCA repitas, ni reformules, una pregunta que ya esté en PREGUNTAS YA FORMULADAS. Si no queda ninguna pendiente, lista vacía.
 
 needs_clarification = true SOLO si questions no está vacía.
 
@@ -553,25 +553,32 @@ def _get_assess_llm():
 
 
 def assess(question: str, formatted_context: str, known_facts: dict | None = None,
-           candidate_modifiers: list | None = None) -> dict:
+           candidate_modifiers: list | None = None, asked_questions: list | None = None,
+           max_questions: int = 1) -> dict:
     """Decide whether to ask the doctor for missing patient data before answering. Returns
     {"needs_clarification": bool, "questions": [...], "branches_on": [...],
     "clinically_relevant": [...], "already_covered": [...]} — the reasoning fields are kept
     for transparency (visible in the trace: which dimensions came from the evidence vs from
-    clinical knowledge). On LLM failure it does NOT block the pipeline: returns
-    needs_clarification=False (we would rather answer than get stuck interrogating)."""
+    clinical knowledge). `asked_questions` are the questions already posed in previous rounds;
+    assess must NOT repeat them (the across-rounds anti-duplicate guard). `max_questions` caps
+    how many questions to ask THIS round (the LLM orders them by priority — evidence first — so
+    we keep the top ones); with max_questions=1 the doctor is asked one at a time. On LLM
+    failure it does NOT block the pipeline: returns needs_clarification=False."""
     facts = {k: v for k, v in (known_facts or {}).items() if k}
     facts_txt = ("\n".join(f"- {k}: {v}" if v else f"- {k}" for k, v in facts.items())
                  or "(ninguno aportado)")
     cands_txt = ", ".join(candidate_modifiers or []) or "(ninguno)"
+    asked_txt = "\n".join(f"- {q}" for q in (asked_questions or [])) or "(ninguna)"
     try:
         a = cast(_Assessment, _get_assess_llm().invoke([
             ("system", _ASSESS_SYS),
             ("human", f"PREGUNTA:\n{question}\n\nCONTEXTO:\n{formatted_context}\n\n"
                       f"DATOS YA CONOCIDOS:\n{facts_txt}\n\n"
-                      f"MODIFICADORES CANDIDATOS:\n{cands_txt}"),
+                      f"MODIFICADORES CANDIDATOS:\n{cands_txt}\n\n"
+                      f"PREGUNTAS YA FORMULADAS:\n{asked_txt}"),
         ]))
-        qs = [q.strip() for q in (a.questions or []) if isinstance(q, str) and q.strip()][:3]
+        qs = [q.strip() for q in (a.questions or [])
+              if isinstance(q, str) and q.strip()][:max(1, max_questions)]
         needs = bool(a.needs_clarification and qs)
         return {"needs_clarification": needs, "questions": qs if needs else [],
                 "branches_on": list(a.branches_on or []),
