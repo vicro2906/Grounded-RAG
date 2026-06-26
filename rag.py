@@ -79,6 +79,10 @@ COLLECTION_HYBRID = "guias_vih_hibrida"    # dense + sparse BM25 (Phase 2)
 GENERATION_MODEL = "gpt-4o"
 REPHRASE_MODEL   = "gpt-4o-mini"
 VALIDATION_MODEL = "gpt-4o-mini"   # grounding/relevance judge (safety net)
+# Clarification assessment: deciding WHICH patient data to ask for leans on clinical knowledge
+# (now the primary vía), where gpt-4o-mini was inconsistent at the structured reasoning. Use the
+# strong model — a better question-asker extracts more relevant detail (the whole point).
+ASSESS_MODEL     = GENERATION_MODEL
 
 # A lock guards the lazy model loads: retrieval now runs sub-queries / branches in parallel
 # (iterative fan-out, graph traverse∥hybrid), so two threads could hit a cold model at once.
@@ -504,40 +508,42 @@ def validate(question: str, answer: dict, formatted_context: str) -> dict:
 
 # ---------------------------------------------------------------------------
 # CLARIFICATION ASSESSMENT — decides whether to ask the doctor for missing patient data
-# before answering. It reasons from TWO sources, in priority order:
-#   (1) EVIDENCE-GROUNDED (branches_on): dimensions the RETRIEVED guidance actually branches
-#       on. The most defensible: we ask only what the guides themselves condition on.
-#   (2) IMPLICIT CLINICAL KNOWLEDGE (clinically_relevant): well-established modifiers that
-#       typically change the answer to THIS question but are NOT visible in the current
-#       context — a SAFETY NET for retrieval misses (the conditional passage may simply not
-#       have been retrieved). This is sound because the doctor's answer is never used as a
-#       cited source: it only steers which branch applies AND re-triggers retrieval
-#       (node_re_retrieve), so the conditional evidence gets pulled before generation, and
-#       validate still guards grounding. Extra first-hand data can only help.
-# already_covered subtracts what the known facts already pin (forces the model to not re-ask).
-# The cheap screen (candidate_modifiers, known_facts) is done earlier in refine().
+# before answering. It reasons from TWO sources, with CLINICAL KNOWLEDGE as the PRIMARY one:
+#   (1) IMPLICIT CLINICAL KNOWLEDGE (clinically_relevant, PRIMARY): the established modifiers
+#       that change the answer to THIS kind of question, INDEPENDENT of what was retrieved.
+#       Rationale (decided with the user): the retriever's silent recall miss is both more
+#       likely and more harmful than the question-model erring — a missed modifier yields a
+#       confident-but-generic answer (silent), whereas a slightly-off question is visible and
+#       recoverable (the doctor flags it as irrelevant; asked_questions stops repeats) and can
+#       never corrupt the answer, which is still re-retrieved and grounding-validated. So we do
+#       NOT anchor the QUESTIONS on the retrieval; only the ANSWER stays evidence-grounded.
+#   (2) EVIDENCE (branches_on, COMPLEMENT): extra context-specific dimensions the retrieved
+#       guidance conditions on — adds specificity when retrieval is good.
+# already_covered subtracts known facts + already-asked questions. questions are ordered by
+# CLINICAL IMPACT (not by source). The cheap screen (candidate_modifiers, known_facts) is in refine().
 # ---------------------------------------------------------------------------
-_ASSESS_SYS = f"""Eres un componente que decide si, ANTES de responder, conviene pedir al médico algún dato del paciente. Recibes una PREGUNTA, el CONTEXTO recuperado (fragmentos de guías de VIH), los DATOS YA CONOCIDOS del paciente y unos MODIFICADORES CANDIDATOS detectados en un cribado previo. NO respondas la pregunta.
+_ASSESS_SYS = f"""Eres un componente que decide si, ANTES de responder, conviene pedir al médico algún dato del paciente. Recibes una PREGUNTA, el CONTEXTO recuperado (fragmentos de guías de VIH), los DATOS YA CONOCIDOS del paciente, unos MODIFICADORES CANDIDATOS de un cribado previo y las PREGUNTAS YA FORMULADAS. NO respondas la pregunta.
 
-Razona en CUATRO pasos, rellenando los campos EN ORDEN:
-1. branches_on (vía EVIDENCIA): dimensiones clínicas del paciente para las que el CONTEXTO recuperado da recomendaciones DISTINTAS (p. ej. "gestación", "función renal", "coinfección VHB", "CD4", "carga viral", "resistencias", "pauta actual"). Si el contexto no condiciona por ningún dato del paciente, déjala vacía. Los MODIFICADORES CANDIDATOS son solo pistas; aquí manda lo que el contexto realmente condiciona.
-2. clinically_relevant (vía CONOCIMIENTO CLÍNICO, red de seguridad): dimensiones que, por conocimiento clínico ESTABLECIDO del VIH, suelen cambiar la respuesta a ESTA pregunta pero que NO aparecen condicionadas en el contexto actual (puede que el fragmento no se haya recuperado). Sé CONSERVADOR: solo modificadores de impacto reconocido y pertinentes a la pregunta (gestación/lactancia, función renal, función hepática, coinfección VHB/VHC, interacciones farmacológicas, CD4/carga viral, resistencias, edad pediátrica). NO incluyas dimensiones irrelevantes para la pregunta ni para preguntas generales/definitorias.
-3. already_covered: de las dimensiones de branches_on Y clinically_relevant, las que YA ESTÁN RESUELTAS por cualquiera de estas dos fuentes: (a) los DATOS YA CONOCIDOS las determinan en CUALQUIER forma o unidad equivalente (si se conoce "semana_gestacion" o "trimestre" → gestación cubierta; "aclaramiento_renal" → función renal cubierta; valor de CD4 → CD4 cubierto); o (b) la dimensión YA FUE PREGUNTADA (aparece en PREGUNTAS YA FORMULADAS), aunque el dato siga incompleto. Sé generoso: cubierta si cualquier dato conocido permite deducirla o si ya se preguntó.
-4. questions: UNA pregunta por cada dimensión pendiente = (branches_on ∪ clinically_relevant) − already_covered. PRIORIZA primero las de branches_on (más defendibles). Concretas, en español, terminadas en "?", pidiendo UN dato cada una. Máximo 3. NUNCA repitas, ni reformules, una pregunta que ya esté en PREGUNTAS YA FORMULADAS. Si no queda ninguna pendiente, lista vacía.
+Tu guía PRINCIPAL es el CONOCIMIENTO CLÍNICO sobre VIH, NO el contexto: el contexto puede estar incompleto o no haber recuperado el fragmento relevante, así que no dependas de él para saber qué importa. Razona en CUATRO pasos, rellenando los campos EN ORDEN:
 
-needs_clarification = true SOLO si questions no está vacía.
+1. clinically_relevant (PRINCIPAL — conocimiento clínico): enumera TODAS las dimensiones del paciente que, por conocimiento clínico establecido del VIH, cambiarían la respuesta a ESTA pregunta, aparezcan o no en el contexto. Sé EXHAUSTIVO dentro de lo PERTINENTE a la pregunta. Modificadores típicos a considerar: gestación/lactancia, función renal, función hepática, coinfección VHB/VHC, interacciones farmacológicas, HLA-B*5701, CD4/carga viral, resistencias previas, edad pediátrica, adherencia, comorbilidades relevantes. NO incluyas dimensiones que no vengan a cuento para la pregunta, y para preguntas generales/definitorias (p. ej. "¿qué es el VIH?") déjala vacía. Es OBLIGATORIO rellenar este campo si luego vas a formular alguna pregunta.
+2. branches_on (COMPLEMENTO — evidencia): dimensiones ADICIONALES por las que el CONTEXTO recuperado da recomendaciones distintas y que NO estén ya en clinically_relevant (aportan especificidad). Si no añade nada nuevo, déjala vacía.
+3. already_covered: de las dimensiones de clinically_relevant Y branches_on, las que YA ESTÁN RESUELTAS por (a) los DATOS YA CONOCIDOS en CUALQUIER forma o unidad equivalente (si se conoce "semana_gestacion" o "trimestre" → gestación cubierta; "aclaramiento_renal" → función renal cubierta; valor de CD4 → CD4 cubierto); o (b) por estar en PREGUNTAS YA FORMULADAS, aunque el dato siga incompleto. Sé generoso: cubierta si cualquier dato conocido permite deducirla o si ya se preguntó.
+4. questions: deriva las preguntas EXACTAMENTE de las dimensiones pendientes = (clinically_relevant ∪ branches_on) − already_covered. UNA pregunta por dimensión pendiente; cada pregunta DEBE corresponder a una dimensión que hayas listado en clinically_relevant o branches_on (no formules preguntas que no correspondan a una dimensión listada). ORDÉNALAS por IMPACTO CLÍNICO (la que más cambie el manejo de este paciente, primero), sin importar de qué vía venga. Concretas, en español, terminadas en "?", pidiendo UN dato cada una. Máximo 3. NUNCA repitas, ni reformules, una pregunta que ya esté en PREGUNTAS YA FORMULADAS. Si no queda ninguna pendiente, lista vacía.
+
+needs_clarification = true SOLO si questions no está vacía. Coherencia OBLIGATORIA: si questions no está vacía, las dimensiones correspondientes deben aparecer en clinically_relevant o branches_on; y ninguna dimensión de questions puede estar en already_covered.
 
 Las abreviaturas de las guías cuentan como el mismo término (lista SIGLA = nombre):
 {_ABBREV_LIST}
 
-Devuelve branches_on, clinically_relevant, already_covered, questions (listas) y needs_clarification (bool)."""
+Devuelve clinically_relevant, branches_on, already_covered, questions (listas) y needs_clarification (bool)."""
 
 
 class _Assessment(BaseModel):
-    branches_on: list[str]         # dims the retrieved context branches on (evidence-grounded)
-    clinically_relevant: list[str] # dims clinical knowledge flags but the context misses (net)
-    already_covered: list[str]     # dims already pinned by known facts (forces subtraction)
-    questions: list[str]           # one per pending dim ((branches_on ∪ relevant) − covered)
+    clinically_relevant: list[str] # PRIMARY: dims clinical knowledge says matter for this question
+    branches_on: list[str]         # COMPLEMENT: extra dims the retrieved context conditions on
+    already_covered: list[str]     # dims already pinned by known facts / already-asked questions
+    questions: list[str]           # one per pending dim, ordered by clinical impact
     needs_clarification: bool
 
 
@@ -546,7 +552,7 @@ def _get_assess_llm():
     """Lazy-load the clarification-assessment LLM (structured output)."""
     global _assess_llm
     if _assess_llm is None:
-        _assess_llm = ChatOpenAI(model=VALIDATION_MODEL, temperature=0).with_structured_output(
+        _assess_llm = ChatOpenAI(model=ASSESS_MODEL, temperature=0).with_structured_output(
             _Assessment, method="json_schema", strict=True
         )
     return _assess_llm

@@ -37,23 +37,29 @@ son IDÉNTICAS en los tres modos; solo cambia el nodo de recuperación, elegido 
   clínicos que la pregunta podría necesitar (`candidate_modifiers`) — la mitad barata del paso
   de clarificación. Si está fuera de dominio → `out_of_domain` (mensaje directo, corta el
   pipeline). La generación usa la pregunta ORIGINAL, no la reescrita.
-- **assess_context + clarify** (`rag.assess`, gpt-4o-mini; nodos en `main.py`): **puerta de
+- **assess_context + clarify** (`rag.assess`, **gpt-4o** `ASSESS_MODEL`; nodos en `main.py`): **puerta de
   clarificación interactiva** (F5, slot-filling) entre la recuperación y `generate`. Razona en
-  campos estructurados (orden = CoT) por DOS vías: **(1) evidencia** (`branches_on`: dimensiones
-  por las que el contexto recuperado da recomendaciones distintas — la más defendible) y
-  **(2) conocimiento clínico implícito** (`clinically_relevant`: modificadores establecidos que
-  suelen cambiar la respuesta pero NO aparecen en el contexto — RED DE SEGURIDAD ante fallos de
-  recuperación; conservadora). Resta `already_covered` (lo que `clinical_facts` ya fija en
-  cualquier unidad) y emite `questions` (una por dimensión pendiente, prioriza evidencia, tope
-  3). El razonamiento se expone en el estado (`assessment`) para verlo en la traza. La vía (2)
-  es segura porque el dato NO se cita: solo dirige la rama Y re-dispara la recuperación
+  campos estructurados (orden = CoT) por DOS vías, con el **CONOCIMIENTO CLÍNICO como PRINCIPAL**:
+  **(1) `clinically_relevant`** (principal): TODOS los modificadores que clínicamente cambian la
+  respuesta a este tipo de pregunta, INDEPENDIENTE del contexto (exhaustiva dentro de lo
+  pertinente) y **(2) `branches_on`** (complemento): dimensiones extra que el contexto recuperado
+  condiciona. **Por qué conocimiento primero (decidido con el usuario):** el fallo del retriever
+  (recall miss silencioso → respuesta genérica con aire de segura) es más probable Y más grave
+  que un error del modelo de preguntas (visible, lo corrige el médico, acotado por `asked_questions`
+  y el tope, y NUNCA corrompe la respuesta, que se re-recupera y valida). Solo la RESPUESTA se
+  ancla en evidencia, no las PREGUNTAS. Resta `already_covered` (lo que `clinical_facts` ya fija en
+  cualquier unidad + lo ya preguntado) y emite `questions` ordenadas por **impacto clínico** (no por
+  vía), una por dimensión pendiente. Razonó inconsistente con gpt-4o-mini (se saltaba el CoT) → se
+  usa gpt-4o (`ASSESS_MODEL`); cuesta más (corre hasta 3× por pregunta) pero un mejor modelo extrae
+  más detalle relevante. El razonamiento se expone en el estado (`assessment`) para la traza. Es
+  seguro porque el dato NO se cita: solo dirige la rama Y re-dispara la recuperación
   (`re_retrieve`), de modo que la evidencia condicional se recupera antes de generar y `validate`
   sigue exigiendo grounding. Si hay preguntas → `clarify` **pausa**
   el grafo con `interrupt()` y pregunta al médico; al reanudar, `clarify` funde la respuesta en
   `clinical_facts` (merge a mano) y suma 1 a `clarify_rounds`. Dos cotas: `CLARIFY_MAX_ROUNDS`
   (=3, nº de pausas) y `CLARIFY_QUESTIONS_PER_ROUND` (=1, preguntas por pausa) → por defecto se
-  pregunta UNA cosa cada vez, como mucho 3 veces. `assess` ordena las pendientes por prioridad
-  (evidencia primero) y se toman las `max_questions` primeras.
+  pregunta UNA cosa cada vez, como mucho 3 veces. `assess` ordena las pendientes por **impacto
+  clínico** y se toman las `max_questions` primeras.
   **`clinical_facts`/`clarify_rounds` NO llevan reducer**: se REINICIAN por pregunta en
   `node_rephrase` (Studio persiste el estado del thread; con reducers acumulativos los datos del
   paciente anterior y el presupuesto de rondas gastado se filtraban a la siguiente pregunta y

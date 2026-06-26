@@ -491,7 +491,7 @@ def node_assess_context(state: RAGState) -> dict:
                max_questions=CLARIFY_QUESTIONS_PER_ROUND)
     return {"pending_clarifications": a["questions"] if a["needs_clarification"] else [],
             "assessment": {k: a.get(k) for k in
-                           ("branches_on", "clinically_relevant", "already_covered")}}
+                           ("clinically_relevant", "branches_on", "already_covered")}}
 
 
 def node_clarify(state: RAGState) -> dict:
