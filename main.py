@@ -498,9 +498,9 @@ def node_clarify(state: RAGState) -> dict:
     """Pause the run and ask the doctor the pending clarifying questions (LangGraph interrupt;
     Studio shows them and waits). On resume, the doctor's answers are merged into clinical_facts
     and the round counter is bumped (by hand, since these fields carry no reducer — see RAGState);
-    control goes to re_retrieve (fold the new data into the query) and back to assess_context,
-    which — now that the data is known — routes to generate (or asks the remaining dimensions if
-    rounds are left)."""
+    control returns to assess_context, which — now that the data is known — either asks the next
+    dimension (if rounds are left) or routes out (re_retrieve -> generate). Retrieval is NOT
+    re-run here: the loop stays on the initial context; the single re_retrieve happens on exit."""
     pending = state.get("pending_clarifications", [])
     answers = interrupt({"questions": pending})
     if isinstance(answers, dict):
@@ -525,13 +525,15 @@ def _facts_phrase(clinical_facts: dict | None) -> str:
 
 
 def node_re_retrieve(state: RAGState, config) -> dict:
-    """After a clarification round, re-run retrieval with the patient data folded into the
-    query, so the doctor's answers actually PULL the conditional passages (e.g. the HBV-
-    coinfection or first-trimester branch) instead of only steering generation over the chunks
+    """Runs ONCE, right before generate, after the clarification loop has gathered all the
+    patient data. Re-runs retrieval with those facts folded into the query, so the doctor's
+    answers actually PULL the conditional passages (e.g. the HBV-coinfection or first-trimester
+    branch) and generate has them to cite — instead of only steering generation over the chunks
     fetched before we knew them. Dispatches on the mode that already ran and reuses the SAME
     collapsed retrieval functions as the first pass (even in the dedicated expanded graphs:
     behaviour-equivalent and far simpler than re-entering the sub-graph), overwriting contexts
-    so assess/generate see the enriched evidence. No-ops if there are no facts to add."""
+    so generate sees the enriched evidence. No-ops if there are no facts to add (e.g. a question
+    that needed no clarification), leaving the initial retrieval untouched."""
     facts = _facts_phrase(state.get("clinical_facts"))
     if not facts:
         return {}   # nothing new to enrich with: keep the original retrieval
@@ -658,13 +660,17 @@ def _add_common(builder: StateGraph) -> None:
     builder.add_edge(START, "rephrase")
     builder.add_edge("out_of_domain", END)
     # Clarification gate (between retrieval and generate): assess the retrieved evidence and,
-    # if it branches on missing patient data, pause to ask; otherwise generate. After asking,
-    # re_retrieve folds the answers into the query and pulls the conditional passages, then
-    # assess_context runs again (data known / budget spent) and routes to generate.
+    # if it branches on missing patient data, pause to ask; otherwise finish. The question loop
+    # (assess_context ⇄ clarify) runs on the SAME initial context — assess is knowledge-primary,
+    # so it does not need the evidence re-fetched each round. re_retrieve runs ONCE, only when we
+    # stop asking, folding ALL gathered facts into the query so generate has the conditional
+    # passages to cite (no-ops if there are no facts). This is 1 initial + at most 1 re_retrieve
+    # (vs one per round before): the intermediate re-retrievals were redundant once assess became
+    # knowledge-driven.
     builder.add_conditional_edges("assess_context", route_assess,
-                                  {"clarify": "clarify", "generate": "generate"})
-    builder.add_edge("clarify", "re_retrieve")
-    builder.add_edge("re_retrieve", "assess_context")
+                                  {"clarify": "clarify", "generate": "re_retrieve"})
+    builder.add_edge("clarify", "assess_context")
+    builder.add_edge("re_retrieve", "generate")
     builder.add_edge("generate", "validate")
     # Loop: validate -> evidence (valid) | generate (retry) | fallback (exhausted)
     builder.add_conditional_edges("validate", route_validation,

@@ -19,10 +19,11 @@ Punto de entrada: `main.py` (grafo compilado `app`). Nodos del grafo:
 
 ```
 question ─▶ rephrase ─┬─ fuera de dominio ─▶ out_of_domain ─▶ END
-                      └─ en dominio ─▶ [RETRIEVAL_MODE] ─▶ assess_context ─┬─ clarify (interrupt) ⟲
-                             ├─ baseline : retrieve (híbrido) ─▶ rerank (20→5)   └─ generate ⇄ validate
-                             ├─ iterative: iterative_retrieve (plan→hop→reflect, →8)   ─▶ evidence ─▶ output
+                      └─ en dominio ─▶ [RETRIEVAL_MODE] ─▶ assess_context ⇄ clarify (interrupt)
+                             ├─ baseline : retrieve (híbrido) ─▶ rerank (20→5)        │ (al salir)
+                             ├─ iterative: iterative_retrieve (plan→hop→reflect, →8)   ▼
                              └─ graph    : graph_retrieve (LightRAG + híbrido propio, →8) ◀ DEFECTO
+                                              re_retrieve (1×) ─▶ generate ⇄ validate ─▶ evidence ─▶ output
                                                               (no válido+agotado ─▶ fallback)
 ```
 
@@ -65,16 +66,20 @@ son IDÉNTICAS en los tres modos; solo cambia el nodo de recuperación, elegido 
   paciente anterior y el presupuesto de rondas gastado se filtraban a la siguiente pregunta y
   `assess_context` se saltaba). Dentro de UNA pregunta el merge/incremento lo hace `clarify` a
   mano (lectura del estado), suficiente porque se escriben en secuencia.
-- **re_retrieve** (nodo en `main.py`): tras `clarify`, **re-recupera con los `clinical_facts`
+- **re_retrieve** (nodo en `main.py`): corre **UNA sola vez, al SALIR del bucle de clarificación**
+  (justo antes de `generate`), no en cada ronda. **Re-recupera con TODOS los `clinical_facts`
   inyectados en la consulta** (despacha según `retrieval_mode`, reusa las funciones colapsadas
-  baseline/iterative/graph) y SOBRESCRIBE `contexts` → así el dato del médico TIRA de los
-  pasajes condicionales (rama de VHB, de primer trimestre…), no solo dirige la generación.
-  Luego vuelve a `assess_context` (cap agotado → `generate`). No-op si no hay datos nuevos.
-  Probado: con "coinfección VHB" entran al top-5 los chunks específicos de VHB.
+  baseline/iterative/graph) y SOBRESCRIBE `contexts` → así el dato del médico TIRA de los pasajes
+  condicionales (rama de VHB, de primer trimestre…) para que `generate` los CITE, no solo dirige
+  la generación. No-op si no hay datos (p. ej. pregunta que no clarifica) → deja el contexto
+  inicial intacto. **Total: 1 retrieve inicial + 1 re_retrieve final** (antes era 1 + N por ronda).
+  El bucle `assess_context ⇄ clarify` corre todo sobre el **contexto inicial**: como `assess` es
+  primario en conocimiento, no necesita re-recuperar entre rondas (los re_retrieve intermedios
+  eran redundantes). Probado: con "coinfección VHB" entran al top-5 los chunks específicos de VHB.
   Los `clinical_facts` entran ADEMÁS en `generate` como bloque
   **"DATOS APORTADOS POR EL MÉDICO" NO citable** (seleccionan la rama de la guía; las citas
-  literales siguen saliendo de los chunks). Si no falta nada → directo a `generate`. Requiere
-  checkpointer: lo provee `langgraph dev`/Studio (no se compila uno propio en los grafos).
+  literales siguen saliendo de los chunks). Requiere checkpointer: lo provee `langgraph dev`/Studio
+  (no se compila uno propio en los grafos).
 - **Recuperación — 3 modos seleccionables (`RETRIEVAL_MODE`), todos terminan en el mismo generate:**
   - **baseline** = `node_retrieve` (`rag.retrieve_hybrid`: densa text-embedding-3-large 3072d +
     sparse BM25 `Qdrant/bm25`, fusión RRF, 20 candidatos) → `node_rerank` (`rag.rerank`,
