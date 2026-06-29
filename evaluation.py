@@ -49,9 +49,9 @@ from rag import (retrieve, retrieve_hybrid, retrieve_rerank, search, build_conte
 # The dataset is fixed (EVAL_SET, defined below). There is no dataset selector.
 #
 #   COLLECTION (Qdrant): choose which hybrid collection retrieval hits via env
-#     QDRANT_COLLECTION=<name>  (rag.py reads it; default "guias_vih_hibrida").
-#   This lets you A/B a Contextual-Retrieval rebuild vs the original WITHOUT code edits:
-#     QDRANT_COLLECTION=guias_vih_hibrida_ctx PIPELINE=graph python evaluation.py
+#     QDRANT_COLLECTION=<name>  (rag.py reads it; DEFAULT "guias_vih_hibrida_ctx", the
+#     Contextual-Retrieval build). To A/B against the non-contextual original WITHOUT edits:
+#     QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py
 # ===========================================================================
 PIPELINE = os.environ.get("PIPELINE", "baseline")   # override per A/B run without editing
 

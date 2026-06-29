@@ -159,8 +159,11 @@ citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estrict
 - Generación: **gpt-4o** (`GENERATION_MODEL`). Rephrase/validación: **gpt-4o-mini**
   (`REPHRASE_MODEL` / `VALIDATION_MODEL`).
 - Embeddings: `text-embedding-3-large` (3072d). Reranker: jina-reranker-v2-base-multilingual.
-- Qdrant Cloud (región **eu-west**). Colecciones: `guias_vih` (solo denso, respaldo) y
-  **`guias_vih_hibrida`** (denso + sparse BM25, la activa).
+- Qdrant Cloud (región **eu-west**). Colecciones: `guias_vih` (solo denso, respaldo),
+  `guias_vih_hibrida` (denso + sparse BM25, sin contexto) y **`guias_vih_hibrida_ctx`**
+  (denso + BM25 con Contextual Retrieval, **la activa por defecto**). La activa la fija
+  `COLLECTION_HYBRID` en `rag.py` (default `guias_vih_hibrida_ctx`), sobreescribible con
+  `QDRANT_COLLECTION` para A/B contra la no contextual.
 - LangSmith en región **UE**: `.env` con `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com`,
   proyecto **`chatbot_vih`** (guion bajo). Trazado se autoactiva si hay `LANGSMITH_API_KEY`.
 
