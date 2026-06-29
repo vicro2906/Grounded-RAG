@@ -133,12 +133,17 @@ citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estrict
 - `rag.py` — pipeline: clientes, embeddings, retrieve/retrieve_hybrid, rerank, refine,
   search, validate, generate_answer (versión cruda), SYS_PROMPT, build_user_prompt, constantes de modelo.
 - `evidence.py` — formateo de respuesta y fuentes.
-- `evaluation.py` — evaluación RAGAS. Dos sets (`GOLDEN_SET` 47 single-hop;
-  `MULTIHOP_SET` 16 multi-hop) y A/B: selector `PIPELINE` (baseline/iterative/graph, vía
-  env) + `DATASET`. Modos: completo (faithfulness+precision+recall) o lean por env
-  `RETRIEVAL_ONLY=1` (sin generación gpt-4o; precision+recall) / `RECALL_ONLY=1` (solo
-  recall). `RunConfig(timeout=600, max_workers=8)` anti-timeout. Mide latencia y vuelca
-  `resultados_ragas_<PIPELINE>[_retrieval].csv`.
+- `evaluation.py` — evaluación RAGAS. **UN ÚNICO set `EVAL_SET` (151 preguntas)** con campo
+  `tier` por pregunta (**simple / single_hop / multihop / adversarial**) → mide performance
+  POR TIPO de pregunta. Se construye fundiendo los antiguos pools (golden + multihop, ahora
+  componentes internos `_PREV_SINGLE`/`_PREV_MULTI`) con un bloque tiered nuevo
+  (`_TIERED_NEW`); ya NO hay selector de dataset. A/B con `PIPELINE`
+  (baseline/iterative/graph, vía env): solo cambia el retrieval, la generación es compartida.
+  **SIEMPRE corre el suite RAGAS completo** (faithfulness+precision+recall; answer_relevancy
+  omitida a propósito por ser artefacto en español); se eliminaron los modos lean
+  `RETRIEVAL_ONLY`/`RECALL_ONLY`. `RunConfig(timeout=600, max_workers=8)` anti-timeout.
+  Imprime medias globales **y por tier**, mide latencia y vuelca `resultados_ragas_<PIPELINE>.csv`.
+  Las referencias las redactó el modelo desde las guías → **pendiente revisión clínica**.
 - `abbreviations.py` — diccionario SIGLA→nombre de las guías (valores en español).
 - **`agentic/`** — Track A (F4). `iterative.py`: `iterative_search` (plan/hop/reflect).
   Importa los primitivos compartidos de `rag.py` (carpeta padre).
@@ -262,22 +267,37 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
     "modificadores por conocimiento implícito" en `assess` (marcada y siempre seguida de
     re-retrieval + validate) como red de seguridad ante fallos de recuperación.
 
-## Pendiente / próximos pasos (a fecha 2026-06-23)
+## Pendiente / próximos pasos (a fecha 2026-06-29)
 
-1. **Medir `context_precision` (y faithfulness) del grafo** a baja concurrencia
-   (`RETRIEVAL_ONLY=1`, `max_workers≈4-8`, `timeout=600`) para cerrar el cuadro del A/B:
-   el recall del grafo es altísimo (0.979) y conviene confirmar que la precisión no cae
-   demasiado (recupera amplio). Reusar baseline (recall 0.844) ya medido.
-2. **(Idea) Descripciones de relaciones como "mapa de conceptos" no citable** en el prompt
+0. **`EVAL_SET` (151 preguntas, 4 tiers) HECHO** y preparado en `evaluation.py` (ver bullet).
+   Sustituye al instrumento del A/B de F4 (el multihop saturaba recall del grafo a 0.979 y
+   no tenía preguntas simples). PENDIENTE: lanzarlo (full RAGAS, ~$15 con juez mini por las 3
+   pipelines, ~$15 más con juez gpt-4o para el número final) y revisión clínica de referencias.
+   Antes de lanzar, sonda con un subconjunto (~10) para medir coste real en el dashboard.
+1. **Contextual Retrieval (enriquecer chunks con contexto) — PREPARADO, sin lanzar.**
+   `chunks/contextualize.py`: por chunk, gpt-4o-mini genera 1-2 frases de contexto (situándolo
+   en su guía vía título+section_path+ventana de vecinos) → `chunks_contextual.jsonl` con
+   `context` y `text_for_retrieval` (= contexto + texto). El uploader embebe/BM25-indexa
+   `text_for_retrieval` PERO el payload conserva `text` literal (citable). Mejora a los TRES
+   retrievers (sustrato híbrido común). Coste ~$0.4 (mini). NO lanzado por decisión del usuario.
+2. **Decidir capa de desviación (router simple→baseline) SOLO con datos:** correr `EVAL_SET`
+   con pipelines puras y leer si el grafo se degrada en los tiers `simple`/`single_hop`. Si no
+   hay gap → el router no aporta calidad (solo latencia). NO añadir antes de medir (ensucia el
+   test: el tier simple pasaría a medir baseline, no la pipeline elegida).
+3. **(Idea) Descripciones de relaciones como "mapa de conceptos" no citable** en el prompt
    de generación del grafo, para ayudar al razonamiento multi-hop sin romper el grounding.
    Prototipar tras un flag y A/B contra la versión actual (faithfulness + recall).
-3. **F5 — UX.** Clarificación interactiva + re-recuperación enriquecida HECHAS (validar en
+4. **(Idea) HippoRAG 2 como reemplazo de LightRAG:** mejor evidencia en multi-hop, menos
+   tokens, y —clave— NO degrada las preguntas simples (a diferencia de LightRAG/GraphRAG).
+   Spike previo: verificar backends swappables a Azure/EU (RGPD) y licencia. A/B tras EVAL_SET.
+5. **F5 — UX.** Clarificación interactiva + re-recuperación enriquecida HECHAS (validar en
    Studio); seguir con streaming, web (Streamlit/Chainlit), memoria multi-turno y navegación
    por conceptos. Incremento 2 pendiente: vía de "modificadores por conocimiento implícito" en
    `assess` (marcada y siempre seguida de re-retrieval + validate).
 
 Artefactos de evaluación versionados: `resultados_ragas.csv` (baseline F0) y
-`resultados_ragas_{baseline,iterative,graph}_retrieval.csv` (A/B F4, context_recall).
+`resultados_ragas_{baseline,iterative,graph}_retrieval.csv` (A/B F4, context_recall). El A/B
+nuevo sobre `EVAL_SET` vuelca `resultados_ragas_<PIPELINE>.csv` (full RAGAS).
 
 ## Hallazgos importantes (no perder)
 

@@ -1,13 +1,15 @@
 """
 Evaluation of the clinical HIV RAG with RAGAS — single script.
 
-You fill in the GOLDEN_SET below (question + reference written by you) and the script
-does the rest: it runs each question through the RAG and computes the RAGAS metrics.
+There is ONE evaluation set (EVAL_SET): every question carries a "tier" (simple /
+single_hop / multihop / adversarial) so the full RAGAS suite can be sliced by question
+type. To run the A/B, pick a retriever with PIPELINE and run; only retrieval varies
+(generation is shared), which is what makes the comparison fair.
 
 Flow:
-    1. Fill in the "reference" of each GOLDEN_SET entry (the questions are already set).
-    2. python evaluation.py
-    3. Check resultados_ragas.csv (per-question detail).
+    1. (optional) review/extend the question pools that build EVAL_SET.
+    2. PIPELINE=graph python evaluation.py     # baseline | iterative | graph
+    3. Check resultados_ragas_<pipeline>.csv (per-question detail) and the per-tier means.
 
 Requirements:
     ragas, langchain-openai. Env vars loaded from .env (OPENAI_API_KEY, QDRANT_*).
@@ -34,31 +36,24 @@ warnings.filterwarnings(
 from rag import retrieve, retrieve_hybrid, retrieve_rerank, search, build_context, generate_answer
 
 # ===========================================================================
-# A/B CONFIG (Phase 4) — pick WHICH dataset and WHICH retrieval pipeline to run.
+# A/B CONFIG — pick WHICH retrieval pipeline to run over the single EVAL_SET.
 # Running the SAME questions through different retrievers (generation is shared, so
-# ONLY retrieval varies) is what makes the multi-hop comparison fair.
+# ONLY retrieval varies) is what makes the comparison fair.
 #
 #   PIPELINE (retrieval strategy):
 #     "baseline"  -> search: rephrase + hybrid + reranker (Phases 2-3, current system)
 #     "iterative" -> Track A: self-ask / reflect-retrieve loop (rag.iterative_search)
 #     "graph"     -> Track B: LightRAG graph retrieval (graph.lightrag_retrieve)
 #
-#   DATASET is chosen below, after MULTIHOP_SET is defined:
-#     GOLDEN_SET    -> 47 single-hop questions (F0 baseline / regression net)
-#     MULTIHOP_SET  -> multi-hop questions (Phase 4 target)
+# The dataset is fixed (EVAL_SET, defined below). There is no dataset selector.
 # ===========================================================================
 PIPELINE = os.environ.get("PIPELINE", "baseline")   # override per A/B run without editing
 
-# RETRIEVAL_ONLY: skip the gpt-4o generation step and score ONLY the retrieval metrics
-# (context_recall + context_precision). This is the lean multi-hop A/B: it measures exactly
-# what differs between strategies (which chunks each one finds) while avoiding the gpt-4o
-# 30k-TPM bottleneck entirely (no answer is generated). Enable with RETRIEVAL_ONLY=1.
-# RECALL_ONLY: even leaner — only context_recall (the single most decision-relevant metric
-# for multi-hop: "was everything needed retrieved?"). It is the light, robust one;
-# context_precision is heavy (one judge call per chunk) and times out under load. RECALL_ONLY
-# implies RETRIEVAL_ONLY. Enable with RECALL_ONLY=1.
-RECALL_ONLY = os.environ.get("RECALL_ONLY") == "1"
-RETRIEVAL_ONLY = RECALL_ONLY or os.environ.get("RETRIEVAL_ONLY") == "1"
+# The evaluation always runs the FULL RAGAS suite (generation + grounding + retrieval
+# metrics); there are no lean/partial modes. The previous RETRIEVAL_ONLY / RECALL_ONLY
+# shortcuts were removed on purpose so every run reports the complete picture per tier.
+# NB: full = generation with gpt-4o (sequential, ~30k-TPM bound) + a judge call per chunk
+# for context_precision, so a full run over EVAL_SET is the expensive one — budget for it.
 
 
 def get_pipeline(name: str):
@@ -107,7 +102,7 @@ JUDGE_MODEL = STRONG_MODEL if STRONG_JUDGE else CHEAP_MODEL
 #   - "reference": the correct answer according to the guidelines, written by you
 #   Questions with an empty "reference" are skipped automatically.
 # ===========================================================================
-GOLDEN_SET = [
+_PREV_SINGLE = [
     {"question": "En un paciente con VIH con carga viral indetectable en DTG/3TC, ¿qué factores obligarían a no mantener una terapia dual según las recomendaciones actuales?", "reference": "La terapia dual DTG/3TC no debe mantenerse si existe coinfección por el virus de la hepatitis B (las pautas duales no cubren el VHB), si hay resistencia conocida o sospechada a lamivudina (mutación M184V/I) o a los inhibidores de integrasa, si no se dispone de estudio de resistencias previo, si hay antecedente de fracaso virológico o si la adherencia no está garantizada. Igualmente se abandonaría ante viremia detectable/fracaso virológico o aparición de resistencias."},
     {"question": "¿Qué pruebas deben realizarse antes de iniciar abacavir y qué ocurriría si el resultado no está disponible en un paciente con infección aguda?", "reference": "Antes de iniciar abacavir es obligatorio determinar el alelo HLA-B*5701 (A-I), ya que los portadores tienen un riesgo de hasta el 50% de reacción de hipersensibilidad; si el HLA-B*5701 es positivo no debe prescribirse abacavir. Si en una infección aguda se opta por inicio rápido y aún no se dispone del resultado de HLA-B*5701 (ni del estudio de resistencias), no deben usarse regímenes con abacavir ni con ITINN; se recomienda iniciar con TDF o TAF/FTC."},
     {"question": "Si un paciente con VIH tiene fracaso virológico con viremias bajas persistentes, ¿cuál es el algoritmo recomendado antes de cambiar TAR?", "reference": "Antes de cambiar el TAR debe confirmarse el fracaso con una segunda determinación de carga viral, evaluar y reforzar la adherencia, descartar interacciones farmacológicas y problemas de absorción, revisar la potencia y barrera genética del régimen y realizar un estudio de resistencias (genotipo) si la viremia lo permite. Solo entonces se decide el cambio, guiado por el resultado de resistencias."},
@@ -178,7 +173,7 @@ GOLDEN_SET = [
 #   Guide labels = source_file in chunks.jsonl: TAR_2022, VIH_TB, VIH_embarazo,
 #   adherencia, medicina_preventiva, profilaxis, neurocognitivo.
 # ===========================================================================
-MULTIHOP_SET = [
+_PREV_MULTI = [
     {"question": "En una gestante con VIH que además inicia tratamiento para tuberculosis con rifampicina, ¿qué régimen antirretroviral es preferible y qué interacción hay que evitar?",
      "reference": "Hay que combinar dos exigencias: un TAR seguro en el embarazo y compatible con rifampicina. La rifampicina es un inductor potente que reduce las concentraciones de la mayoría de antirretrovirales: no pueden usarse bictegravir, elvitegravir/cobicistat ni cabotegravir, y los IP potenciados con ritonavir/cobicistat tampoco. La opción preferida es 2 ITIAN (tenofovir/emtricitabina o abacavir/lamivudina) más un fármaco compatible: dolutegravir con la dosis ajustada a 50 mg/12 h (manteniéndola hasta 2 semanas tras finalizar la rifampicina) o efavirenz a dosis estándar, ambos con experiencia de uso en gestación. Debe vigilarse la carga viral por el riesgo de infradosificación y la transmisión vertical.",
      "guides": ["VIH_embarazo", "VIH_TB", "TAR_2022"], "hops": 3},
@@ -230,8 +225,331 @@ MULTIHOP_SET = [
 ]
 
 
-# Dataset under evaluation: GOLDEN_SET (single-hop regression) or MULTIHOP_SET (Phase 4).
-DATASET = MULTIHOP_SET
+# ===========================================================================
+# PURPOSE-BUILT TIERED QUESTIONS  ->  the discriminative core of EVAL_SET.
+#
+#   WHY THESE EXIST: the former multi-hop pool already SATURATED graph recall (0.979),
+#   so it could no longer tell two good retrievers apart (no headroom) and had no simple
+#   questions to detect the "complex retriever degrades simple QA" tradeoff. These add
+#   genuinely simple/atomic questions, deliberately harder multi-hop ones, and a tier of
+#   adversarial/conditional questions framed so that surface similarity pulls the WRONG
+#   passage — i.e. questions where even a strong retriever can fail.
+#
+#   SIZING: the A/B is a PAIRED comparison (same questions through every pipeline; only
+#   retrieval varies), the high-power design. To detect a ~0.07 absolute difference in
+#   mean context_recall with per-question difference SD ~0.20 at alpha=0.05/power=0.80 you
+#   need n ~= (1.96+0.84)^2 * 0.20^2 / 0.07^2 ~= 64; a Wilcoxon (RAGAS scores are
+#   non-normal, clustered near 0/1) needs ~15% more ~= 74. EVAL_SET (151) clears that with
+#   margin on the AGGREGATE and gives ~30-48 per tier, enough to detect per-tier effects of
+#   ~0.10 absolute — the size of the reported "simple-QA degradation" (5-10 F1). Report the
+#   aggregate as the decision metric; read the tiers as direction.
+#
+#   FIELDS per question: tier, hops (int), guides (source guides), stress (what it
+#   stresses) — all ignored by RAGAS, used only to slice results. Guide labels = source_file
+#   stem in chunks.jsonl. NB the real files are "medicina preventiva.md"
+#   (label medicina_preventiva) and "ManejoclinicodelasalteracionesNC.md" (neurocognitivo).
+#
+#   CAVEAT: references were drafted by the model FROM the guidelines, NOT reviewed by a
+#   clinician. Absolute scores are indicative; the signal is the comparison BETWEEN
+#   pipelines on the SAME set. PENDING clinician review.
+# ===========================================================================
+_TIERED_NEW = [
+    # ---------------------------------------------------------------- TIER: simple (26)
+    {"question": "¿Qué fármaco antirretroviral se administra por vía intravenosa durante el parto cuando la carga viral materna no está controlada?",
+     "reference": "Zidovudina (AZT) intravenosa intraparto, indicada cuando la carga viral materna no está suprimida cerca del parto, como medida de profilaxis de la transmisión vertical.",
+     "tier": "simple", "hops": 1, "guides": ["VIH_embarazo"], "stress": "lexical"},
+    {"question": "¿Por debajo de qué cifra de CD4 están contraindicadas las vacunas de virus vivos atenuados en personas con VIH?",
+     "reference": "Por debajo de 200 cél/µL (o <15%): con inmunodepresión grave las vacunas de virus vivos atenuados (triple vírica, varicela, fiebre amarilla) están contraindicadas y deben posponerse hasta la recuperación inmune.",
+     "tier": "simple", "hops": 1, "guides": ["medicina_preventiva"], "stress": "numeric"},
+    {"question": "¿Cuál es el plazo máximo recomendado para iniciar la profilaxis postexposición (PEP) tras una exposición de riesgo?",
+     "reference": "72 horas; pasado ese plazo la eficacia es muy baja y en general no se recomienda iniciarla. Idealmente debe comenzarse en las primeras horas.",
+     "tier": "simple", "hops": 1, "guides": ["profilaxis"], "stress": "numeric"},
+    {"question": "¿Cuántas semanas dura una pauta completa de profilaxis postexposición al VIH?",
+     "reference": "Cuatro semanas (28 días) de tratamiento antirretroviral, habitualmente con una pauta de tres fármacos.",
+     "tier": "simple", "hops": 1, "guides": ["profilaxis"], "stress": "numeric"},
+    {"question": "Según las guías actuales, ¿a partir de qué recuento de CD4 se recomienda iniciar el TAR en una persona con infección por VIH?",
+     "reference": "Se recomienda iniciar el TAR en TODAS las personas con infección por VIH con independencia del recuento de CD4 (tratamiento universal), idealmente de forma precoz tras el diagnóstico.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "conceptual"},
+    {"question": "En la coinfección VIH-tuberculosis, ¿con qué fármaco antituberculoso se producen las interacciones más relevantes con el TAR?",
+     "reference": "Con la rifampicina, un inductor enzimático potente (CYP3A4 y glucuronidación/UGT1A1) que reduce las concentraciones de numerosos antirretrovirales.",
+     "tier": "simple", "hops": 1, "guides": ["VIH_TB"], "stress": "lexical"},
+    {"question": "¿Qué fármaco antituberculoso puede sustituir a la rifampicina para poder mantener un inhibidor de la proteasa potenciado?",
+     "reference": "La rifabutina, que tiene mucha menor capacidad de inducción enzimática y permite mantener inhibidores de la proteasa potenciados, ajustando su dosis.",
+     "tier": "simple", "hops": 1, "guides": ["VIH_TB"], "stress": "lexical"},
+    {"question": "En la coinfección VIH-VHB, ¿qué dos componentes con actividad frente al VHB suele incluir el régimen?",
+     "reference": "Tenofovir (TAF o TDF) junto con emtricitabina o lamivudina (FTC o 3TC); el régimen debe incluir dos fármacos activos frente al VHB.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "lexical"},
+    {"question": "¿Qué mutación de resistencia se asocia clásicamente a la pérdida de actividad de lamivudina y emtricitabina?",
+     "reference": "La mutación M184V/I, que confiere resistencia a lamivudina (3TC) y emtricitabina (FTC).",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "lexical"},
+    {"question": "¿Qué efecto tiene cobicistat sobre la creatinina sérica y cómo se interpreta?",
+     "reference": "Cobicistat eleva la creatinina sérica porque inhibe su secreción tubular, SIN reducir el filtrado glomerular real; es un aumento no progresivo que no refleja deterioro renal verdadero.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "conceptual"},
+    {"question": "¿Qué inhibidores de la integrasa se consideran de segunda generación y de alta barrera genética?",
+     "reference": "Dolutegravir y bictegravir; requieren la acumulación de varias mutaciones para perder eficacia, frente a la baja barrera de raltegravir y elvitegravir.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "lexical"},
+    {"question": "¿Qué tipo de vacunas son seguras en personas con VIH con independencia del recuento de CD4?",
+     "reference": "Las vacunas inactivadas (no vivas) son seguras independientemente del recuento de CD4, aunque su inmunogenicidad puede estar reducida con CD4 bajos.",
+     "tier": "simple", "hops": 1, "guides": ["medicina_preventiva"], "stress": "conceptual"},
+    {"question": "¿Qué fármaco antirretroviral análogo de nucleótido se asocia a tubulopatía y deterioro de la función renal?",
+     "reference": "El tenofovir disoproxilo fumarato (TDF), que puede causar tubulopatía proximal y deterioro renal; en riesgo o insuficiencia renal se prefiere tenofovir alafenamida (TAF) o evitarlo.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "lexical"},
+    {"question": "¿Cómo se denomina el fenómeno de replicación del VIH detectable en el líquido cefalorraquídeo con carga viral plasmática indetectable?",
+     "reference": "Escape viral en LCR (escape virológico en el sistema nervioso central): replicación compartimentada en el SNC pese a la supresión plasmática, por penetración insuficiente de fármacos o resistencia local.",
+     "tier": "simple", "hops": 1, "guides": ["neurocognitivo"], "stress": "lexical"},
+    {"question": "¿Qué concepto mide la capacidad de penetración de los antirretrovirales en el sistema nervioso central?",
+     "reference": "El índice CPE (CSF Penetration-Effectiveness), que estima la penetración-efectividad de cada antirretroviral en el líquido cefalorraquídeo/SNC.",
+     "tier": "simple", "hops": 1, "guides": ["neurocognitivo"], "stress": "lexical"},
+    {"question": "¿Frente a qué clase de antirretrovirales es intrínsecamente resistente el VIH-2?",
+     "reference": "El VIH-2 es intrínsecamente resistente a los ITINN (inhibidores no nucleósidos de la transcriptasa inversa) y a la enfuvirtida, y responde peor a algunos inhibidores de la proteasa.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "conceptual"},
+    {"question": "¿Cuál es la principal causa de fracaso virológico en pacientes en tratamiento antirretroviral?",
+     "reference": "La adherencia subóptima al tratamiento es la principal causa de fracaso virológico.",
+     "tier": "simple", "hops": 1, "guides": ["adherencia"], "stress": "conceptual"},
+    {"question": "¿Qué significa el principio U=U en el contexto del VIH?",
+     "reference": "U=U (indetectable = intransmisible): una persona con VIH que mantiene una carga viral indetectable de forma estable y mantenida con el TAR no transmite el VIH por vía sexual.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "conceptual"},
+    {"question": "Cuando la carga viral materna permanece elevada cerca del término, ¿qué vía del parto se recomienda valorar?",
+     "reference": "La cesárea electiva (programada), que se valora cuando la carga viral materna permanece elevada (en torno a >1000 copias/mL) cerca del parto para reducir la transmisión vertical.",
+     "tier": "simple", "hops": 1, "guides": ["VIH_embarazo"], "stress": "numeric"},
+    {"question": "¿Qué prueba de laboratorio debe realizarse de forma basal antes de iniciar el TAR para detectar resistencias transmitidas?",
+     "reference": "Un estudio de resistencias genotípico basal, para detectar resistencias transmitidas que condicionen la elección del primer régimen.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "conceptual"},
+    {"question": "En un paciente con VIH y tuberculosis sin TAR previo, ¿qué tratamiento se inicia primero?",
+     "reference": "Se inicia primero el tratamiento antituberculoso y, a continuación, el TAR de forma precoz (el momento exacto depende del recuento de CD4), no de forma simultánea.",
+     "tier": "simple", "hops": 1, "guides": ["VIH_TB"], "stress": "conceptual"},
+    {"question": "¿Qué profilaxis se administra al recién nacido de madre con VIH?",
+     "reference": "Profilaxis antirretroviral al recién nacido expuesto (habitualmente zidovudina; pauta combinada de varios fármacos si el riesgo de transmisión es alto), iniciada precozmente tras el nacimiento.",
+     "tier": "simple", "hops": 1, "guides": ["VIH_embarazo"], "stress": "lexical"},
+    {"question": "¿Cómo se define la supresión virológica en una persona en TAR?",
+     "reference": "Como una carga viral plasmática por debajo del límite de detección del ensayo (habitualmente <50 copias/mL), mantenida en el tiempo.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "numeric"},
+    {"question": "¿Qué tipo de pruebas permiten diagnosticar la infección aguda por VIH antes de la seroconversión completa?",
+     "reference": "Las pruebas que detectan el virus o el antígeno p24 directamente: la carga viral (ARN-VIH) y los inmunoanálisis de cuarta generación (antígeno p24 + anticuerpos), que se positivizan antes que los anticuerpos aislados.",
+     "tier": "simple", "hops": 1, "guides": ["profilaxis"], "stress": "conceptual"},
+    {"question": "¿Cuál es el régimen de elección del tercer fármaco con rifampicina cuando NO se usan inhibidores de la integrasa?",
+     "reference": "Efavirenz a dosis estándar (600 mg/día), que mantiene concentraciones adecuadas con rifampicina y es el tercer fármaco de elección no INI en la coinfección TB-VIH.",
+     "tier": "simple", "hops": 1, "guides": ["VIH_TB"], "stress": "lexical"},
+    {"question": "¿Qué reacción adversa grave se asocia al abacavir en portadores del alelo HLA-B*5701?",
+     "reference": "Una reacción de hipersensibilidad potencialmente grave; por eso el abacavir está contraindicado si el HLA-B*5701 es positivo.",
+     "tier": "simple", "hops": 1, "guides": ["TAR_2022"], "stress": "lexical"},
+
+    # ---------------------------------------------------------------- TIER: multihop (32)
+    {"question": "Gestante en primer trimestre, con coinfección por VHB, que además debe iniciar tratamiento de tuberculosis con rifampicina: ¿qué régimen antirretroviral concilia las tres restricciones?",
+     "reference": "Hay que combinar tres exigencias. (1) VHB: el régimen debe incluir dos fármacos activos frente al VHB → tenofovir (en gestación se usa TDF, con experiencia de seguridad) + emtricitabina/lamivudina; no debe retirarse la cobertura anti-VHB. (2) Rifampicina (inductor potente): no pueden usarse bictegravir, elvitegravir/cobicistat, cabotegravir ni IP potenciados; las opciones compatibles son efavirenz a dosis estándar o dolutegravir 50 mg/12 h (hasta 2 semanas tras finalizar la rifampicina). (3) Embarazo: elegir fármacos con experiencia de seguridad gestacional. Una pauta razonable es TDF/FTC + dolutegravir (50 mg/12 h mientras dure la rifampicina) o + efavirenz, vigilando estrechamente la carga viral por el riesgo de infradosificación y de transmisión vertical.",
+     "tier": "multihop", "hops": 4, "guides": ["VIH_embarazo", "TAR_2022", "VIH_TB"], "stress": "conflicting-constraints"},
+    {"question": "Paciente con meningitis tuberculosa y CD4 <50 cél/µL: ¿cuándo iniciar el TAR y qué fármacos elegir teniendo en cuenta la rifampicina?",
+     "reference": "Aunque con CD4 <50 la norma es iniciar el TAR de forma muy precoz (primeras 2 semanas), la meningitis tuberculosa es la EXCEPCIÓN: el inicio del TAR se retrasa por el alto riesgo de síndrome inflamatorio de reconstitución inmune (SIRI) grave a nivel del SNC. En cuanto a los fármacos, hay que evitar los incompatibles con rifampicina (bictegravir, elvitegravir/cobicistat, cabotegravir, IP potenciados) y elegir efavirenz a dosis estándar o dolutegravir 50 mg/12 h. El conflicto se resuelve dando prioridad a evitar el SIRI meníngeo (diferir) sin perder la compatibilidad con la rifampicina.",
+     "tier": "multihop", "hops": 3, "guides": ["VIH_TB", "TAR_2022"], "stress": "exception"},
+    {"question": "Paciente con insuficiencia renal avanzada y hepatitis B crónica que además inicia rifampicina por tuberculosis: ¿cómo se cubre el VHB sin dañar el riñón y manteniendo compatibilidad con la rifampicina?",
+     "reference": "Triple conflicto. El VHB exige tenofovir, pero el TDF es nefrotóxico → se prefiere tenofovir alafenamida (TAF) por su menor toxicidad renal (con precaución según el filtrado) junto con FTC/3TC para cubrir el VHB. Por la insuficiencia renal hay que ajustar los ITIAN de eliminación renal al filtrado glomerular. Por la rifampicina, el tercer fármaco debe ser compatible (efavirenz o dolutegravir 50 mg/12 h), evitando los inductibles. No debe retirarse la cobertura anti-VHB sin alternativa activa por riesgo de reactivación.",
+     "tier": "multihop", "hops": 4, "guides": ["TAR_2022", "VIH_TB"], "stress": "conflicting-constraints"},
+    {"question": "Paciente polimedicado con alto riesgo cardiovascular, deterioro neurocognitivo y adherencia irregular que quiere simplificar el TAR: ¿qué clase de antirretroviral concilia la baja interacción, la alta barrera genética y la penetración en el SNC?",
+     "reference": "Los inhibidores de la integrasa sin potenciador (dolutegravir, bictegravir) son la mejor opción porque (1) tienen pocas interacciones, frente a las pautas potenciadas con ritonavir/cobicistat o los ITINN, lo que importa en un polimedicado; (2) son de alta barrera genética, clave con adherencia irregular; y (3) dolutegravir tiene buena penetración en el SNC, relevante por el deterioro neurocognitivo. Hay que tener en cuenta el perfil metabólico (algunos INI y el TAF se asocian a aumento de peso/dislipemia) por el riesgo cardiovascular, descartar coinfección por VHB y resistencias antes de simplificar, y recordar la interacción de los INI con cationes/antiácidos.",
+     "tier": "multihop", "hops": 4, "guides": ["TAR_2022", "neurocognitivo", "adherencia"], "stress": "conflicting-constraints"},
+    {"question": "Profesional sanitaria embarazada sufre una exposición percutánea profunda con una fuente VIH positiva en fracaso virológico (carga viral elevada): ¿está indicada la PEP, cómo influye la carga viral de la fuente en el riesgo y cómo afecta el embarazo a la elección?",
+     "reference": "La PEP está indicada y el embarazo NO la contraindica. El riesgo es alto porque concurren una exposición percutánea profunda y una fuente con carga viral elevada (el fracaso virológico maximiza la infectividad). Debe iniciarse cuanto antes (idealmente en las primeras horas, siempre <72 h) y mantenerse 4 semanas. En la gestante se eligen antirretrovirales con experiencia de seguridad en embarazo, evitando los desaconsejados, con seguimiento serológico. Se informa del riesgo-beneficio, pero el embarazo no es motivo para no administrarla.",
+     "tier": "multihop", "hops": 3, "guides": ["profilaxis", "VIH_embarazo"], "stress": "conflicting-constraints"},
+    {"question": "Paciente con infección por VIH-2 que desarrolla tuberculosis y necesita un tercer fármaco compatible con rifampicina: ¿por qué no sirve la opción habitual y qué alternativas quedan?",
+     "reference": "La opción habitual con rifampicina sería efavirenz, pero el VIH-2 es intrínsecamente resistente a los ITINN, así que efavirenz NO es válido aquí. Las alternativas son: usar un inhibidor de la integrasa compatible con rifampicina ajustando la dosis (dolutegravir 50 mg/12 h) sobre una base de 2 ITIAN, o bien sustituir la rifampicina por rifabutina para poder emplear un inhibidor de la proteasa potenciado activo. La elección debe basarse en fármacos con actividad demostrada frente al VIH-2 (2 ITIAN + INI o IP/p), nunca en ITINN.",
+     "tier": "multihop", "hops": 4, "guides": ["TAR_2022", "VIH_TB"], "stress": "trap-conflict"},
+    {"question": "Paciente con fracaso previo a raltegravir (resistencia a inhibidores de integrasa de primera generación) que ahora desarrolla tuberculosis: ¿cómo se diseña el TAR teniendo en cuenta a la vez la resistencia y la rifampicina?",
+     "reference": "Manda la resistencia: hay que construir un régimen con al menos dos fármacos plenamente activos según el genotipo histórico y actual, sin añadir un único fármaco activo. La resistencia a INI de primera generación puede comprometer también dolutegravir (que con rifampicina necesitaría 50 mg/12 h y, además, dosis ajustadas frente a resistencia a INI), por lo que a menudo la mejor estrategia es sustituir la rifampicina por rifabutina para poder usar un IP potenciado activo (darunavir/ritonavir) más otros fármacos activos. Se prioriza la actividad frente al virus y se adapta la pauta antituberculosa para hacerla compatible.",
+     "tier": "multihop", "hops": 4, "guides": ["TAR_2022", "VIH_TB"], "stress": "conflicting-constraints"},
+    {"question": "Gestante con adherencia irregular y deterioro neurocognitivo leve: ¿cómo se relacionan ambos problemas y qué hay que reforzar para prevenir la transmisión vertical?",
+     "reference": "Existe un círculo vicioso: el deterioro neurocognitivo dificulta la adherencia (olvidos, errores de dosis) y la adherencia irregular impide mantener la supresión virológica, lo que aumenta el riesgo de transmisión vertical (mínimo solo con carga viral indetectable) y de selección de resistencias. Hay que reforzar intensamente la adherencia (simplificación de pauta, apoyos, supervisión), monitorizar estrechamente la carga viral —sobre todo cerca del parto— y, si la viremia no se controla, aplicar medidas de profilaxis de la transmisión vertical (AZT IV intraparto, valorar cesárea, profilaxis al recién nacido).",
+     "tier": "multihop", "hops": 3, "guides": ["neurocognitivo", "adherencia", "VIH_embarazo"], "stress": "mechanistic"},
+    {"question": "Paciente recién diagnosticado con CD4 muy bajos y tuberculosis activa que tiene previsto viajar a una zona endémica de fiebre amarilla: ¿puede vacunarse y cómo se priorizan las intervenciones?",
+     "reference": "Prioridad clínica: tratar la tuberculosis e iniciar el TAR (con CD4 muy bajos, de forma precoz, salvo meningitis TB), eligiendo fármacos compatibles con rifampicina. La vacuna de la fiebre amarilla es de virus vivos atenuados y está contraindicada con inmunodepresión grave (CD4 <200), por lo que NO debe administrarse ahora; se difiere hasta lograr la recuperación inmune (CD4 ≥200 estable) con el TAR, y entonces se valora antes del viaje. Mientras tanto, las vacunas inactivadas indicadas sí pueden administrarse.",
+     "tier": "multihop", "hops": 3, "guides": ["medicina_preventiva", "VIH_TB", "TAR_2022"], "stress": "prioritization"},
+    {"question": "Paciente suprimido con coinfección por VHB y antecedente de fracaso a un ITINN que solicita pasar a la pauta inyectable de cabotegravir + rilpivirina: ¿qué dos motivos lo desaconsejan?",
+     "reference": "Hay una doble contraindicación. (1) La pauta CAB+RPV no cubre el VHB, y como contiene rilpivirina (un ITINN) y cabotegravir (un INI), sustituiría a un régimen con tenofovir, dejando el VHB sin cobertura → riesgo de reactivación. (2) La pauta inyectable está contraindicada si hay evidencia actual o previa de resistencia/fracaso a ITINN o INI, como es el caso (fracaso previo a un ITINN), aun estando hoy suprimido, por el alto riesgo de fracaso y resistencias. Cualquiera de los dos motivos por separado ya la desaconseja.",
+     "tier": "multihop", "hops": 2, "guides": ["TAR_2022", "adherencia"], "stress": "double-contraindication"},
+    {"question": "Paciente con deterioro neurocognitivo progresivo y escape viral en LCR que además presenta resistencias en el genotipo plasmático: ¿qué dos criterios deben guiar la elección del régimen de rescate?",
+     "reference": "Dos criterios simultáneos: (1) la ACTIVIDAD frente al virus, seleccionando fármacos plenamente activos según el estudio de resistencias (idealmente también un genotipo en LCR si es posible), con al menos dos fármacos activos; y (2) la PENETRACIÓN en el SNC, orientando el régimen hacia fármacos con buena penetración en el sistema nervioso central para controlar la replicación compartimentada responsable del deterioro. Debe confirmarse y monitorizarse la carga viral en LCR.",
+     "tier": "multihop", "hops": 3, "guides": ["neurocognitivo", "TAR_2022"], "stress": "conflicting-constraints"},
+    {"question": "Gestante en el tercer trimestre con carga viral detectable por mala adherencia: ¿qué cadena de medidas de profilaxis de la transmisión vertical deben adoptarse?",
+     "reference": "Con carga viral detectable cerca del parto aumenta el riesgo de transmisión vertical y deben encadenarse medidas: reforzar el TAR materno y la adherencia y repetir la carga viral; administrar zidovudina intravenosa intraparto; valorar la cesárea electiva si la viremia permanece elevada (en torno a >1000 copias/mL); y aplicar profilaxis antirretroviral al recién nacido (combinada si el riesgo es alto). El objetivo es reducir al máximo la viremia antes del parto.",
+     "tier": "multihop", "hops": 3, "guides": ["VIH_embarazo", "adherencia"], "stress": "sequencing"},
+    {"question": "Paciente con riesgo cardiovascular elevado que quiere simplificar a terapia dual y tiene además hepatitis B crónica: ¿qué impide la simplificación y qué hay que valorar del perfil metabólico?",
+     "reference": "La coinfección por VHB IMPIDE la simplificación a terapia dual del tipo DTG/3TC, porque esa pauta no cubre el VHB y al retirar el tenofovir hay riesgo de reactivación; debe mantenerse un régimen con dos fármacos activos frente al VHB (tenofovir + FTC/3TC). En cuanto al perfil metabólico, hay que tener presente que algunos inhibidores de integrasa y el TAF se asocian a aumento de peso y dislipemia, relevante por el riesgo cardiovascular, eligiendo la opción de menor impacto metabólico dentro de lo que permita la cobertura del VHB.",
+     "tier": "multihop", "hops": 2, "guides": ["TAR_2022"], "stress": "trap-conflict"},
+    {"question": "Paciente con CD4 altos y carga viral plasmática indetectable que consulta por deterioro cognitivo: ¿por qué puede tener HAND pese al buen control y qué hay que descartar respecto al SNC y a la adherencia?",
+     "reference": "El buen control periférico no garantiza el control en el SNC: el HAND puede persistir por el establecimiento temprano del reservorio en el SNC, neuroinflamación crónica, penetración variable del TAR, daño acumulado por un nadir de CD4 bajo y comorbilidades. Hay que descartar un escape viral en LCR (replicación compartimentada con plasma indetectable) y evaluar la adherencia, ya que el propio deterioro cognitivo la empeora y la adherencia subóptima favorece la replicación residual; conviene reforzar y simplificar el tratamiento.",
+     "tier": "multihop", "hops": 3, "guides": ["neurocognitivo", "adherencia"], "stress": "mechanistic"},
+    {"question": "Sanitario con exposición percutánea con aguja hueca visiblemente manchada de sangre de una fuente de serología desconocida: ¿cómo se estratifica el riesgo y qué decisión y seguimiento de PEP corresponden?",
+     "reference": "El riesgo se estratifica por el tipo de exposición (percutánea profunda con aguja hueca de gran calibre y dispositivo visiblemente ensangrentado = riesgo alto) y por la probabilidad de que la fuente sea VIH positiva (desconocida → se valora el contexto epidemiológico). Ante una exposición de riesgo se recomienda iniciar la PEP cuanto antes (<72 h), pauta de tres fármacos durante 4 semanas, intentando determinar la serología de la fuente para suspenderla si resulta negativa. El seguimiento incluye serología VIH basal y a las semanas siguientes, cribado de VHB/VHC y otras ITS, y control de adherencia y tolerancia.",
+     "tier": "multihop", "hops": 3, "guides": ["profilaxis"], "stress": "stratification"},
+    {"question": "Paciente con fracaso virológico, buena adherencia documentada y genotipo con múltiples mutaciones, que además inicia rifampicina por tuberculosis: enuncia el principio del rescate y cómo lo modifica la rifampicina.",
+     "reference": "Principio del rescate: construir un régimen con al menos dos (preferiblemente tres) fármacos plenamente activos según el genotipo histórico y actual, sin añadir nunca un único fármaco activo a un régimen que fracasa. La rifampicina añade la restricción de evitar los antirretrovirales cuyas concentraciones reduce (bictegravir, elvitegravir/cobicistat, cabotegravir, IP potenciados); si el rescate requiere un IP potenciado, se sustituye la rifampicina por rifabutina; si se usa dolutegravir se ajusta a 50 mg/12 h. La selección de fármacos activos manda y la pauta antituberculosa se adapta para ser compatible.",
+     "tier": "multihop", "hops": 3, "guides": ["TAR_2022", "VIH_TB"], "stress": "conflicting-constraints"},
+    {"question": "Mujer con VIH en edad fértil, suprimida con un régimen basado en efavirenz, que planifica un embarazo: ¿qué aspectos del TAR y del seguimiento deben revisarse antes de la concepción?",
+     "reference": "Hay que revisar la idoneidad del régimen para la gestación (eligiendo fármacos con experiencia de seguridad en embarazo), confirmar la supresión virológica estable y la adherencia, comprobar la ausencia de interacciones y de coinfecciones que condicionen la pauta (VHB), actualizar el cribado y las vacunas indicadas antes del embarazo, y planificar una monitorización estrecha de la carga viral durante la gestación —especialmente cerca del parto— para minimizar la transmisión vertical. La decisión de mantener o cambiar el régimen se individualiza según el perfil de seguridad y la supresión.",
+     "tier": "multihop", "hops": 3, "guides": ["VIH_embarazo", "TAR_2022", "medicina_preventiva"], "stress": "planning"},
+    {"question": "Paciente con tuberculosis en tratamiento con rifampicina cuyo TAR óptimo, por resistencias, requeriría un inhibidor de la proteasa potenciado: ¿cómo se compatibilizan ambos tratamientos?",
+     "reference": "La rifampicina no puede combinarse con IP potenciados con ritonavir/cobicistat porque reduce drásticamente sus concentraciones. Para compatibilizarlos se sustituye la rifampicina por rifabutina (ajustando su dosis), que tiene mucha menor inducción y permite mantener el IP potenciado necesario por las resistencias. Si no es posible cambiar a rifabutina, habría que rediseñar el TAR hacia fármacos compatibles con rifampicina, lo que puede no ser viable si las resistencias obligan al IP potenciado.",
+     "tier": "multihop", "hops": 2, "guides": ["VIH_TB", "TAR_2022"], "stress": "conflicting-constraints"},
+    {"question": "Paciente con carga viral indetectable mantenida durante años pero con adherencia que ha pasado a ser intermitente en los últimos meses: ¿qué tres riesgos encadenados aparecen y qué papel tiene la barrera genética del régimen?",
+     "reference": "Riesgos encadenados: (1) rebote virológico por concentraciones subterapéuticas; (2) selección de mutaciones de resistencia bajo presión selectiva, sobre todo con fármacos de baja barrera (3TC/FTC con M184V, ITINN); y (3) pérdida progresiva de opciones terapéuticas y de la supresión a largo plazo. La barrera genética del régimen modula el riesgo: con inhibidores de integrasa de segunda generación (dolutegravir, bictegravir) se necesitan varias mutaciones para perder eficacia, por lo que protegen frente a la resistencia mejor que las pautas de baja barrera cuando la adherencia es irregular.",
+     "tier": "multihop", "hops": 3, "guides": ["adherencia", "TAR_2022"], "stress": "mechanistic"},
+    {"question": "Paciente con VIH e insuficiencia renal avanzada y deterioro neurocognitivo: ¿cómo se concilia la elección de un régimen renal-seguro con la necesidad de buena penetración en el SNC?",
+     "reference": "Por la insuficiencia renal hay que evitar el TDF (nefrotóxico) y ajustar los ITIAN de eliminación renal al filtrado; abacavir, dolutegravir y los ITINN no requieren ajuste renal y facilitan el manejo. Por el deterioro neurocognitivo conviene priorizar fármacos con buena penetración en el SNC. Dolutegravir concilia bien ambas exigencias (sin ajuste renal y con buena penetración en el SNC) sobre una base de ITIAN ajustada/segura (p. ej. abacavir si HLA-B*5701 negativo, o TAF con precaución), evitando el cobicistat por su elevación de la creatinina que dificulta la monitorización.",
+     "tier": "multihop", "hops": 3, "guides": ["TAR_2022", "neurocognitivo"], "stress": "conflicting-constraints"},
+    {"question": "Tras una exposición sexual de riesgo en una persona que podría además estar en periodo de infección aguda por otra exposición previa, ¿qué hay que tener en cuenta antes de iniciar la PEP?",
+     "reference": "Antes de iniciar la PEP debe descartarse una infección por VIH ya establecida con una prueba basal (incluyendo pruebas que detecten infección aguda: antígeno p24/carga viral, no solo anticuerpos), porque dar una pauta de PEP de dos/tres fármacos a alguien ya infectado equivaldría a una monoterapia/biterapia encubierta con riesgo de resistencias. Si la prueba basal es negativa o no concluyente y la exposición es de riesgo, se inicia la PEP sin demora (<72 h) y se completa el estudio; el seguimiento serológico posterior confirmará o descartará la infección.",
+     "tier": "multihop", "hops": 3, "guides": ["profilaxis", "TAR_2022"], "stress": "trap-conflict"},
+    {"question": "Paciente con hepatitis B crónica al que se le va a retirar el tenofovir por toxicidad renal: ¿qué riesgo específico aparece y cómo debe manejarse el cambio?",
+     "reference": "Retirar el tenofovir (componente activo frente al VHB) sin una alternativa activa frente al VHB puede provocar una reactivación de la hepatitis B con riesgo de hepatitis grave (flare). El cambio debe garantizar que se mantiene la cobertura anti-VHB: sustituir TDF por tenofovir alafenamida (TAF), que es activo frente al VHB y mucho menos nefrotóxico, en lugar de eliminar el tenofovir; y monitorizar la función hepática y la carga viral del VHB tras el cambio.",
+     "tier": "multihop", "hops": 2, "guides": ["TAR_2022"], "stress": "trap-conflict"},
+    {"question": "Paciente con VIH que va a recibir quimioterapia (inmunosupresión añadida) y consulta por vacunación: ¿cómo influyen el recuento de CD4 y el momento respecto a la inmunosupresión?",
+     "reference": "La respuesta vacunal depende del estado inmune: conviene vacunar con CD4 altos y carga viral suprimida, e idealmente antes de iniciar la inmunosupresión adicional, porque tanto los CD4 bajos como la quimioterapia reducen la inmunogenicidad. Las vacunas de virus vivos atenuados están contraindicadas con inmunodepresión grave (CD4 <200 o por la propia quimioterapia); las inactivadas son seguras aunque con respuesta posiblemente disminuida. Se planifica el calendario para maximizar la respuesta antes de la mayor inmunosupresión.",
+     "tier": "multihop", "hops": 3, "guides": ["medicina_preventiva", "TAR_2022"], "stress": "timing"},
+    {"question": "Paciente con tuberculosis y VIH que, a las pocas semanas de iniciar el TAR, presenta empeoramiento clínico y reaparición de fiebre y adenopatías: ¿qué entidad hay que considerar y cómo se relaciona con el momento de inicio del TAR?",
+     "reference": "Hay que considerar un síndrome inflamatorio de reconstitución inmune (SIRI/IRIS) asociado a la tuberculosis: un empeoramiento paradójico por la recuperación inmune tras iniciar el TAR, más frecuente cuanto más bajos son los CD4 y más precoz el inicio del TAR. Se relaciona directamente con el momento de inicio: por eso, aunque con CD4 <50 se inicia precozmente, en la meningitis tuberculosa se difiere para evitar un SIRI del SNC grave. El manejo es continuar el tratamiento antituberculoso y el TAR y, según gravedad, añadir corticoides.",
+     "tier": "multihop", "hops": 3, "guides": ["VIH_TB", "TAR_2022"], "stress": "mechanistic"},
+    {"question": "Paciente con riesgo cardiovascular y carga viral indetectable que pregunta por qué su riesgo sigue siendo alto pese a tener los factores clásicos controlados, y cómo influye el propio TAR: ¿qué se le explica?",
+     "reference": "Aunque controle los factores clásicos, persiste un riesgo cardiovascular aumentado por la inflamación e inmunoactivación crónicas asociadas al VIH (presentes incluso con carga viral suprimida), la disfunción endotelial y el daño vascular acumulado. Además, algunos antirretrovirales contribuyen: ciertos IP y algunos inhibidores de integrasa y el TAF se asocian a cambios metabólicos (aumento de peso, dislipemia). Se actúa optimizando los factores modificables y, si procede, eligiendo una pauta de menor impacto metabólico, sin renunciar a la eficacia virológica.",
+     "tier": "multihop", "hops": 3, "guides": ["TAR_2022", "neurocognitivo"], "stress": "mechanistic"},
+    {"question": "Gestante con VIH y tuberculosis diagnosticada en el segundo trimestre: ¿cómo se ordenan el inicio del tratamiento antituberculoso, el ajuste del TAR por la rifampicina y la vigilancia de la transmisión vertical?",
+     "reference": "Se inicia el tratamiento antituberculoso sin demora y se ajusta el TAR para que sea compatible con la rifampicina (efavirenz a dosis estándar o dolutegravir 50 mg/12 h; evitar bictegravir, elvitegravir/cobicistat, cabotegravir e IP potenciados), usando fármacos con experiencia de seguridad en gestación. Por el embarazo y el riesgo de infradosificación que añade la rifampicina, se intensifica la monitorización de la carga viral, especialmente cerca del parto, para asegurar la supresión y minimizar la transmisión vertical, aplicando las medidas intraparto y neonatales si la viremia no se controla.",
+     "tier": "multihop", "hops": 4, "guides": ["VIH_embarazo", "VIH_TB", "TAR_2022"], "stress": "sequencing"},
+    {"question": "Paciente que tras años suprimido presenta rebote virológico confirmado y refiere adherencia correcta: ¿qué causas no adherenciales deben investigarse y en qué orden actuar antes de cambiar el TAR?",
+     "reference": "Primero confirmar el rebote con una segunda carga viral y reevaluar críticamente la adherencia (incluida la real, no solo la referida). Si la adherencia es realmente correcta, investigar interacciones farmacológicas que reduzcan las concentraciones (inductores, antiácidos/cationes con los INI) y problemas de absorción o requisitos con alimentos, y considerar resistencia transmitida/archivada o de nueva aparición. Debe realizarse un estudio de resistencias antes de cambiar, y el cambio se guía por su resultado, construyendo un régimen con fármacos plenamente activos.",
+     "tier": "multihop", "hops": 3, "guides": ["adherencia", "TAR_2022"], "stress": "sequencing"},
+    {"question": "Paciente con deterioro neurocognitivo y polifarmacia por comorbilidades: ¿por qué la elección del TAR afecta tanto al riesgo de interacciones como a la cognición, y qué clase se prefiere?",
+     "reference": "El TAR influye en ambos frentes: las pautas potenciadas con ritonavir/cobicistat y los ITINN tienen muchas interacciones (problemáticas en polifarmacia), mientras que los inhibidores de integrasa sin potenciador (dolutegravir, bictegravir, raltegravir) las minimizan; y la penetración del fármaco en el SNC condiciona el control de la replicación cerebral relevante para la cognición. Se prefiere un inhibidor de integrasa sin potenciador con buena penetración en el SNC (dolutegravir), vigilando las interacciones con cationes/antiácidos y revisando la medicación concomitante.",
+     "tier": "multihop", "hops": 2, "guides": ["neurocognitivo", "TAR_2022"], "stress": "mechanistic"},
+    {"question": "Persona sin VIH con exposiciones sexuales de riesgo repetidas que acude por una nueva exposición: ¿cómo se diferencia la PEP de la indicación de PrEP y qué cabe plantear?",
+     "reference": "La PEP es una intervención reactiva y puntual tras una exposición concreta: pauta de tres fármacos durante 4 semanas iniciada en <72 h. Las exposiciones de riesgo REPETIDAS, en cambio, son indicación de valorar la profilaxis preexposición (PrEP) como estrategia preventiva continuada. Ante una nueva exposición se indica la PEP si procede y, en el seguimiento, se plantea la transición a PrEP para las exposiciones futuras, además del cribado de ITS y la educación preventiva.",
+     "tier": "multihop", "hops": 2, "guides": ["profilaxis"], "stress": "discrimination"},
+    {"question": "Paciente con VIH-2 e insuficiencia renal: ¿cómo se combinan las restricciones del VIH-2 y de la función renal en la elección del régimen?",
+     "reference": "Por el VIH-2 hay que evitar los ITINN (inactivos) y basar el tratamiento en 2 ITIAN + un inhibidor de la integrasa (o un IP/p activo). Por la insuficiencia renal hay que evitar el TDF y ajustar los ITIAN de eliminación renal al filtrado, prefiriendo opciones sin ajuste renal o el TAF con precaución; dolutegravir no requiere ajuste renal y es válido frente al VIH-2, por lo que una base de ITIAN renal-segura + dolutegravir concilia ambas restricciones. La monitorización del VIH-2 es más compleja por la falta de cargas virales estandarizadas.",
+     "tier": "multihop", "hops": 3, "guides": ["TAR_2022"], "stress": "conflicting-constraints"},
+    {"question": "Paciente con tuberculosis y CD4 de 300 cél/µL sin meningitis: ¿en qué plazo se inicia el TAR y por qué difiere del de un paciente con CD4 muy bajos?",
+     "reference": "Con CD4 más altos (p. ej. 300) y sin afectación meníngea, el inicio del TAR puede diferirse hasta unas 8 semanas tras comenzar el tratamiento antituberculoso, porque el beneficio de mortalidad del inicio muy precoz se concentra en los CD4 muy bajos (<50, donde se inicia en las 2 primeras semanas) y diferir reduce el riesgo de SIRI y de toxicidades/interacciones solapadas. La meningitis tuberculosa es la excepción en que se difiere aún más por el riesgo de SIRI grave del SNC.",
+     "tier": "multihop", "hops": 2, "guides": ["VIH_TB", "TAR_2022"], "stress": "threshold-reasoning"},
+    {"question": "Paciente con coinfección por VHB que interrumpe el TAR por su cuenta: ¿qué riesgo hepático específico añade la coinfección frente a un paciente sin VHB?",
+     "reference": "Frente a un paciente sin VHB, la interrupción añade el riesgo de reactivación de la hepatitis B con posible hepatitis aguda grave (flare hepático) al retirarse bruscamente los fármacos activos frente al VHB (tenofovir, 3TC/FTC). Por eso en la coinfección por VHB no debe suspenderse el componente anti-VHB sin una alternativa activa, y las interrupciones son especialmente peligrosas; además del habitual riesgo de rebote virológico del VIH y de selección de resistencias.",
+     "tier": "multihop", "hops": 2, "guides": ["TAR_2022"], "stress": "comparative"},
+
+    # ---------------------------------------------------------------- TIER: adversarial (20)
+    {"question": "¿Puede usarse la pauta dual dolutegravir + lamivudina en cualquier paciente con carga viral indetectable que quiera simplificar?",
+     "reference": "No, no en cualquiera. DTG/3TC NO debe usarse si hay coinfección por VHB (no lo cubre), resistencia conocida o sospechada a lamivudina (M184V/I) o a inhibidores de integrasa, ausencia de estudio de resistencias previo, antecedente de fracaso virológico, o adherencia no garantizada. Solo es adecuada en pacientes suprimidos de forma estable que cumplan esos criterios de seguridad.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "negation"},
+    {"question": "¿Está indicada la profilaxis postexposición siempre que se produzca un pinchazo accidental con una aguja?",
+     "reference": "No siempre. No se indica PEP cuando no hay riesgo apreciable: fuente VIH negativa o con carga viral indetectable confirmada, contacto con fluidos no infecciosos, exposición sobre piel intacta, aguja sólida sin sangre visible de bajo riesgo, o si han transcurrido más de 72 horas. La indicación depende del tipo de exposición, del inóculo y del estado serológico/carga viral de la fuente.",
+     "tier": "adversarial", "hops": 2, "guides": ["profilaxis"], "stress": "negation"},
+    {"question": "Para evitar el síndrome de reconstitución inmune, ¿conviene retrasar el inicio del TAR en todos los pacientes con tuberculosis?",
+     "reference": "No. En general el TAR se inicia precozmente: con CD4 muy bajos (<50) dentro de las 2 primeras semanas, porque retrasarlo aumenta la mortalidad. Solo se difiere de forma marcada en la meningitis tuberculosa, por el alto riesgo de SIRI grave del SNC. Retrasar el TAR en todos los pacientes con TB sería un error: el equilibrio entre riesgo de SIRI y de mortalidad depende del recuento de CD4 y de la localización de la TB.",
+     "tier": "adversarial", "hops": 2, "guides": ["VIH_TB", "TAR_2022"], "stress": "overgeneralization-trap"},
+    {"question": "Si un paciente está indetectable, ¿puede prescindir del preservativo con su pareja sin más condiciones?",
+     "reference": "Solo bajo la condición de U=U: la intransmisibilidad sexual requiere una supresión virológica mantenida y estable (carga viral indetectable confirmada y sostenida con buena adherencia). Con adherencia irregular o supresión no confirmada no se cumple la condición y existe riesgo de viremia y transmisión. Además, el preservativo sigue protegiendo frente a otras ITS y embarazos no deseados, lo que puede aconsejarlo igualmente.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "conditional"},
+    {"question": "Un paciente con VIH-2 va a iniciar TAR y, como tiene tuberculosis, se plantea efavirenz por su buena compatibilidad con la rifampicina. ¿Es correcto?",
+     "reference": "No es correcto. Aunque el efavirenz es compatible con la rifampicina, el VIH-2 es intrínsecamente resistente a los ITINN, por lo que el efavirenz NO es activo frente al VIH-2 y no debe usarse. La buena compatibilidad farmacocinética con la rifampicina no compensa la falta de actividad antiviral. Hay que elegir 2 ITIAN + un inhibidor de integrasa compatible con rifampicina (dolutegravir 50 mg/12 h) o sustituir la rifampicina por rifabutina para usar un IP/p activo.",
+     "tier": "adversarial", "hops": 3, "guides": ["TAR_2022", "VIH_TB"], "stress": "distractor-trap"},
+    {"question": "En un paciente que simplifica el TAR y tiene hepatitis B crónica, ¿se puede retirar el tenofovir si el resto del régimen es potente?",
+     "reference": "No. En la coinfección por VHB no debe retirarse el tenofovir (ni el componente activo frente al VHB) sin una alternativa activa, aunque el resto del régimen sea potente frente al VIH, por el riesgo de reactivación de la hepatitis B y hepatitis grave. La potencia frente al VIH no sustituye la cobertura del VHB: hay que mantener dos fármacos activos frente al VHB.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "distractor-trap"},
+    {"question": "Ante un fracaso virológico con resistencias, ¿es razonable añadir un solo fármaco nuevo plenamente activo al régimen que está fracasando?",
+     "reference": "No. Nunca debe añadirse un único fármaco activo a un régimen que fracasa, porque equivale funcionalmente a una monoterapia sobre un virus replicante y selecciona resistencia al nuevo fármaco. El principio es construir un régimen con al menos dos (preferiblemente tres) fármacos plenamente activos según el estudio de resistencias.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "negation"},
+    {"question": "¿Se puede administrar la vacuna triple vírica (sarampión-rubéola-parotiditis) a una persona con VIH?",
+     "reference": "Depende del estado inmune: la triple vírica es de virus vivos atenuados, por lo que está contraindicada con inmunodepresión grave (CD4 <200 cél/µL o <15%). Si el paciente tiene CD4 por encima de ese umbral y no está gravemente inmunodeprimido, puede administrarse cuando esté indicada. No es ni un sí ni un no absolutos: el recuento de CD4 decide.",
+     "tier": "adversarial", "hops": 2, "guides": ["medicina_preventiva"], "stress": "conditional"},
+    {"question": "Como el dolutegravir tiene alta barrera genética, ¿es seguro pasar a la pauta inyectable de cabotegravir + rilpivirina en un paciente con fracaso previo a inhibidores de integrasa?",
+     "reference": "No. El antecedente de resistencia o fracaso a inhibidores de integrasa (o a ITINN) contraindica la pauta inyectable cabotegravir + rilpivirina, por el alto riesgo de fracaso y de resistencias, aunque el paciente esté hoy suprimido. La alta barrera del dolutegravir oral no se traslada a esta combinación inyectable de cabotegravir (INI) + rilpivirina (ITINN) en presencia de resistencia previa a esas clases.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022", "adherencia"], "stress": "distractor-trap"},
+    {"question": "Si la carga viral plasmática es indetectable, ¿se puede descartar el deterioro neurocognitivo asociado al VIH?",
+     "reference": "No. El HAND puede presentarse pese a carga viral plasmática indetectable y CD4 normales, por neuroinflamación crónica, daño acumulado (nadir bajo de CD4), reservorio y posible escape viral en LCR (replicación en el SNC con plasma indetectable). El control periférico no excluye el deterioro neurocognitivo.",
+     "tier": "adversarial", "hops": 2, "guides": ["neurocognitivo"], "stress": "negation"},
+    {"question": "Como cobicistat eleva la creatinina, ¿debe interpretarse siempre como deterioro renal y motivar la retirada del fármaco?",
+     "reference": "No. Cobicistat eleva la creatinina sérica porque inhibe su secreción tubular, sin reducir el filtrado glomerular real; es un aumento esperado, leve y no progresivo que NO indica deterioro renal verdadero y no justifica por sí mismo retirar el fármaco. Hay que distinguirlo de una caída real del filtrado, valorando otros parámetros de función renal.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "distractor-trap"},
+    {"question": "Una viremia persistente de bajo nivel (<200 copias/mL) en un paciente por lo demás estable, ¿obliga a cambiar inmediatamente el TAR?",
+     "reference": "No obliga a un cambio inmediato. Viremias persistentes de bajo nivel <200 copias/mL a menudo no se consideran fracaso virológico establecido. Primero hay que confirmar/repetir la determinación, evaluar la adherencia, descartar interacciones y blips, y valorar un estudio de resistencias; la decisión de cambiar se toma según la evolución y el resultado, no de forma automática.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "conditional"},
+    {"question": "Si una gestante con VIH tiene carga viral indetectable mantenida, ¿es obligatoria la cesárea para prevenir la transmisión vertical?",
+     "reference": "No. Con carga viral indetectable mantenida cerca del parto el riesgo de transmisión vertical es muy bajo y no está indicada la cesárea por el VIH; puede plantearse el parto vaginal. La cesárea electiva se reserva para cuando la carga viral permanece elevada (en torno a >1000 copias/mL) o no está controlada. La vía del parto se decide según la carga viral, no de forma sistemática.",
+     "tier": "adversarial", "hops": 2, "guides": ["VIH_embarazo"], "stress": "negation"},
+    {"question": "Como el efavirenz se usa con rifampicina, ¿es la mejor opción de tercer fármaco para cualquier paciente con tuberculosis?",
+     "reference": "No para cualquiera. El efavirenz es el tercer fármaco de elección con rifampicina en muchos casos, pero no sirve si hay VIH-2 o resistencia a ITINN (inactivos), ni se prefiere si hay antecedentes psiquiátricos relevantes u otras contraindicaciones; en gestación y otros contextos puede preferirse dolutegravir (50 mg/12 h). La elección se individualiza; la compatibilidad con rifampicina es solo uno de los criterios.",
+     "tier": "adversarial", "hops": 2, "guides": ["VIH_TB", "TAR_2022"], "stress": "overgeneralization-trap"},
+    {"question": "Dado que el tenofovir alafenamida (TAF) es menos nefrotóxico que el TDF, ¿puede usarse TAF junto con rifampicina sin problema?",
+     "reference": "No sin problema: aunque el TAF es mejor a nivel renal, NO se recomienda con rifampicina porque la rifampicina reduce sus concentraciones plasmáticas. Como ITIAN con rifampicina se prefieren TDF, abacavir, 3TC o FTC. La ventaja renal del TAF no resuelve la interacción farmacocinética con la rifampicina.",
+     "tier": "adversarial", "hops": 2, "guides": ["VIH_TB", "TAR_2022"], "stress": "distractor-trap"},
+    {"question": "Si un paciente refiere tomar toda la medicación, ¿se puede descartar la adherencia como causa de un fracaso virológico?",
+     "reference": "No se puede descartar solo con lo que refiere el paciente. La adherencia autodeclarada sobreestima la real, y la adherencia subóptima es la primera causa de fracaso; debe evaluarse con métodos objetivos (registros de dispensación, recuento, niveles si procede) además de la entrevista. Solo tras confirmar una adherencia realmente correcta se investigan otras causas (interacciones, absorción, resistencias).",
+     "tier": "adversarial", "hops": 2, "guides": ["adherencia", "TAR_2022"], "stress": "distractor-trap"},
+    {"question": "¿Basta con que hayan pasado menos de 72 horas para que la profilaxis postexposición esté indicada?",
+     "reference": "No basta. El plazo <72 h es necesario pero no suficiente: además debe haber un riesgo apreciable de transmisión (tipo de exposición, inóculo, estado VIH/carga viral de la fuente). Si la fuente es VIH negativa o indetectable, el contacto es con fluidos no infecciosos o sobre piel intacta, no se indica PEP aunque se esté dentro del plazo.",
+     "tier": "adversarial", "hops": 2, "guides": ["profilaxis"], "stress": "conditional"},
+    {"question": "En un paciente suprimido con buena adherencia, ¿la monoterapia con un inhibidor de integrasa de alta barrera es una opción de simplificación válida?",
+     "reference": "No. Se recomienda evitar la monoterapia antirretroviral incluso con fármacos potentes y de alta barrera, porque no mantiene una supresión duradera y selecciona resistencias. Las estrategias de simplificación validadas son pautas combinadas (p. ej. terapia dual como DTG/3TC o DTG/RPV en candidatos seleccionados), no la monoterapia.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "negation"},
+    {"question": "Como las vacunas inactivadas son seguras en personas con VIH, ¿da igual el recuento de CD4 al vacunar?",
+     "reference": "Seguras sí, pero no da igual el momento: con CD4 bajos o carga viral detectable la inmunogenicidad (la respuesta protectora) está disminuida. Por eso conviene vacunar con CD4 altos y carga viral suprimida para lograr una mejor respuesta, aunque la administración en sí sea segura con CD4 bajos. Seguridad e inmunogenicidad son cuestiones distintas.",
+     "tier": "adversarial", "hops": 2, "guides": ["medicina_preventiva"], "stress": "conditional"},
+    {"question": "Si el TAR redujo drásticamente la demencia asociada al VIH, ¿significa que un buen control virológico elimina el riesgo de trastornos neurocognitivos?",
+     "reference": "No. El TAR eliminó en gran medida la forma más grave (la demencia asociada al VIH), pero persisten formas leves y moderadas de HAND por neuroinflamación crónica, penetración variable de los fármacos en el SNC, reservorio en el SNC, daño previo (nadir bajo de CD4) y comorbilidades. Un buen control virológico reduce pero no elimina el riesgo neurocognitivo.",
+     "tier": "adversarial", "hops": 2, "guides": ["neurocognitivo"], "stress": "negation"},
+    {"question": "En España, ¿puede una madre con VIH y carga viral indetectable dar el pecho con seguridad si lo desea?",
+     "reference": "En entornos con acceso garantizado a lactancia artificial segura, como España, se recomienda evitar la lactancia materna y alimentar con fórmula, porque la leche materna puede transmitir el VIH y ese riesgo no es nulo ni siquiera con carga viral indetectable. La indetectabilidad reduce el riesgo pero la recomendación de evitar la lactancia se mantiene; si la madre insiste, se maneja como una situación de riesgo con acompañamiento, no como una opción equivalente.",
+     "tier": "adversarial", "hops": 2, "guides": ["VIH_embarazo"], "stress": "distractor-trap"},
+    {"question": "Como el tenofovir alafenamida (TAF) es más seguro a nivel renal y óseo que el TDF, ¿debe sustituirse el TDF por TAF en todos los pacientes?",
+     "reference": "No en todos. El TAF es preferible cuando hay riesgo o daño renal u óseo, pero la elección se individualiza: el TDF sigue siendo válido en muchos pacientes, se asocia a un perfil lipídico más favorable y menor ganancia de peso que el TAF, y no se recomienda con rifampicina (donde se prefiere TDF). La ventaja renal/ósea del TAF no justifica una sustitución universal; depende del perfil del paciente y de las interacciones.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "overgeneralization-trap"},
+    {"question": "Si un paciente lleva años con carga viral indetectable, ¿puede dejar de monitorizarse la carga viral?",
+     "reference": "No. Aunque la frecuencia de monitorización puede espaciarse en pacientes estables y adherentes, la carga viral debe seguir controlándose periódicamente para detectar precozmente un eventual fracaso virológico (por pérdida de adherencia, interacciones o resistencias). Suspender la monitorización por completo no es adecuado.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022", "adherencia"], "stress": "negation"},
+    {"question": "¿La profilaxis preexposición (PrEP) protege también frente a otras infecciones de transmisión sexual además del VIH?",
+     "reference": "No. La PrEP previene la adquisición del VIH, pero no protege frente a otras ITS (sífilis, gonorrea, clamidia, VHB/VHC, etc.). Por ello se mantiene la recomendación de preservativo y de cribado periódico de ITS en las personas en PrEP; confiar solo en la PrEP frente a todas las ITS es un error.",
+     "tier": "adversarial", "hops": 2, "guides": ["profilaxis"], "stress": "distractor-trap"},
+    {"question": "Un resultado HLA-B*5701 negativo, ¿garantiza que el paciente no tendrá ninguna reacción adversa al abacavir?",
+     "reference": "No. Un HLA-B*5701 negativo reduce drásticamente el riesgo de la reacción de hipersensibilidad mediada por ese alelo y permite prescribir abacavir, pero no garantiza la ausencia de cualquier otro efecto adverso (gastrointestinales, exantema no relacionado, posible debate sobre riesgo cardiovascular). Negativo no equivale a riesgo cero de toda reacción.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "negation"},
+    {"question": "Si un paciente tolera bien su pauta potenciada con ritonavir, ¿da igual mantenerla cuando se le añaden varios fármacos nuevos por otras enfermedades?",
+     "reference": "No da igual. El ritonavir (y el cobicistat) es un inhibidor enzimático potente con numerosas interacciones farmacológicas; al añadir nuevos fármacos aumenta el riesgo de interacciones clínicamente relevantes aunque el paciente tolere bien el antirretroviral en sí. En polifarmacia conviene revisar las interacciones y a menudo se prefieren inhibidores de integrasa sin potenciador. La buena tolerancia no equivale a ausencia de interacciones.",
+     "tier": "adversarial", "hops": 2, "guides": ["TAR_2022"], "stress": "distractor-trap"},
+    {"question": "Para una exposición de bajo riesgo, ¿puede administrarse la PEP con un solo antirretroviral para simplificar?",
+     "reference": "No. La pauta recomendada de PEP es de tres fármacos antirretrovirales; no debe usarse mono ni biterapia, ya que una pauta insuficiente puede no prevenir la infección y, si hubiera infección establecida, seleccionar resistencias. Lo que se decide según el riesgo es SI se indica la PEP, no reducir el número de fármacos de la pauta.",
+     "tier": "adversarial", "hops": 2, "guides": ["profilaxis"], "stress": "distractor-trap"},
+    {"question": "¿Cualquier inhibidor de la integrasa puede combinarse con rifampicina si se ajusta la dosis?",
+     "reference": "No. Solo dolutegravir (a 50 mg/12 h) y raltegravir (a 800 mg/12 h) pueden usarse con rifampicina ajustando la dosis. Bictegravir, elvitegravir/cobicistat y cabotegravir NO pueden combinarse con rifampicina porque sus concentraciones caen de forma inaceptable y no se corrigen con ajuste de dosis. El ajuste no es una solución universal para toda la clase.",
+     "tier": "adversarial", "hops": 2, "guides": ["VIH_TB", "TAR_2022"], "stress": "overgeneralization-trap"},
+    {"question": "Dado que las vacunas de virus vivos están contraindicadas con CD4 <200, ¿una vez superado ese umbral son todas igualmente seguras?",
+     "reference": "No automáticamente. Superar los 200 cél/µL permite considerar varias vacunas vivas (p. ej. triple vírica, varicela) cuando están indicadas, pero la decisión sigue siendo individualizada y algunas, como la fiebre amarilla, requieren una valoración específica del riesgo-beneficio y del grado de recuperación inmune. El umbral de 200 es necesario pero no convierte a todas las vacunas vivas en igualmente seguras de forma indiscriminada.",
+     "tier": "adversarial", "hops": 2, "guides": ["medicina_preventiva"], "stress": "conditional"},
+    {"question": "Si un paciente con tuberculosis mejora clínicamente a las pocas semanas, ¿puede acortarse la duración del tratamiento antituberculoso?",
+     "reference": "No. La mejoría clínica precoz no permite acortar la duración del tratamiento antituberculoso, que debe completarse durante el tiempo establecido para erradicar el bacilo y evitar recaídas y resistencias. Acortarlo por la mejoría sintomática es un error; la duración viene determinada por la pauta y la respuesta microbiológica, no por la sensación de mejoría.",
+     "tier": "adversarial", "hops": 2, "guides": ["VIH_TB"], "stress": "distractor-trap"},
+]
+
+
+def _tag(items, tier):
+    """Stamp a default tier/hops onto questions from the previously-separate pools so the
+    whole evaluation is ONE tiered set. Existing fields win (e.g. multihop keeps its hops)."""
+    return [{**it, "tier": it.get("tier", tier), "hops": it.get("hops", 1)} for it in items]
+
+
+# ===========================================================================
+# EVAL_SET — the SINGLE evaluation set used for everything. The formerly-separate
+# GOLDEN/MULTIHOP pools are FOLDED IN here (not discarded: more questions = more
+# statistical power, which is what makes the A/B reliable) and every question carries a
+# "tier" so performance can be sliced by question type. Tiers:
+#   simple       — atomic factual/lexical lookup (1 hop)
+#   single_hop   — single-area clinical reasoning (the former golden reasoning questions)
+#   multihop     — cross-guide / multi-step reasoning
+#   adversarial  — negation / "it depends" / distractor framing (traps a naive retriever)
+# To change the mix, edit the pools above; there is no dataset selector any more.
+# ===========================================================================
+EVAL_SET = (
+    _tag(_PREV_SINGLE[:39], "single_hop")   # former golden: clinical-reasoning block
+    + _tag(_PREV_SINGLE[39:], "simple")     # former golden: specific-terms / lexical block
+    + _tag(_PREV_MULTI, "multihop")         # former multi-hop set (keeps its own hops/guides)
+    + _TIERED_NEW                           # purpose-built simple/multihop/adversarial tiers
+)
+DATASET = EVAL_SET
 
 
 def build_dataset(dataset: list[dict], retriever) -> tuple[EvaluationDataset, list[float]]:
@@ -250,15 +568,11 @@ def build_dataset(dataset: list[dict], retriever) -> tuple[EvaluationDataset, li
             omitted.append(i)
             continue
 
-        # --- pipeline: swappable retrieval + (optional) shared generation ---
+        # --- pipeline: swappable retrieval + shared generation (always, full eval) ---
         t0 = time.perf_counter()
         payloads = retriever(question)                      # list[dict]
-        # In RETRIEVAL_ONLY we skip generation: the kept metrics (recall/precision) only
-        # need the retrieved contexts + reference, not a generated answer.
-        answer_text = ""
-        if not RETRIEVAL_ONLY:
-            _, formatted_context = build_context(payloads)
-            answer_text = generate_answer(question, formatted_context)["answer"]
+        _, formatted_context = build_context(payloads)
+        answer_text = generate_answer(question, formatted_context)["answer"]
         dt = time.perf_counter() - t0
         latencies.append(dt)
 
@@ -281,8 +595,7 @@ def build_dataset(dataset: list[dict], retriever) -> tuple[EvaluationDataset, li
 
 def main():
     retriever = get_pipeline(PIPELINE)
-    mode = "retrieval-only" if RETRIEVAL_ONLY else "full"
-    print(f"Pipeline: {PIPELINE} | mode: {mode} | dataset: {len(DATASET)} preguntas\n")
+    print(f"Pipeline: {PIPELINE} | mode: full RAGAS | dataset: {len(DATASET)} preguntas\n")
     dataset, latencies = build_dataset(DATASET, retriever)
 
     print(f"Evaluating with judge: {JUDGE_MODEL}\n")
@@ -291,16 +604,11 @@ def main():
         OpenAIEmbeddings(model="text-embedding-3-large")
     )
 
-    # answer_relevancy omitted on purpose: it is misleading on Spanish answers (Phase 0
-    # artifact ~0.42) and adds cost without signal. The retrieval metrics (precision/recall)
-    # are the axes a multi-hop A/B turns on; faithfulness (grounding) is only added in the
-    # full run, since it needs the generated answer.
-    if RECALL_ONLY:
-        metrics = [LLMContextRecall()]
-    elif RETRIEVAL_ONLY:
-        metrics = [LLMContextPrecisionWithReference(), LLMContextRecall()]
-    else:
-        metrics = [Faithfulness(), LLMContextPrecisionWithReference(), LLMContextRecall()]
+    # Full RAGAS suite: faithfulness (grounding of the generated answer), context precision
+    # and context recall. answer_relevancy stays omitted on purpose — it is misleading on
+    # Spanish answers (Phase 0 artifact ~0.42) and adds cost without signal; re-add it here
+    # only if you specifically want that axis.
+    metrics = [Faithfulness(), LLMContextPrecisionWithReference(), LLMContextRecall()]
 
     # Default RAGAS concurrency (16 workers, 180s timeout) overwhelms the judge -> NaN.
     # 8 workers + a long timeout + retries is the stable point (16 still timed out on the
@@ -319,14 +627,25 @@ def main():
     print(result)
 
     df = result.to_pandas()
-    suffix = f"{PIPELINE}_retrieval" if RETRIEVAL_ONLY else PIPELINE
-    out_csv = f"resultados_ragas_{suffix}.csv"     # per-pipeline/mode file so runs don't clash
+    out_csv = f"resultados_ragas_{PIPELINE}.csv"   # per-pipeline file so A/B runs don't clash
     df.to_csv(out_csv, index=False)
     print(f"\nDetail saved to {out_csv}")
 
     pd.set_option("display.max_colwidth", 60)
     print("\n=== Means per metric ===")
     print(df.select_dtypes("number").mean())
+
+    # Per-tier slice: joins the tier back onto the scored rows by question so we can read
+    # whether a pipeline degrades on the SIMPLE tier vs the SINGLE_HOP / MULTIHOP /
+    # ADVERSARIAL ones — the per-question-type performance, the whole point of this set.
+    tier_by_q = {c["question"].strip(): c.get("tier") for c in DATASET if c.get("tier")}
+    if tier_by_q and "user_input" in df.columns:
+        df_t = df.copy()
+        df_t["tier"] = df_t["user_input"].map(tier_by_q)
+        num_cols = df_t.select_dtypes("number").columns
+        print("\n=== Means per tier (n per tier) ===")
+        print(df_t.groupby("tier")[num_cols].mean())
+        print(df_t["tier"].value_counts().rename("n"))
 
     # Velocity axis of the A/B: latency per query (retrieval + generation).
     if latencies:
