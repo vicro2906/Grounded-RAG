@@ -274,12 +274,18 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
    no tenía preguntas simples). PENDIENTE: lanzarlo (full RAGAS, ~$15 con juez mini por las 3
    pipelines, ~$15 más con juez gpt-4o para el número final) y revisión clínica de referencias.
    Antes de lanzar, sonda con un subconjunto (~10) para medir coste real en el dashboard.
-1. **Contextual Retrieval (enriquecer chunks con contexto) — PREPARADO, sin lanzar.**
-   `chunks/contextualize.py`: por chunk, gpt-4o-mini genera 1-2 frases de contexto (situándolo
-   en su guía vía título+section_path+ventana de vecinos) → `chunks_contextual.jsonl` con
-   `context` y `text_for_retrieval` (= contexto + texto). El uploader embebe/BM25-indexa
-   `text_for_retrieval` PERO el payload conserva `text` literal (citable). Mejora a los TRES
-   retrievers (sustrato híbrido común). Coste ~$0.4 (mini). NO lanzado por decisión del usuario.
+1. **Contextual Retrieval (enriquecer chunks con contexto) — HECHO (índice construido).**
+   `chunks/contextualize.py`: por chunk, gpt-4o-mini genera UNA frase densa de contexto
+   (entidades/siglas/grado de recomendación; situándolo en su guía vía título+section_path+
+   ventana de vecinos `--window`, resumible, `max_retries` alto por el tope de 200k TPM) →
+   `chunks_contextual.jsonl` (517) con `context` y `text_for_retrieval` (= contexto + texto).
+   El uploader embebe/BM25-indexa `text_for_retrieval` PERO el payload conserva `text` literal
+   (citable). Subido a colección NUEVA **`guias_vih_hibrida_ctx`** (la original
+   `guias_vih_hibrida` intacta). **Colección elegible** vía `QDRANT_COLLECTION` (env, lo lee
+   `rag.py`) o `--collection` (uploader) → repunta los TRES retrievers a la vez. Coste real
+   ~$0.23 (contextualizar) + ~$0.03 (re-embeber). PENDIENTE: **A/B `EVAL_SET` contra
+   `guias_vih_hibrida` vs `guias_vih_hibrida_ctx`** para confirmar la mejora antes de hacerla
+   la colección por defecto.
 2. **Decidir capa de desviación (router simple→baseline) SOLO con datos:** correr `EVAL_SET`
    con pipelines puras y leer si el grafo se degrada en los tiers `simple`/`single_hop`. Si no
    hay gap → el router no aporta calidad (solo latencia). NO añadir antes de medir (ensucia el

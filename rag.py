@@ -72,7 +72,12 @@ if os.environ.get("RERANK_DEVICE", "cpu").lower() in ("cuda", "auto"):
 from fastembed import SparseTextEmbedding
 
 COLLECTION_DENSE  = "guias_vih"            # original collection (dense only)
-COLLECTION_HYBRID = "guias_vih_hibrida"    # dense + sparse BM25 (Phase 2)
+# Active hybrid collection (dense + sparse BM25). Overridable via env so you can point
+# retrieval at an alternative collection (e.g. a Contextual-Retrieval rebuild) for A/B
+# tests WITHOUT editing code: QDRANT_COLLECTION=guias_vih_hibrida_ctx python ...
+# All three retrievers go through retrieve_hybrid (baseline, iterative, and the graph's
+# hybrid complement), so this one switch repoints them all.
+COLLECTION_HYBRID = os.environ.get("QDRANT_COLLECTION", "guias_vih_hibrida")
 
 # Centralized LLM models: the final clinical answer uses a strong model (quality is
 # critical); rephrasing is a simple task and runs on a cheap one.

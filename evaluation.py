@@ -33,7 +33,8 @@ warnings.filterwarnings(
 )
 
 # --- Existing pipeline ---
-from rag import retrieve, retrieve_hybrid, retrieve_rerank, search, build_context, generate_answer
+from rag import (retrieve, retrieve_hybrid, retrieve_rerank, search, build_context,
+                 generate_answer, COLLECTION_HYBRID)
 
 # ===========================================================================
 # A/B CONFIG — pick WHICH retrieval pipeline to run over the single EVAL_SET.
@@ -46,6 +47,11 @@ from rag import retrieve, retrieve_hybrid, retrieve_rerank, search, build_contex
 #     "graph"     -> Track B: LightRAG graph retrieval (graph.lightrag_retrieve)
 #
 # The dataset is fixed (EVAL_SET, defined below). There is no dataset selector.
+#
+#   COLLECTION (Qdrant): choose which hybrid collection retrieval hits via env
+#     QDRANT_COLLECTION=<name>  (rag.py reads it; default "guias_vih_hibrida").
+#   This lets you A/B a Contextual-Retrieval rebuild vs the original WITHOUT code edits:
+#     QDRANT_COLLECTION=guias_vih_hibrida_ctx PIPELINE=graph python evaluation.py
 # ===========================================================================
 PIPELINE = os.environ.get("PIPELINE", "baseline")   # override per A/B run without editing
 
@@ -595,7 +601,8 @@ def build_dataset(dataset: list[dict], retriever) -> tuple[EvaluationDataset, li
 
 def main():
     retriever = get_pipeline(PIPELINE)
-    print(f"Pipeline: {PIPELINE} | mode: full RAGAS | dataset: {len(DATASET)} preguntas\n")
+    print(f"Pipeline: {PIPELINE} | mode: full RAGAS | dataset: {len(DATASET)} preguntas "
+          f"| coleccion Qdrant: {COLLECTION_HYBRID}\n")
     dataset, latencies = build_dataset(DATASET, retriever)
 
     print(f"Evaluating with judge: {JUDGE_MODEL}\n")

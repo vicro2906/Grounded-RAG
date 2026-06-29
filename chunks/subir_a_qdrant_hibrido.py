@@ -18,6 +18,8 @@ Uso:
     python chunks/subir_a_qdrant_hibrido.py chunks/chunks.jsonl
     python chunks/subir_a_qdrant_hibrido.py chunks/chunks.jsonl --recreate
     python chunks/subir_a_qdrant_hibrido.py chunks/chunks.jsonl --dry-run
+    # Contextual Retrieval a una coleccion NUEVA (no toca la actual; permite A/B y volver atras):
+    python chunks/subir_a_qdrant_hibrido.py chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
 """
 
 import argparse
@@ -85,14 +87,14 @@ def embed_batch(client: OpenAI, texts):
     raise RuntimeError("Fallaron los reintentos de embeddings")
 
 
-def ensure_collection(client: QdrantClient, recreate: bool):
-    exists = client.collection_exists(COLLECTION)
+def ensure_collection(client: QdrantClient, recreate: bool, collection: str):
+    exists = client.collection_exists(collection)
     if exists and recreate:
-        client.delete_collection(COLLECTION)
+        client.delete_collection(collection)
         exists = False
     if not exists:
         client.create_collection(
-            collection_name=COLLECTION,
+            collection_name=collection,
             # Vectores con NOMBRE: denso + sparse en cada punto.
             vectors_config={
                 "dense": models.VectorParams(
@@ -107,20 +109,24 @@ def ensure_collection(client: QdrantClient, recreate: bool):
         )
         for f in KEYWORD_FIELDS:
             client.create_payload_index(
-                COLLECTION, field_name=f,
+                collection, field_name=f,
                 field_schema=models.PayloadSchemaType.KEYWORD)
         for f in INTEGER_FIELDS:
             client.create_payload_index(
-                COLLECTION, field_name=f,
+                collection, field_name=f,
                 field_schema=models.PayloadSchemaType.INTEGER)
-        print(f"Coleccion '{COLLECTION}' creada (dense {vector_dim()}d coseno + sparse bm25 IDF).")
+        print(f"Coleccion '{collection}' creada (dense {vector_dim()}d coseno + sparse bm25 IDF).")
     else:
-        print(f"Coleccion '{COLLECTION}' ya existe; se hara upsert.")
+        print(f"Coleccion '{collection}' ya existe; se hara upsert.")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("jsonl", help="Archivo chunks.jsonl")
+    ap.add_argument("--collection", default=COLLECTION,
+                    help=f"Nombre de la coleccion destino (por defecto '{COLLECTION}'). "
+                         "Usa otro nombre (p.ej. guias_vih_hibrida_ctx) para NO sobrescribir "
+                         "la actual y poder hacer A/B o volver atras.")
     ap.add_argument("--recreate", action="store_true", help="Borra la coleccion antes de subir")
     ap.add_argument("--dry-run", action="store_true", help="No sube; valida y estima coste")
     args = ap.parse_args()
@@ -145,11 +151,16 @@ def main():
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
     qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     bm25 = SparseTextEmbedding(BM25_MODEL)        # descarga el modelo la 1ª vez
-    ensure_collection(qdrant, args.recreate)
+    ensure_collection(qdrant, args.recreate, args.collection)
 
     for start in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[start:start + BATCH_SIZE]
-        textos = [c["text"] for c in batch]
+        # Contextual Retrieval: si el chunk trae "text_for_retrieval" (contexto + texto,
+        # generado por chunks/contextualize.py), se EMBEBE e INDEXA en BM25 esa versión
+        # enriquecida para mejorar el matching; si no, cae al texto crudo (compatibilidad).
+        # El payload conserva el chunk entero, así que p["text"] sigue siendo el LITERAL
+        # citable (evidence.py cita "text", no "text_for_retrieval").
+        textos = [c.get("text_for_retrieval", c["text"]) for c in batch]
         dense_vecs = embed_batch(openai_client, textos)
         sparse_vecs = list(bm25.embed(textos))    # BM25 local (documentos)
         points = [
@@ -166,10 +177,10 @@ def main():
             )
             for c, dense, sp in zip(batch, dense_vecs, sparse_vecs)
         ]
-        qdrant.upsert(collection_name=COLLECTION, points=points)
+        qdrant.upsert(collection_name=args.collection, points=points)
         print(f"  subidos {min(start + BATCH_SIZE, len(chunks))}/{len(chunks)}")
 
-    print("Listo. Ingesta hibrida completada en Qdrant Cloud.")
+    print(f"Listo. Ingesta hibrida completada en Qdrant Cloud (coleccion '{args.collection}').")
 
 
 if __name__ == "__main__":
