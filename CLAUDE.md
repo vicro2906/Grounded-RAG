@@ -152,6 +152,9 @@ citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estrict
 - `chunks/` — `chunk_guias.py` (chunking estructural), `subir_a_qdrant.py` (denso),
   `subir_a_qdrant_hibrido.py` (denso+BM25), `chunks.jsonl` (517 chunks).
 - `data/markdown/` — las 7 guías en Markdown (fuente del corpus). `data/pdfs/`, `data/textos/` — originales.
+  Los `.md` se transcribieron de los PDFs con **código generado por Claude Code adaptado a cada PDF**
+  (particularidades no extrapolables), usando librerías de transcripción tipo `pymupdf4llm` que
+  **copian el texto, no inventan** (ver `data/README.md`).
 - `docs/` — documentos de diseño y diagramas de arquitectura. `resultados/` — CSV de evaluación RAGAS.
 - `langgraph.json` — config de LangGraph Studio (expone `main.py:app`).
 

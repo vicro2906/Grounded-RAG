@@ -555,7 +555,18 @@ EVAL_SET = (
     + _tag(_PREV_MULTI, "multihop")         # former multi-hop set (keeps its own hops/guides)
     + _TIERED_NEW                           # purpose-built simple/multihop/adversarial tiers
 )
-DATASET = EVAL_SET
+# Cost control: EVAL_SAMPLE=N runs a STRATIFIED subset of N questions PER TIER (cheap probe
+# while iterating); unset / 0 = the full 151-question set (the number you report). The subset
+# keeps the per-tier balance so a quick run still exercises all four question types.
+_SAMPLE = int(os.environ.get("EVAL_SAMPLE", "0"))
+if _SAMPLE > 0:
+    from collections import defaultdict
+    _by_tier: dict[str, list] = defaultdict(list)
+    for _c in EVAL_SET:
+        _by_tier[_c.get("tier")].append(_c)
+    DATASET = [c for tier in _by_tier for c in _by_tier[tier][:_SAMPLE]]
+else:
+    DATASET = EVAL_SET
 
 
 def build_dataset(dataset: list[dict], retriever) -> tuple[EvaluationDataset, list[float]]:

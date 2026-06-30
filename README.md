@@ -69,6 +69,18 @@ Detalle exhaustivo de decisiones y hallazgos en [`CLAUDE.md`](CLAUDE.md).
 
 ---
 
+## Procedencia del corpus
+
+Los `.md` de `data/markdown/` se generaron a partir de los PDFs originales (`data/pdfs/`) con
+**código de extracción generado con Claude Code y adaptado a cada PDF por separado**: cada guía
+tiene particularidades de maquetación (tablas, numeración, notas al pie) que no son
+extrapolables a las demás, así que no hubo un único script genérico sino uno ajustado a cada
+documento. La conversión se apoya en librerías de **transcripción** PDF→Markdown (p. ej.
+`pymupdf4llm`) que **copian el texto, no lo generan** — el corpus es fiel al original y no
+introduce alucinaciones ya en la fuente, coherente con la prioridad nº 1 del proyecto.
+
+---
+
 ## Cómo ejecutar
 
 Requisitos: Python 3.12+, dependencias gestionadas con [`uv`](https://docs.astral.sh/uv/), y un
