@@ -402,6 +402,9 @@ nuevo sobre `EVAL_SET` vuelca `resultados/resultados_ragas_<PIPELINE>.csv` (full
   `abbreviations.py`). Al usuario se le habla en español.
 - Toda llamada LLM encapsulada para poder cambiar a Azure OpenAI (GPT-4 privado) sin
   fricción el día que se requiera por cumplimiento.
-- Commits directos a `main` (flujo de un solo dev). Mensajes en español. En `.gitignore`:
-  `.env`, `*.log`, `.langgraph_api/` y `lightrag_store/` (el grafo se reconstruye con
-  `python -m graph.lightrag_track`).
+- Commits directos a `main` (flujo de un solo dev). Mensajes en español. **NO añadir el
+  trailer `Co-Authored-By: Claude…`** a los commits: el repo es público (portfolio) y la
+  atribución a Claude Code va en el README y la descripción, no como co-autor de git (ese
+  trailer hacía aparecer "claude" en la lista de Contributors de GitHub). En `.gitignore`:
+  `.env`, `*.log`, `.langgraph_api/`, `lightrag_store/` y `data/pdfs/` (el grafo se reconstruye
+  con `python -m graph.lightrag_track`).
