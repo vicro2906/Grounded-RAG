@@ -1,4 +1,4 @@
-# grounded-rag — respuestas ancladas en documentos estructurados
+# Grounded-RAG — respuestas ancladas en documentos estructurados
 
 Arquitectura **RAG** que responde preguntas sobre un corpus de **documentos estructurados**
 (guías clínicas, normativa, documentación técnica…) **citando siempre la evidencia literal**.
