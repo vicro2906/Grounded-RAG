@@ -2,7 +2,9 @@
 
 Material fuente del chatbot: las 7 guías clínicas de VIH de **GeSIDA**.
 
-- **`pdfs/`** — los PDFs originales, tal cual se publican.
+- **`pdfs/`** — los PDFs originales. **No se versionan en este repositorio** (están en
+  `.gitignore`): son obra de GeSIDA, así que se mantienen solo en local y no se redistribuyen.
+  Se descargan de GeSIDA si se necesitan.
 - **`markdown/`** — los PDFs convertidos a Markdown; es el **corpus real** del que se hace el
   chunking (`../chunks/`).
 - **`textos/`** — extracciones de texto plano de los originales (provenance / respaldo).

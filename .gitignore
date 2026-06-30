@@ -20,3 +20,6 @@ wheels/
 # LightRAG knowledge-graph store (Track B, F4) — regenerable con lightrag_track.py
 lightrag_store/
 _probe_store/
+
+# PDFs originales de GeSIDA: se conservan en local pero NO se redistribuyen (© GeSIDA)
+data/pdfs/

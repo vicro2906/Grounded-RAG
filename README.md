@@ -15,8 +15,6 @@ corpus de documentos estructurados del mismo estilo (ver [Reproducir con otro co
 > trabajo agéntico cuando las ideas y el criterio los pone la persona.
 >
 > **Estado: prototipo** para demostración (sin usuarios reales todavía).
->
-> _Nombre `grounded-rag` propuesto; cámbialo si prefieres otro (VeriRAG, CiteRAG, anchored-rag…)._
 
 ---
 
@@ -76,7 +74,8 @@ Detalle exhaustivo de decisiones y hallazgos en [`CLAUDE.md`](CLAUDE.md).
 
 ## Procedencia del corpus
 
-Los `.md` de `data/markdown/` se generaron a partir de los PDFs originales (`data/pdfs/`) con
+Los `.md` de `data/markdown/` se generaron a partir de los PDFs originales de GeSIDA (no
+redistribuidos en este repositorio; ver [`data/README.md`](data/README.md)) con
 **código de extracción generado con Claude Code y adaptado a cada PDF por separado**: cada guía
 tiene particularidades de maquetación (tablas, numeración, notas al pie) que no son
 extrapolables a las demás, así que no hubo un único script genérico sino uno ajustado a cada
@@ -172,7 +171,7 @@ QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py   # A/B 
 | `evaluation.py` | Evaluación RAGAS (`EVAL_SET`, por tier). |
 | `agentic/` · `graph/` | Recuperación iterativa (Track A) y por grafo LightRAG (Track B). |
 | `chunks/` | Chunking, contextualización y subida a Qdrant (incluye `chunks.jsonl`). |
-| `data/` | Las 7 guías GeSIDA: `markdown/` (corpus), `pdfs/` y `textos/` (originales). |
+| `data/` | Corpus: `markdown/` (las 7 guías GeSIDA, fuente real) y `textos/`. Los PDFs originales (`pdfs/`) no se versionan (ver `data/README.md`). |
 | `resultados/` | CSV de evaluación RAGAS (un fichero por pipeline). |
 | `docs/` | Documentos de diseño y diagramas de arquitectura. |
 | `CLAUDE.md` | Documento vivo de contexto, decisiones y hallazgos. |
