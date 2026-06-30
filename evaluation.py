@@ -634,7 +634,8 @@ def main():
     print(result)
 
     df = result.to_pandas()
-    out_csv = f"resultados_ragas_{PIPELINE}.csv"   # per-pipeline file so A/B runs don't clash
+    os.makedirs("resultados", exist_ok=True)
+    out_csv = os.path.join("resultados", f"resultados_ragas_{PIPELINE}.csv")  # per-pipeline file
     df.to_csv(out_csv, index=False)
     print(f"\nDetail saved to {out_csv}")
 

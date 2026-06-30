@@ -142,7 +142,7 @@ citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estrict
   **SIEMPRE corre el suite RAGAS completo** (faithfulness+precision+recall; answer_relevancy
   omitida a propósito por ser artefacto en español); se eliminaron los modos lean
   `RETRIEVAL_ONLY`/`RECALL_ONLY`. `RunConfig(timeout=600, max_workers=8)` anti-timeout.
-  Imprime medias globales **y por tier**, mide latencia y vuelca `resultados_ragas_<PIPELINE>.csv`.
+  Imprime medias globales **y por tier**, mide latencia y vuelca `resultados/resultados_ragas_<PIPELINE>.csv`.
   Las referencias las redactó el modelo desde las guías → **pendiente revisión clínica**.
 - `abbreviations.py` — diccionario SIGLA→nombre de las guías (valores en español).
 - **`agentic/`** — Track A (F4). `iterative.py`: `iterative_search` (plan/hop/reflect).
@@ -151,7 +151,8 @@ citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estrict
   (importa `rerank` de `rag.py`, corpus de `chunks/`, store en `lightrag_store/`).
 - `chunks/` — `chunk_guias.py` (chunking estructural), `subir_a_qdrant.py` (denso),
   `subir_a_qdrant_hibrido.py` (denso+BM25), `chunks.jsonl` (517 chunks).
-- `markdown/` — las 7 guías en Markdown (fuente del corpus). `pdfs/`, `textos/` — originales.
+- `data/markdown/` — las 7 guías en Markdown (fuente del corpus). `data/pdfs/`, `data/textos/` — originales.
+- `docs/` — documentos de diseño y diagramas de arquitectura. `resultados/` — CSV de evaluación RAGAS.
 - `langgraph.json` — config de LangGraph Studio (expone `main.py:app`).
 
 ## Modelos y servicios
@@ -224,7 +225,7 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
 - **F0 — Brújula: HECHA.** Golden set RAGAS con referencias (las redactó el modelo, no un
   médico → caveat). Baseline denso (juez gpt-4o-mini): faithfulness 0.81,
   answer_relevancy 0.58 (ENGAÑOSO, artefacto de la métrica en español), context_precision
-  0.97, context_recall 0.94 (algo inflado). Detalle en `resultados_ragas.csv`.
+  0.97, context_recall 0.94 (algo inflado). Detalle en `resultados/resultados_ragas.csv`.
 - **F1 — LangGraph + LangSmith: HECHA.**
 - **F2 — Retrieval barato: HECHA.** Híbrido (2a) + reranker (2b).
 - **F3 — Refine: HECHA.** rephrasing + normalización de abreviaturas; **guardrail de
@@ -304,9 +305,9 @@ Orden acordado: medir → orquestar → retrieval barato → refine+validate →
    por conceptos. Incremento 2 pendiente: vía de "modificadores por conocimiento implícito" en
    `assess` (marcada y siempre seguida de re-retrieval + validate).
 
-Artefactos de evaluación versionados: `resultados_ragas.csv` (baseline F0) y
+Artefactos de evaluación versionados en `resultados/`: `resultados_ragas.csv` (baseline F0) y
 `resultados_ragas_{baseline,iterative,graph}_retrieval.csv` (A/B F4, context_recall). El A/B
-nuevo sobre `EVAL_SET` vuelca `resultados_ragas_<PIPELINE>.csv` (full RAGAS).
+nuevo sobre `EVAL_SET` vuelca `resultados/resultados_ragas_<PIPELINE>.csv` (full RAGAS).
 
 ## Hallazgos importantes (no perder)
 

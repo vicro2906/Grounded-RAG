@@ -123,8 +123,10 @@ QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py   # A/B 
 | `evidence.py` | Formateo de respuesta y panel de fuentes con citas literales. |
 | `evaluation.py` | Evaluación RAGAS (`EVAL_SET`, por tier). |
 | `agentic/` · `graph/` | Recuperación iterativa (Track A) y por grafo LightRAG (Track B). |
-| `chunks/` | Chunking, contextualización y subida a Qdrant. |
-| `markdown/` · `pdfs/` | Las 7 guías GeSIDA (fuente del corpus). |
+| `chunks/` | Chunking, contextualización y subida a Qdrant (incluye `chunks.jsonl`). |
+| `data/` | Las 7 guías GeSIDA: `markdown/` (corpus), `pdfs/` y `textos/` (originales). |
+| `resultados/` | CSV de evaluación RAGAS (un fichero por pipeline). |
+| `docs/` | Documentos de diseño y diagramas de arquitectura. |
 | `CLAUDE.md` | Documento vivo de contexto, decisiones y hallazgos. |
 
 ---
