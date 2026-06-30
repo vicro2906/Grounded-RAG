@@ -1,17 +1,22 @@
-# Chatbot médico VIH — RAG sobre las guías GeSIDA
+# grounded-rag — respuestas ancladas en documentos estructurados
 
-Asistente conversacional (RAG) para **profesionales médicos** que responde preguntas
-sobre las **guías clínicas de VIH de GeSIDA** citando siempre la evidencia literal.
-Construido sobre LangGraph, con foco en **no alucinar**, conectar conceptos para navegar
-las guías y una UX cuidada.
+Arquitectura **RAG** que responde preguntas sobre un corpus de **documentos estructurados**
+(guías clínicas, normativa, documentación técnica…) **citando siempre la evidencia literal**.
+Construida sobre LangGraph, con foco en **no alucinar**, conectar conceptos para navegar el
+corpus y una UX conversacional cuidada.
 
-> **Sobre la autoría.** Es un proyecto personal. El **diseño, las decisiones de arquitectura
-> y el razonamiento clínico/producto son míos**; usé **Claude Code (Anthropic)** como
-> asistente de **programación agéntica** para implementarlo. El repositorio sirve también
-> como ejemplo de hasta dónde llega ese flujo de trabajo agéntico cuando las ideas y el
-> criterio los pone la persona.
+El diseño es **agnóstico al dominio**: aquí se demuestra sobre las **guías clínicas de VIH de
+GeSIDA** (en español, para uso médico), pero la misma arquitectura se reproduce sobre cualquier
+corpus de documentos estructurados del mismo estilo (ver [Reproducir con otro corpus](#reproducir-con-otro-corpus)).
+
+> **Sobre la autoría.** Proyecto personal. El **diseño y las decisiones de arquitectura son
+> míos**; usé **Claude Code (Anthropic)** como asistente de **programación agéntica** para
+> implementarlo. El repositorio sirve también como ejemplo de hasta dónde llega ese flujo de
+> trabajo agéntico cuando las ideas y el criterio los pone la persona.
 >
 > **Estado: prototipo** para demostración (sin usuarios reales todavía).
+>
+> _Nombre `grounded-rag` propuesto; cámbialo si prefieres otro (VeriRAG, CiteRAG, anchored-rag…)._
 
 ---
 
@@ -86,6 +91,32 @@ PDF → script adaptado → validación → iteración.
 
 ---
 
+## Reproducir con otro corpus
+
+La arquitectura no tiene nada intrínsecamente "de VIH": es un patrón de **grounded RAG sobre
+documentos estructurados**. Para instanciarla sobre otro corpus (otra especialidad clínica,
+normativa, manuales técnicos…) se cambia la **capa de dominio**, no el motor:
+
+**Lo que se sustituye (específico del dominio):**
+- El **corpus**: los documentos en `data/` y su transcripción (el prompt de `data/prompt.txt`
+  es reutilizable para cualquier PDF estructurado) + re-ejecutar el chunking de `chunks/`.
+- El **glosario de siglas** (`abbreviations.py`) por el del nuevo dominio.
+- La **guardia de dominio** (clasificación `in_domain` del nodo *rephrase*) que define qué
+  preguntas están "dentro de tema".
+- Los **prompts** que nombran el dominio (`SYS_PROMPT`, contextualización, *assess*) y los
+  nombres de colección en Qdrant.
+
+**Lo que se reutiliza tal cual (el motor):** el grafo LangGraph, la recuperación híbrida +
+grafo + reranker, el Contextual Retrieval, la puerta de clarificación, y la
+validación + citación literal. Es decir, **todo el valor de ingeniería es portable**; lo
+específico es la configuración del dominio.
+
+> Nota: hoy esas piezas de dominio están en el código (no parametrizadas en un fichero de
+> config). Extraerlas a configuración es trabajo futuro natural, pero la separación
+> conceptual motor/dominio ya existe.
+
+---
+
 ## Cómo ejecutar
 
 Requisitos: Python 3.12+, dependencias gestionadas con [`uv`](https://docs.astral.sh/uv/), y un
@@ -148,8 +179,14 @@ QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py   # A/B 
 
 ---
 
+## Licencia
+
+El **código** se publica bajo licencia **MIT** (ver [`LICENSE`](LICENSE)): úsalo, cópialo o
+modifícalo libremente conservando el aviso de copyright. La licencia **NO cubre el contenido de
+`data/`**: las guías de GeSIDA son obra y propiedad de sus autores y se incluyen únicamente para
+la demostración del prototipo.
+
 ## Aviso
 
 Herramienta de apoyo a la decisión clínica en fase de prototipo. **No sustituye el juicio
-médico** ni constituye consejo clínico. El contenido procede de las guías GeSIDA, cuya autoría
-y derechos pertenecen a sus autores.
+médico** ni constituye consejo clínico.
