@@ -75,9 +75,14 @@ Los `.md` de `data/markdown/` se generaron a partir de los PDFs originales (`dat
 **código de extracción generado con Claude Code y adaptado a cada PDF por separado**: cada guía
 tiene particularidades de maquetación (tablas, numeración, notas al pie) que no son
 extrapolables a las demás, así que no hubo un único script genérico sino uno ajustado a cada
-documento. La conversión se apoya en librerías de **transcripción** PDF→Markdown (p. ej.
-`pymupdf4llm`) que **copian el texto, no lo generan** — el corpus es fiel al original y no
+documento. La conversión se apoya en librerías de **transcripción** PDF→Markdown
+(`pymupdf4llm`) que **copian el texto, no lo generan** — el corpus es fiel al original y no
 introduce alucinaciones ya en la fuente, coherente con la prioridad nº 1 del proyecto.
+
+El **prompt** que guió todo el proceso está versionado en [`data/prompt.txt`](data/prompt.txt):
+impone fidelidad por encima de completitud (prohíbe parafrasear, resumir o reconstruir, y obliga
+a omitir con marca lo que no se extraiga con garantía), e implementa el flujo inspección del
+PDF → script adaptado → validación → iteración.
 
 ---
 

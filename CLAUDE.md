@@ -153,8 +153,9 @@ citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estrict
   `subir_a_qdrant_hibrido.py` (denso+BM25), `chunks.jsonl` (517 chunks).
 - `data/markdown/` — las 7 guías en Markdown (fuente del corpus). `data/pdfs/`, `data/textos/` — originales.
   Los `.md` se transcribieron de los PDFs con **código generado por Claude Code adaptado a cada PDF**
-  (particularidades no extrapolables), usando librerías de transcripción tipo `pymupdf4llm` que
-  **copian el texto, no inventan** (ver `data/README.md`).
+  (particularidades no extrapolables), usando `pymupdf4llm` (transcribe, **no inventa**). El prompt
+  que guió la conversión (fidelidad absoluta, inspección→script→validación→iteración) está en
+  `data/prompt.txt`. Ver `data/README.md`.
 - `docs/` — documentos de diseño y diagramas de arquitectura. `resultados/` — CSV de evaluación RAGAS.
 - `langgraph.json` — config de LangGraph Studio (expone `main.py:app`).
 
