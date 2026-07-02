@@ -8,7 +8,7 @@ the combined graph keeps the collapsed nodes in nodes.py.
 """
 from langgraph.types import Send
 
-from rag import retrieve_hybrid, rerank, search, retrieve_rerank, build_context
+from rag import retrieve_hybrid, rerank, retrieve_rerank, build_context
 from agentic.iterative import _plan, _reflect, MAX_HOPS, PER_HOP
 
 from .state import IterativeState, GraphState
@@ -36,8 +36,9 @@ def route_iter_generate_subquestions(state: IterativeState):
 
 
 def node_iter_single(state: IterativeState) -> dict:
-    """Single-hop fallback: the baseline one-shot (rephrase + hybrid + rerank)."""
-    contexts = search(state["question"], top_k=8)
+    """Single-hop fallback: one baseline shot (hybrid + rerank) reusing the query that
+    node_rephrase already rewrote (no duplicate rephrase LLM call)."""
+    contexts = retrieve_rerank(state.get("search_query") or state["question"], top_k=8)
     chunk_index, formatted_context = build_context(contexts)
     return {"contexts": contexts, "chunk_index": chunk_index,
             "formatted_context": formatted_context}

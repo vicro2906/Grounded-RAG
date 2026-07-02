@@ -89,8 +89,10 @@ def node_rerank(state: RAGState) -> dict:
 
 def node_iterative_retrieve(state: RAGState) -> dict:
     """Track A: multi-hop retrieval (plan -> hop -> reflect). Uses the ORIGINAL question (it
-    does its own decomposition); yields the same numbered-context shape as the baseline."""
-    contexts = iterative_search(state["question"], top_k=8)
+    does its own decomposition); yields the same numbered-context shape as the baseline. The
+    rephrased query is passed along so a single-hop fallback skips a duplicate rephrase call."""
+    contexts = iterative_search(state["question"], top_k=8,
+                                search_query=state.get("search_query"))
     chunk_index, formatted_context = build_context(contexts)
     return {"contexts": contexts, "chunk_index": chunk_index,
             "formatted_context": formatted_context, "retrieval_mode": "iterative"}
@@ -163,21 +165,22 @@ def node_re_retrieve(state: RAGState, config) -> dict:
     """Runs ONCE, right before generate, after the clarification loop gathered all the patient
     data. Re-runs retrieval with those facts folded into the query so the doctor's answers PULL
     the conditional passages (e.g. the HBV-coinfection or first-trimester branch) for generate
-    to cite. Dispatches on the mode that already ran; no-ops if there are no facts to add."""
+    to cite. Dispatches on the mode that already ran; no-ops unless clarification ADDED facts —
+    facts that came in the question itself were already in the initial retrieval query."""
     facts = _facts_phrase(state.get("clinical_facts"))
-    if not facts:
+    if not facts or not state.get("clarify_rounds"):
         return {}
     mode = state.get("retrieval_mode") or _resolve_mode(config)
     patient = f"Contexto del paciente: {facts}"
+    enriched = f"{state.get('search_query') or state['question']}\n{patient}"
     if mode == "iterative":
-        contexts = iterative_search(f"{state['question']}\n{patient}", top_k=8)
+        contexts = iterative_search(f"{state['question']}\n{patient}", top_k=8,
+                                    search_query=enriched)
     elif mode == "graph":
         from graph.lightrag_track import graph_search
-        enriched_hybrid = f"{state.get('search_query') or state['question']}\n{patient}"
         contexts = graph_search(f"{state['question']}\n{patient}", top_k=8,
-                                hybrid_query=enriched_hybrid)
+                                hybrid_query=enriched)
     else:  # baseline
-        enriched = f"{state.get('search_query') or state['question']}\n{patient}"
         candidates = retrieve_hybrid(enriched, top_k=20, prefetch_limit=30)
         contexts = rerank(enriched, candidates, top_k=5)
     chunk_index, formatted_context = build_context(contexts)

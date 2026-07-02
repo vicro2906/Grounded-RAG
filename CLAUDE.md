@@ -80,8 +80,9 @@ are IDENTICAL across the three modes; only the retrieval node changes, chosen by
   injected into the query** (dispatches on `retrieval_mode`, reuses the collapsed
   baseline/iterative/graph functions) and OVERWRITES `contexts` → so the doctor's datum PULLS
   the conditional passages (the HBV branch, the first-trimester one…) so `generate` CITES
-  them, not just steers generation. No-op if there is no data (e.g. a question that does not
-  clarify) → leaves the initial context intact. **Total: 1 initial retrieve + 1 final
+  them, not just steers generation. No-op unless clarification ADDED facts (`clarify_rounds`
+  > 0): facts that came in the question itself were already in the initial retrieval query, so
+  re-retrieving with them would be a redundant full pass (latency fix). **Total: 1 initial retrieve + 1 final
   re_retrieve** (previously it was 1 + N per round). The `assess_context ⇄ clarify` loop runs
   entirely on the **initial context**: since `assess` is knowledge-primary, it does not need
   re-retrieval between rounds (the intermediate re_retrieves were redundant). Tested: with
@@ -94,7 +95,9 @@ are IDENTICAL across the three modes; only the retrieval node changes, chosen by
     sparse BM25 `Qdrant/bm25`, RRF fusion, 20 candidates) → `node_rerank` (`rag.rerank`,
     local cross-encoder, 20→5).
   - **iterative** (Track A) = `node_iterative_retrieve` → `agentic.iterative.iterative_search`
-    (plan→hop→reflect, top 8). Uses the ORIGINAL question (its own plan); ignores the rewritten one.
+    (plan→hop→reflect, top 8). Plans over the ORIGINAL question; the single-hop fallback reuses
+    the caller's rewritten query (`search_query` param) instead of re-rephrasing (saves one LLM
+    call per single-hop run; without the param, e.g. from the eval, it rephrases itself).
   - **graph** (Track B, DEFAULT) = `node_graph_retrieve` → `graph.lightrag_track.graph_search`
     (entity+relation graph `mode="hybrid"` + `retrieve_hybrid` dense+BM25 complement →
     dedup fusion → rerank → top 8).
@@ -364,6 +367,17 @@ new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS
   in parallel; (3) `rag.warmup()` preloads reranker+BM25 and `main.py` launches it on a daemon
   thread at import (kills the ~3.5 s of the 1st query); (4) thread-safe locks on the lazy model
   loads. Studio's dedicated graphs already parallelized (Send / branches).
+- **Optimizations applied (2026-07-02, redundant LLM/retrieval calls on the critical path):**
+  (1) the iterative single-hop fallback re-rephrased a question the graph had already
+  rephrased (a duplicate gpt-4o-mini call, ~1-2 s, on EVERY single-hop iterative run) →
+  `iterative_search` now takes an optional `search_query` and the nodes pass the state's one;
+  (2) `re_retrieve` re-ran a FULL retrieval pass (in graph mode including another LightRAG
+  keyword LLM call, ~1-8 s) whenever `clinical_facts` was non-empty — but facts seeded by
+  `refine` from the question itself are already in the initial retrieval query, so it now
+  no-ops unless a clarification round actually ADDED facts (`clarify_rounds > 0`). Remaining
+  candidates NOT applied (complexity vs. readability): speculative single-hop prefetch during
+  `_plan`, speculative generate during assess, LightRAG storage warm-up at import (unsafe with
+  Studio's reloader and breaks the "LightRAG stays lazy" decision).
 - **RERANKER ON GPU (DONE, the biggest latency improvement).** Measured: `rerank` 20 docs went
   from **~3.8 s (CPU) to ~0.45 s (GPU GTX 1650)** → retrieval: baseline 7.6→5.5 s, **iterative
   15.8→4.9 s (~3.2×, it had 4 reranks)**, graph 11.5→7.7 s. Now the remaining time is the LLM

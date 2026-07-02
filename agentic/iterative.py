@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
-from rag import (retrieve_rerank, rerank, search, REPHRASE_MODEL, _ABBREV_LIST,
+from rag import (retrieve_rerank, rerank, rephrase, REPHRASE_MODEL, _ABBREV_LIST,
                  _get_reranker, _get_bm25)
 
 MAX_HOPS = 3        # total retrieval rounds (initial sub-queries + reflect follow-ups)
@@ -117,13 +117,14 @@ def _accumulate(pool: dict, payloads: list) -> None:
 
 
 def iterative_search(query: str, top_k: int = 8, max_hops: int = MAX_HOPS,
-                     per_hop: int = PER_HOP) -> list:
+                     per_hop: int = PER_HOP, search_query: str | None = None) -> list:
     """Track A retriever for multi-hop questions: plan -> retrieve per sub-query ->
     reflect/retrieve follow-ups -> rerank the union against the ORIGINAL question.
-    Single-hop questions fall back to the baseline `search` (no extra LLM cost)."""
+    Single-hop questions fall back to one baseline shot; pass `search_query` when the
+    caller already rephrased the question (the graph does) to skip a duplicate LLM call."""
     plan = _plan(query)
     if not plan["is_multihop"]:
-        return search(query, top_k=top_k)
+        return retrieve_rerank(search_query or rephrase(query), top_k=top_k)
 
     pool: dict = {}
     subs = plan["sub_queries"][:max_hops]
