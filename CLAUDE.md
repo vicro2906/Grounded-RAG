@@ -21,7 +21,9 @@ an EU region. The doctor's data may include health information (GDPR Art. 9).
 
 ## Current architecture (LangGraph)
 
-Entry point: `main.py` (compiled graph `app`). Graph nodes:
+Entry point: `main.py` (compiles the graph `app`). The graph itself lives in the `pipeline/`
+package (`config`, `state`, `nodes`, `nodes_expanded`, `builder`, `generation`); `main.py` only
+wires runtime concerns (UTF-8, LangSmith, warm-up) and the CLI. Graph nodes:
 
 ```
 question ─▶ rephrase ─┬─ out of domain ─▶ out_of_domain ─▶ END
@@ -35,7 +37,7 @@ question ─▶ rephrase ─┬─ out of domain ─▶ out_of_domain ─▶ END
 
 The head (rephrase + domain guardrail) and the tail (assess_context→generate→validate→evidence)
 are IDENTICAL across the three modes; only the retrieval node changes, chosen by
-`RETRIEVAL_MODE` in `main.py` (default `"graph"` after the Phase-4 A/B).
+`RETRIEVAL_MODE` in `pipeline/config.py` (default `"graph"` after the Phase-4 A/B).
 
 - **rephrase** (`rag.refine`, gpt-4o-mini): a single call that (a) classifies whether the
   question belongs to the HIV domain (`in_domain`); (b) rewrites the query WITHOUT adding
@@ -44,7 +46,7 @@ are IDENTICAL across the three modes; only the retrieval node changes, chosen by
   clinical modifiers the question might need (`candidate_modifiers`) — the cheap half of the
   clarification step. If out of domain → `out_of_domain` (direct message, short-circuits the
   pipeline). Generation uses the ORIGINAL question, not the rewritten one.
-- **assess_context + clarify** (`rag.assess`, **gpt-4o** `ASSESS_MODEL`; nodes in `main.py`):
+- **assess_context + clarify** (`rag.assess`, **gpt-4o** `ASSESS_MODEL`; nodes in `pipeline/nodes.py`):
   **interactive clarification gate** (Phase 5, slot-filling) between retrieval and `generate`.
   It reasons over structured fields (order = CoT) via TWO paths, with **CLINICAL KNOWLEDGE as
   the PRIMARY one**: **(1) `clinically_relevant`** (primary): ALL modifiers that clinically
@@ -73,7 +75,7 @@ are IDENTICAL across the three modes; only the retrieval node changes, chosen by
   patient's data and the spent round budget leaked into the next question and `assess_context`
   was skipped). Within ONE question the merge/increment is done by `clarify` by hand (reading
   the state), enough because they are written sequentially.
-- **re_retrieve** (node in `main.py`): runs **ONCE, on EXIT from the clarification loop**
+- **re_retrieve** (node in `pipeline/nodes.py`): runs **ONCE, on EXIT from the clarification loop**
   (right before `generate`), not on every round. **Re-retrieves with ALL the `clinical_facts`
   injected into the query** (dispatches on `retrieval_mode`, reuses the collapsed
   baseline/iterative/graph functions) and OVERWRITES `contexts` → so the doctor's datum PULLS
@@ -98,7 +100,7 @@ are IDENTICAL across the three modes; only the retrieval node changes, chosen by
     dedup fusion → rerank → top 8).
 - **rerank** (`rag.rerank`): local cross-encoder `jinaai/jina-reranker-v2-base-multilingual`
   (fastembed/ONNX, multilingual, GDPR-ok). Used by the three modes to refine to the final top.
-- **generate** (`main._structured_llm`, gpt-4o): structured output with
+- **generate** (`pipeline.generation.structured_llm`, gpt-4o): structured output with
   `ChatOpenAI.with_structured_output` (Pydantic `ClinicalAnswer`, strict json_schema).
   Returns dict: sufficient_information, answer, sources_used[{ref,quote}], follow_up_questions.
 - **validate** (`rag.validate`, gpt-4o-mini): relevance + semantic grounding judge.
@@ -136,9 +138,16 @@ keeping strict grounding + validate.
 
 ## Key files
 
-- `main.py` — LangGraph graph + LangSmith + structured generation (entry point).
-- `rag.py` — pipeline: clients, embeddings, retrieve/retrieve_hybrid, rerank, refine,
-  search, validate, generate_answer (raw version), SYS_PROMPT, build_user_prompt, model constants.
+- `main.py` — entry point: compiles the graphs, wires runtime concerns (UTF-8, LangSmith,
+  warm-up) and the CLI. Thin; the graph lives in `pipeline/`.
+- **`pipeline/`** — the LangGraph app, assembled from `rag.py`'s primitives: `config.py`
+  (constants, Studio context schema, `MSG_*`), `state.py` (state schemas + reducers),
+  `nodes.py` (combined-pipeline nodes + routing), `nodes_expanded.py` (one-node-per-step
+  retrieval for the dedicated Studio graphs), `builder.py` (head/tail assembly +
+  `build_graph`/`build_combined_graph`), `generation.py` (structured `ClinicalAnswer` LLM).
+- `rag.py` — retrieval/generation primitives: clients, embeddings, retrieve/retrieve_hybrid,
+  rerank, refine, search, validate, assess, generate_answer (raw version), SYS_PROMPT,
+  build_user_prompt, model constants.
 - `evidence.py` — answer and sources formatting.
 - `evaluation.py` — RAGAS evaluation. **A SINGLE set `EVAL_SET` (151 questions)** with a
   `tier` field per question (**simple / single_hop / multihop / adversarial**) → measures
@@ -184,8 +193,8 @@ keeping strict grounding + validate.
 - App (interactive CLI): `.venv\Scripts\python.exe main.py`
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → opens Studio (EU). See steps in the
   **Trace View** tab (not Turn View).
-- **Choosing the retrieval strategy (Phase 4):** `main.py` compiles FOUR graphs and
-  `langgraph.json` registers them so Studio shows a **graph selector**:
+- **Choosing the retrieval strategy (Phase 4):** `main.py` compiles FOUR graphs (via
+  `pipeline/builder.py`) and `langgraph.json` registers them so Studio shows a **graph selector**:
   - **Dedicated graphs** `app_baseline` / `app_iterative` / `app_graph` (build_graph(mode)):
     each one contains ONLY its architecture, with retrieval **EXPANDED into its real nodes**
     (teaching view) instead of hiding it behind a single `retrieve`:
@@ -212,8 +221,9 @@ keeping strict grounding + validate.
   - **Combined graph** `app` (build_combined_graph): the three routes in one graph; it exposes
     a `context_schema` (`ConfigSchema`) with the **`retrieval_mode`** field as a **dropdown**
     in the run config panel (live choice). Also used by the CLI.
-  - **Shared head/tail** are factored into `_add_common`; the retrieval section into
-    `_add_retrieval(mode)`. This is what makes the pipeline RETRIEVAL-AGNOSTIC: each retrieval
+  - **Shared head/tail** are factored into `_add_common` (in `pipeline/builder.py`); the
+    retrieval section into `_add_retrieval_collapsed/_expanded(mode)`. This is what makes the
+    pipeline RETRIEVAL-AGNOSTIC: each retrieval
     node honours the SAME state contract (fills `contexts`/`chunk_index`/`formatted_context`)
     and the tail only reads that contract, never anything mode-specific.
   - **Via env / CLI:** `RETRIEVAL_MODE` (env var, default `"graph"`) is the combined graph's
@@ -404,6 +414,16 @@ new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS
 
 ## Conventions
 
+- **Software-architecture fundamentals (ALWAYS, non-negotiable):** every change must uphold
+  sound software-architecture principles — this is a portfolio repository and the code quality
+  is itself on display. Concretely: **separation of concerns / single responsibility** (each
+  module and function does one thing; e.g. `rag.py` = primitives, `pipeline/` = the graph,
+  `evidence.py` = formatting), **no leaky abstractions** (retrieval honours the `RAGState`
+  contract; the tail never reads anything mode-specific), **DRY** (share primitives, do not
+  duplicate logic across tracks), small and readable functions, meaningful names, and comments
+  that explain a non-obvious WHY rather than restating the code. When adding or modifying code,
+  keep the design clean: extend the right module, factor shared logic, and prefer the simplest
+  structure that preserves the behaviour — never trade architecture away for a quick patch.
 - **Language policy (updated 2026-07-02):** the code and documentation are in **English** so
   non-Spanish-speaking colleagues can read them. Concretely:
   - **English:** all identifiers, comments and docstrings; the project documents (`README.md`,
@@ -411,7 +431,7 @@ new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS
     output (argparse help, `print`/stderr messages, developer `SystemExit`/error messages in
     the scripts).
   - **Spanish (do NOT translate — it would affect functionality or is user/domain-facing):**
-    everything shown to the doctor (the `MSG_*` messages in `main.py`, the evidence panel
+    everything shown to the doctor (the `MSG_*` messages in `pipeline/config.py`, the evidence panel
     labels in `evidence.py`, the CLI `input()` prompt); the LLM prompts (`SYS_PROMPT`,
     `build_user_prompt`, and the system prompts of refine/assess/validate/plan/reflect and of
     `contextualize.py`); the guideline/chunk content (`data/markdown/`, `data/textos/`,

@@ -1,17 +1,10 @@
-"""
-agentic/iterative.py — Track A (Phase 4): ITERATIVE / AGENTIC retrieval for MULTI-HOP.
+"""Track A (Phase 4): iterative / agentic retrieval for MULTI-HOP questions.
 
-Classic single-shot RAG retrieves evidence for one hop and misses the rest. Here an LLM
-(a) decomposes the question into normalized sub-queries (PLAN) and, after a first round,
-(b) judges whether the gathered evidence is enough and, if not, emits the next sub-query
-(REFLECT — self-ask). Each sub-query reuses the existing hybrid + reranker; results are
-pooled (deduped by chunk_id) and finally reranked against the ORIGINAL question. Zero
-re-indexing: it only changes HOW we query the store that Qdrant already holds.
-
-Shared primitives are imported from the PARENT module `rag.py` (retrieve_rerank, rerank,
-search, the rephrase/abbreviation machinery). This module only adds the loop, so the two
-Phase-4 approaches (agentic here, graph in ../graph/) stay cleanly separated while sharing
-the same retrieval core and the same downstream generate -> validate -> evidence.
+An LLM (a) decomposes the question into normalized sub-queries (PLAN) and, after a first
+round, (b) judges whether the pooled evidence suffices and, if not, emits the next sub-query
+(REFLECT — self-ask). Each sub-query reuses the hybrid + reranker; results are pooled (dedup
+by chunk_id) and finally reranked against the ORIGINAL question. Zero re-indexing — it only
+changes HOW we query the store Qdrant already holds. Shared primitives come from rag.py.
 """
 from typing import cast
 from concurrent.futures import ThreadPoolExecutor
@@ -19,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
-# Shared retrieval core lives in the parent module.
 from rag import (retrieve_rerank, rerank, search, REPHRASE_MODEL, _ABBREV_LIST,
                  _get_reranker, _get_bm25)
 
@@ -135,9 +127,8 @@ def iterative_search(query: str, top_k: int = 8, max_hops: int = MAX_HOPS,
 
     pool: dict = {}
     subs = plan["sub_queries"][:max_hops]
-    # The planned sub-queries are independent, so retrieve+rerank them IN PARALLEL (each does
-    # an embedding + Qdrant + cross-encoder). Pre-warm the local models first so the workers
-    # don't race on the lazy load. ex.map preserves input order -> dedup is deterministic.
+    # Independent sub-queries -> retrieve+rerank IN PARALLEL. Pre-warm the local models so the
+    # workers don't race on the lazy load; ex.map preserves order, so dedup is deterministic.
     _get_reranker(); _get_bm25()
     with ThreadPoolExecutor(max_workers=max(1, len(subs))) as ex:
         for payloads in ex.map(lambda sq: retrieve_rerank(sq, top_k=per_hop), subs):

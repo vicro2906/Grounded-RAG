@@ -7,10 +7,8 @@ import difflib
 
 WIDTH = 72
 
-# The formatted answer is DATA consumed by several frontends (LangGraph Studio, a
-# future web app, the API), not just the terminal. That is why NO ANSI color codes are
-# embedded: they would clutter any non-terminal consumer. Color is a presentation
-# concern at print time, not part of the content.
+# The formatted answer is DATA consumed by several frontends (Studio, a future web app, the
+# API), not just the terminal — so no ANSI codes are embedded. Color is a print-time concern.
 class C:
     RESET = BOLD = DIM = BLUE = GREEN = GRAY = YELLOW = ""
 

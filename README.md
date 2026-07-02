@@ -169,8 +169,9 @@ QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py   # A/B 
 
 | Path | What it is |
 |------|--------|
-| `main.py` | LangGraph graph + structured generation (entry point). |
-| `rag.py` | Retrieval pipeline: hybrid, rerank, refine, validate, prompts. |
+| `main.py` | Entry point: compiles the graphs, wires runtime concerns and the CLI. |
+| `pipeline/` | The LangGraph app: state, nodes, graph assembly and structured generation. |
+| `rag.py` | Retrieval/generation primitives: hybrid, rerank, refine, validate, prompts. |
 | `evidence.py` | Answer formatting and sources panel with literal citations. |
 | `evaluation.py` | RAGAS evaluation (`EVAL_SET`, per tier). |
 | `agentic/` · `graph/` | Iterative retrieval (Track A) and LightRAG graph retrieval (Track B). |

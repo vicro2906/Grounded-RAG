@@ -1,28 +1,16 @@
-"""
-graph/lightrag_track.py — Track B (Phase 4): LightRAG GRAPH layer for MULTI-HOP questions.
+"""Track B (Phase 4): LightRAG GRAPH layer for MULTI-HOP questions.
 
-Builds an entity-relation knowledge graph over the SAME chunks already indexed in Qdrant
-(LightRAG's default FILE storage, no new infra) and exposes:
-
-    graph_search(query) -> list[payload]   # our chunk dicts, with metadata
-
-so the rest of the pipeline (generate -> validate -> evidence, including the literal-
-citation panel) keeps working UNCHANGED. LightRAG is used ONLY to SELECT source chunks
-via graph traversal (aquery_data); it does NOT write the final answer — our gpt-4o
-generator + validator do, exactly as in the baseline and the agentic track. This is the
-design decision that preserves grounding/citations: the synthetic entity/relation
-descriptions are never cited, only the original chunks they point to.
-
-Shared resources come from the PARENT folder: the reranker from `rag.py`, the corpus from
-`chunks/chunks.jsonl`, and the graph store at `lightrag_store/` (all at project root).
+Builds an entity-relation graph over the SAME chunks indexed in Qdrant (LightRAG file
+storage, no new infra) and exposes `graph_search(query) -> list[payload]`, so the rest of the
+pipeline (generate -> validate -> evidence, citations included) is UNCHANGED. LightRAG only
+SELECTS source chunks via traversal; our gpt-4o generator writes the answer. This is what
+preserves grounding: the synthetic entity/relation descriptions are never cited, only the
+original chunks they point to. The LLM/embedding are isolated in LLM_COMPLETE / _embed so
+switching to Azure OpenAI (EU, for GDPR) is a one-line change.
 
 Usage:
     1. Build the graph once:   .venv\\Scripts\\python.exe -m graph.lightrag_track
     2. Evaluate it:            set PIPELINE = "graph" in evaluation.py and run it.
-
-RGPD / encapsulation: the LLM and embedding are the SAME providers as the rest of the
-system and are isolated in LLM_COMPLETE / _embed below, so switching to Azure OpenAI (EU)
-is a one-line change (azure_openai_complete / azure_openai_embed + AZURE_* env vars).
 """
 import os
 import sys
@@ -60,13 +48,12 @@ CHUNKS_PATH = os.path.join(ROOT, "chunks", "chunks.jsonl")  # shared corpus (par
 EMBEDDING_MODEL = "text-embedding-3-large"                  # same as Qdrant -> 3072 dims
 EMBEDDING_DIM = 3072
 
-# LLM used by LightRAG for entity/relation extraction (indexing) and keyword extraction
-# (query). gpt-4o-mini is enough and cheap for a small, stable corpus. Swap both funcs
-# for the azure_openai_* variants when RGPD requires a private EU model.
+# LLM for entity/relation extraction (indexing) and keyword extraction (query). gpt-4o-mini
+# is enough and cheap for a small, stable corpus. Swap for azure_openai_* when GDPR requires it.
 LLM_COMPLETE = gpt_4o_mini_complete
 
-# Build-time concurrency (one-time index): defaults are tiny (max_parallel_insert=2,
-# llm_model_max_async=4) which makes the build crawl. These do not affect query latency.
+# Build-time concurrency (one-time index): the defaults (2 / 4) make the build crawl. These
+# do not affect query latency.
 MAX_PARALLEL_INSERT = 8
 LLM_MAX_ASYNC = 16
 EMBED_MAX_ASYNC = 16
@@ -77,11 +64,9 @@ async def _embed(texts):
 
 
 def _traceable_llm(func):
-    """At QUERY time, wrap LightRAG's internal LLM (keyword extraction) with LangSmith's
-    @traceable so it nests under the graph run instead of being invisible — LightRAG uses
-    its own OpenAI client, which our wrap_openai in main.py does not reach. No-op when
-    there is no LANGSMITH_API_KEY or langsmith is unavailable, so nothing breaks offline.
-    NOT applied during index BUILD (no parent run to nest under)."""
+    """Wrap LightRAG's internal keyword-extraction LLM with LangSmith's @traceable so it nests
+    under the graph run (LightRAG uses its own OpenAI client, which main.py's wrap_openai does
+    not reach). No-op without LANGSMITH_API_KEY; not applied during the index build."""
     if not os.environ.get("LANGSMITH_API_KEY"):
         return func
     try:
@@ -120,10 +105,8 @@ async def _build_index() -> None:
     await initialize_pipeline_status()
 
     chunks = _load_chunks()
-    # Insert each chunk as its own document (they are < chunk_token_size, so each stays a
-    # single LightRAG chunk). We pass our chunk_id as the id and source_file as file_path
-    # for traceability; mapping back at query time is by exact content anyway. Re-running
-    # resumes: already-processed docs are skipped and the LLM cache makes redo cheap.
+    # Each chunk is its own document (all < chunk_token_size, so each stays one LightRAG
+    # chunk). Re-running resumes: processed docs are skipped and the LLM cache makes redo cheap.
     await rag.ainsert(
         input=[c["text"] for c in chunks],
         ids=[c["chunk_id"] for c in chunks],
@@ -170,10 +153,8 @@ def _ensure_rag():
 
 
 def _shutdown() -> None:
-    """Clean teardown at process exit: LightRAG leaves background workers (priority-limit
-    queues + a health check) on the loop; without this they raise 'Event loop is closed'
-    noise when the interpreter tears down. We finalize storages, cancel any pending tasks,
-    then close the loop."""
+    """Clean teardown at process exit: finalize storages, cancel LightRAG's leftover background
+    workers, then close the loop (otherwise they raise 'Event loop is closed' noise)."""
     global _loop, _rag
     if _loop is None:
         return
@@ -229,12 +210,10 @@ def _merge_dedup(*lists) -> list:
 
 
 def graph_traverse(query: str, chunk_top_k: int = 20) -> list:
-    """STEP 1 of Track B in isolation: run LightRAG's ENTITY + RELATION traversal (mode=
-    'hybrid' = entity+relation, NOT vector hybrid; it deliberately drops LightRAG's naive
-    DENSE chunk search so we plug in our own) and map the reached source chunks back to our
-    payloads. This is where LightRAG calls its internal LLM for keyword extraction (traced
-    via _make_rag(trace_llm=True)). Exposed on its own so the graph node in main.py can show
-    the traversal as a distinct step instead of hiding it inside graph_search."""
+    """LightRAG's ENTITY + RELATION traversal (mode='hybrid' = entity+relation, NOT vector
+    hybrid; it drops LightRAG's naive dense chunk search so we plug in our own), mapping the
+    reached source chunks back to our payloads. Exposed on its own so the expanded graph can
+    show the traversal as a distinct step."""
     loop, rag = _ensure_rag()
     data = loop.run_until_complete(rag.aquery_data(
         query,
@@ -245,13 +224,9 @@ def graph_traverse(query: str, chunk_top_k: int = 20) -> list:
 
 
 def graph_extract_keywords(query: str, mode: str = "hybrid") -> dict:
-    """STEP 1a (the LLM call inside the graph traversal). LightRAG reads the query and
-    extracts TWO keyword sets that drive the search:
-      - HIGH-LEVEL keywords: global/abstract themes -> matched against the RELATION vectors.
-      - LOW-LEVEL keywords:  specific/concrete terms -> matched against the ENTITY vectors.
-    Exposed on its own so the graph node can show this step (and the two keyword lists)
-    separately, instead of hiding it inside graph_traverse. Replicates exactly how LightRAG
-    calls it internally (global_config = asdict(self), hashing_kv = its LLM cache)."""
+    """The LLM step of the traversal: extract HIGH-LEVEL keywords (-> matched to RELATION
+    vectors) and LOW-LEVEL keywords (-> ENTITY vectors). Exposed on its own so the expanded
+    graph can show this step; replicates how LightRAG calls it internally."""
     from dataclasses import asdict
     from lightrag.operate import extract_keywords_only
     loop, rag = _ensure_rag()
@@ -264,12 +239,10 @@ def graph_extract_keywords(query: str, mode: str = "hybrid") -> dict:
 
 def graph_select(query: str, hl_keywords: list, ll_keywords: list,
                  chunk_top_k: int = 20) -> dict:
-    """STEP 1b (the vector search + graph walk, NO LLM). With the keywords already extracted,
-    LightRAG: (1) embeds them and does cosine similarity — low-level vs the ENTITY store,
-    high-level vs the RELATION store — to pick the nearest entities/relations; (2) walks the
-    graph around them; (3) gathers, via source_id, the source text chunks. Passing the
-    keywords makes LightRAG SKIP its own extraction (no LLM here). Returns the chunks mapped
-    to our payloads plus the selected entities/relationships (for visibility in the state)."""
+    """Vector search + graph walk (NO LLM). With the keywords pre-extracted, LightRAG cosine-
+    matches low-level vs the ENTITY store and high-level vs the RELATION store, walks the graph
+    and gathers the source chunks via source_id. Passing the keywords makes it skip its own
+    extraction. Returns the mapped payloads + the selected entities/relationships (for the state)."""
     loop, rag = _ensure_rag()
     param = QueryParam(mode="hybrid", chunk_top_k=chunk_top_k, enable_rerank=False,
                        hl_keywords=hl_keywords or [], ll_keywords=ll_keywords or [])
@@ -284,20 +257,13 @@ def graph_select(query: str, hl_keywords: list, ll_keywords: list,
 
 def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: int = 10,
                  hybrid_query: str | None = None) -> list:
-    """Track B retriever (single-call API, used by evaluation.py and the COMBINED graph) —
-    TWO complementary sources of chunks, then one rerank:
-
-      1. GRAPH (graph_traverse): chunks reached via ENTITY + RELATION traversal — the
-         multi-hop signal.
-      2. our HYBRID VECTOR search (`rag.retrieve_hybrid`: dense + sparse BM25, RRF on Qdrant)
-         on the rephrased query — this REPLACES LightRAG's dense-only complement with a
-         dense+lexical one (BM25 helps with the guides' heavy abbreviation use).
-
-    Both are merged (dedup by chunk_id) and reranked to top_k. The dedicated graph in main.py
-    runs these same steps as separate, visible nodes; this function is the collapsed
-    equivalent. The graph traversal and the hybrid complement are independent (hybrid only
-    needs the rephrased query), so they run IN PARALLEL: the graph walk uses LightRAG's event
-    loop while the hybrid branch hits Qdrant/OpenAI on another thread."""
+    """Track B retriever (collapsed single-call API, used by the eval and the combined graph).
+    Two complementary chunk sources, merged (dedup by chunk_id) and reranked to top_k:
+      1. GRAPH traversal (graph_traverse) — the multi-hop signal.
+      2. our HYBRID search (dense + BM25 RRF) on the rephrased query — replaces LightRAG's
+         dense-only complement (BM25 helps with the guides' heavy abbreviation use).
+    The two are independent, so they run IN PARALLEL (graph on LightRAG's loop, hybrid on a
+    thread hitting Qdrant/OpenAI)."""
     _get_reranker(); _get_bm25()  # pre-warm local models before the parallel branches
     with ThreadPoolExecutor(max_workers=2) as ex:
         fut_graph = ex.submit(graph_traverse, query, chunk_top_k)

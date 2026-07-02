@@ -1,10 +1,7 @@
-"""
-abbreviations.py — ABBREVIATION -> full name dictionary from the GeSIDA HIV guidelines.
+"""ABBREVIATION -> full name dictionary from the GeSIDA HIV guidelines.
 
-Used by the rephrase node (rag.refine) to normalize query terms: since the guidelines
-use both abbreviations and full names (e.g. "DTG" appears far more often than
-"dolutegravir", but both exist), the query is rewritten including BOTH forms to match
-the retrievable text. The values stay in Spanish because they are guideline terms.
+Used to normalize query terms into BOTH forms (the guides use abbreviations and full names
+interchangeably). Values stay in Spanish because they are guideline terms.
 """
 
 ABBREVIATIONS = {

@@ -1,10 +1,16 @@
+"""Retrieval + generation primitives shared by every pipeline and track.
+
+Holds the OpenAI/Qdrant clients, hybrid search, the reranker, the rephrase/validate/assess
+LLM steps and the prompts. The `agentic/` (iterative) and `graph/` (LightRAG) tracks import
+from here, as does main.py's graph. LLM calls are isolated so they can be swapped to Azure
+OpenAI (private EU model) the day GDPR requires it.
+"""
 import os
 import sys
 import json
 from openai import OpenAI
 
-# The Windows console uses cp1252 by default and breaks when printing accents,
-# 'µ' or the '═'/'─' boxes. Force UTF-8 on stdout.
+# The Windows console defaults to cp1252 and breaks accents / the '═'/'─' boxes. Force UTF-8.
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 except (AttributeError, ValueError):
@@ -20,11 +26,9 @@ QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 client = OpenAI(api_key = OPENAI_API_KEY)
-# Qdrant Cloud exposes the REST API on BOTH 6333 (the client's default) and 443. We default
-# to 443 because restrictive networks (corporate/campus WiFi, some VPNs) often block the
-# non-standard 6333 outbound while 443 is universally open — symptom is
-# `ResponseHandlingException(ConnectTimeout('timed out'))` on every query. Override with
-# QDRANT_PORT if needed (e.g. 6333 for a self-hosted instance).
+# Default to 443 (not the client's default 6333): restrictive networks often block outbound
+# 6333 while 443 is universally open (symptom: ConnectTimeout on every query). Override with
+# QDRANT_PORT for e.g. a self-hosted instance on 6333.
 QDRANT_PORT = int(os.environ.get("QDRANT_PORT", "443"))
 qdrant = QdrantClient(
     url = QDRANT_URL,
@@ -35,14 +39,12 @@ qdrant = QdrantClient(
 
 # --- GPU enablement for the cross-encoder (must run BEFORE onnxruntime/fastembed import) ---
 def _init_cuda_dlls() -> None:
-    """Make onnxruntime-gpu find the pip-installed CUDA/cuDNN DLLs on Windows. The nvidia-*
-    wheels drop their DLLs under site-packages/nvidia/*/bin, which is NOT on the default DLL
-    search path, so the CUDA provider silently fails to load and falls back to CPU. We add
-    those dirs AND pre-load the DLLs into the process (so dependency resolution matches them
-    by already-loaded module name) — that combination is what reliably initializes the CUDA
-    session. No-op off Windows or if the nvidia wheels / GPU are not present.
-    Requires onnxruntime-gpu matching the CUDA major of the nvidia-*-cuXX wheels (here CUDA 12:
-    onnxruntime-gpu 1.22.x + nvidia-*-cu12). Enabled only when RERANK_DEVICE is cuda/auto."""
+    """Let onnxruntime-gpu find the pip-installed CUDA/cuDNN DLLs on Windows. The nvidia-*
+    wheels drop them under site-packages/nvidia/*/bin, which is NOT on the default DLL search
+    path, so the CUDA provider silently falls back to CPU. Adding those dirs AND pre-loading
+    the DLLs (so deps resolve by already-loaded module name) is what reliably starts the CUDA
+    session. No-op off Windows or without the nvidia wheels / a GPU. Needs onnxruntime-gpu
+    matching the CUDA major of the wheels (here CUDA 12). Only when RERANK_DEVICE is cuda/auto."""
     if sys.platform != "win32":
         return
     import glob, ctypes
@@ -71,27 +73,22 @@ if os.environ.get("RERANK_DEVICE", "cpu").lower() in ("cuda", "auto"):
 # --- Hybrid search (dense semantic + sparse lexical BM25) ---
 from fastembed import SparseTextEmbedding
 
-COLLECTION_DENSE  = "guias_vih"            # original collection (dense only)
-# Active hybrid collection (dense + sparse BM25). DEFAULT = the Contextual-Retrieval build
-# (guias_vih_hibrida_ctx): EVERY script that retrieves chunks uses it through retrieve_hybrid
-# (baseline, iterative and the graph's hybrid complement), so this one constant repoints them
-# all. Overridable via env to A/B against the NON-contextual build without editing code:
-# QDRANT_COLLECTION=guias_vih_hibrida python ...
+COLLECTION_DENSE  = "guias_vih"            # original collection (dense only, backup)
+# Active hybrid collection (dense + sparse BM25); DEFAULT = the Contextual-Retrieval build.
+# retrieve_hybrid is the single point every retriever goes through, so this one constant
+# repoints them all. Override via QDRANT_COLLECTION to A/B against the non-contextual build.
 COLLECTION_HYBRID = os.environ.get("QDRANT_COLLECTION", "guias_vih_hibrida_ctx")
 
-# Centralized LLM models: the final clinical answer uses a strong model (quality is
-# critical); rephrasing is a simple task and runs on a cheap one.
+# Centralized LLM models. The clinical answer uses a strong model (quality is critical);
+# rephrasing/validation run on a cheap one. Clarification-assessment also uses the strong
+# model: it leans on clinical knowledge, where gpt-4o-mini was inconsistent at the reasoning.
 GENERATION_MODEL = "gpt-4o"
 REPHRASE_MODEL   = "gpt-4o-mini"
-VALIDATION_MODEL = "gpt-4o-mini"   # grounding/relevance judge (safety net)
-# Clarification assessment: deciding WHICH patient data to ask for leans on clinical knowledge
-# (now the primary vía), where gpt-4o-mini was inconsistent at the structured reasoning. Use the
-# strong model — a better question-asker extracts more relevant detail (the whole point).
+VALIDATION_MODEL = "gpt-4o-mini"
 ASSESS_MODEL     = GENERATION_MODEL
 
-# A lock guards the lazy model loads: retrieval now runs sub-queries / branches in parallel
-# (iterative fan-out, graph traverse∥hybrid), so two threads could hit a cold model at once.
-# Double-checked locking keeps the fast path lock-free once the model is loaded.
+# A lock guards the lazy model loads: retrieval runs sub-queries / branches in parallel, so two
+# threads could hit a cold model at once. Double-checked locking keeps the fast path lock-free.
 import threading
 _model_lock = threading.Lock()
 
@@ -106,7 +103,7 @@ def _get_bm25() -> SparseTextEmbedding:
     return _bm25
 
 def get_embedding(text: str):
-    """Transform the query into an embedding to compare against the vector database."""
+    """Embed the query to compare it against the vector database."""
     response = client.embeddings.create(model = "text-embedding-3-large", input = text)
     return response.data[0].embedding
 
@@ -149,10 +146,9 @@ def retrieve_hybrid(query: str, top_k: int = 5, prefetch_limit: int = 20):
 
 # --- Reranker (local, multilingual cross-encoder) ---
 RERANKER_MODEL = "jinaai/jina-reranker-v2-base-multilingual"
-# Device for the cross-encoder. Default "cpu" = current behaviour. Set RERANK_DEVICE=cuda to
-# run it on an NVIDIA GPU (needs `onnxruntime-gpu` + CUDA/cuDNN installed; see CLAUDE.md). It
-# only helps THIS local model — embeddings are OpenAI (remote) and generation is gpt-4o. If
-# CUDA is requested but unavailable, we fall back to CPU instead of crashing.
+# Device for the cross-encoder. RERANK_DEVICE=cuda runs it on an NVIDIA GPU (needs
+# onnxruntime-gpu + CUDA/cuDNN; see CLAUDE.md); if CUDA is unavailable we fall back to CPU
+# instead of crashing. Only this local model is affected (embeddings/generation are remote).
 RERANK_DEVICE = os.environ.get("RERANK_DEVICE", "cpu").lower()  # "cpu" | "cuda" | "auto"
 _reranker = None
 def _get_reranker():
@@ -185,15 +181,11 @@ def warmup() -> None:
         pass
 
 
-# The cross-encoder pads every item in a batch to the LONGEST one on CPU, so a single
-# long chunk makes the whole rerank crawl (~128 s observed). We only need a strong
-# relevance SIGNAL, not the full text, so we score a truncated prefix while still
-# RETURNING the full payloads. Measured effect: ~128 s -> ~5 s.
-# This is the dominant cost of retrieval on CPU and scales ~linearly with the length:
-# 20 docs take ~3.8 s @512, ~1.8 s @256, ~1.0 s @128. Tunable via RERANK_SCORE_CHARS, but
-# the DEFAULT stays 512 because lowering it shifts the top-8 (measured: 256 changes up to
-# ~3/8 chunks on some queries) and quality/no-hallucination is priority #1. The real fix for
-# rerank latency is the GPU (see RERANK_DEVICE) — it cuts each call ~10-50x.
+# On CPU the cross-encoder pads every batch item to the LONGEST one, so one long chunk makes
+# the whole rerank crawl (~128 s observed). We only need a relevance SIGNAL, so we score a
+# truncated prefix (returning the full payloads): ~128 s -> ~5 s. The default stays 512 —
+# lowering it shifts the top-8 (256 changes up to ~3/8 chunks) and no-hallucination is
+# priority #1. The real fix for the latency is the GPU (see RERANK_DEVICE).
 RERANK_SCORE_CHARS = int(os.environ.get("RERANK_SCORE_CHARS", "512"))
 
 def rerank(query: str, payloads: list, top_k: int = 5) -> list:
@@ -218,10 +210,9 @@ def retrieve_rerank(query: str, top_k: int = 5, candidates: int = 20) -> list:
 
 
 # ---------------------------------------------------------------------------
-# REPHRASING — query preprocessing to improve retrieval.
-#   Rewrites the question WITHOUT adding new content and normalizes terms: since the
-#   guidelines use both abbreviations and full names, it includes BOTH forms
-#   (e.g. "bictegravir (BIC)") to match the retrievable text.
+# REPHRASING — query preprocessing: rewrite the question WITHOUT adding content and normalize
+# terms into BOTH forms «full name (ABBR)» (the guides use both), to improve retrieval. Also
+# the cheap half of the clarification step (known_facts / candidate_modifiers).
 # ---------------------------------------------------------------------------
 from typing import cast
 from langchain_openai import ChatOpenAI
@@ -284,12 +275,9 @@ def _facts_to_dict(facts: list[str]) -> dict:
 
 
 def refine(query: str) -> dict:
-    """Single LLM call that (a) rewrites the query for the retriever without adding
-    info and normalizing terms, (b) classifies whether it belongs to the HIV domain, and
-    (c) screens the patient data already present in the question (known_facts) and the
-    clinical modifiers the question might still need (candidate_modifiers) — the cheap half
-    of the hybrid clarification step. Returns
-    {"query": str, "in_domain": bool, "known_facts": dict, "candidate_modifiers": list}.
+    """Single LLM call that (a) rewrites the query (no new info, normalizing terms), (b)
+    classifies the HIV domain, and (c) screens the patient data present in the question and
+    the modifiers it might need. Returns {query, in_domain, known_facts, candidate_modifiers}.
     On LLM failure it does not block: returns the original query, in_domain=True, no facts."""
     try:
         out = cast(_Refined,
@@ -307,27 +295,18 @@ def rephrase(query: str) -> str:
 
 
 def search(query: str, top_k: int = 5) -> list:
-    """Full retrieval pipeline (Phase 2 + 3): rephrase -> hybrid -> reranker."""
+    """Baseline retrieval: rephrase -> hybrid -> reranker."""
     return retrieve_rerank(rephrase(query), top_k=top_k)
 
 
-# Track A (iterative/agentic, multi-hop) lives in ../agentic/iterative.py and Track B
-# (LightRAG graph) in ../graph/lightrag_track.py. Both import the shared primitives above
-# (retrieve_hybrid, rerank, retrieve_rerank, search) from this parent module.
-
-
 def build_context(context: list):
-    """Build a formatted, numbered text out of the retrieved chunks."""
-    final_context = ""
-    chunk_index = {}
-    for i in range(len(context)):
-        chunk = context[i]
-        chunk_index[i+1] = chunk
-        final_context += f"[{i+1}] {chunk['text']}\n\n"
-    return chunk_index, final_context
+    """Number the retrieved chunks: return ({n: chunk}, "[1] text\\n\\n[2] …") for the prompt."""
+    chunk_index = {i: chunk for i, chunk in enumerate(context, 1)}
+    formatted = "".join(f"[{i}] {chunk['text']}\n\n" for i, chunk in chunk_index.items())
+    return chunk_index, formatted
 
 
-# Reusable system prompt (kept in Spanish: drives Spanish output over Spanish guides).
+# System prompt (Spanish: it drives Spanish output over the Spanish guides).
 SYS_PROMPT = """
     Eres un asistente clínico especializado en el manejo del VIH. Respondes preguntas médicas utilizando EXCLUSIVAMENTE la información de los fragmentos de guías clínicas que te proporciona el sistema RAG.
 
@@ -403,9 +382,8 @@ def build_user_prompt(query: str, context: str, clinical_facts: dict | None = No
 
 
 def generate_answer(query: str, context: str):
-    """Call the LLM to get the answer conditioned on the retrieved data."""
-
-    sys_prompt = SYS_PROMPT
+    """Raw (non-LangChain) structured generation. Used by the evaluation; the graph uses the
+    LangChain structured LLM in pipeline/generation.py."""
     prompt = build_user_prompt(query, context)
     ANSWER_SCHEMA = {
         "name": "clinical_answer",
@@ -438,25 +416,22 @@ def generate_answer(query: str, context: str):
     }
     response = client.chat.completions.create(
         model= GENERATION_MODEL,
-        messages = [{"role": "system", "content": sys_prompt},
+        messages = [{"role": "system", "content": SYS_PROMPT},
                     {"role": "user", "content": prompt}],
         temperature = 0.2,
         response_format = {"type": "json_schema","json_schema": ANSWER_SCHEMA}  # type: ignore[arg-type]
         )
 
-    # return the structured answer dict parsed from the JSON
     content = response.choices[0].message.content
     if content is None:
-        raise ValueError("The model returned no content (content=None)")
-    else:
-        return json.loads(content)
+        raise ValueError("The model returned no content")
+    return json.loads(content)
 
 
 # ---------------------------------------------------------------------------
-# VALIDATION — LLM judge that checks RELEVANCE (the answer addresses the question)
-# and FAITHFULNESS/grounding (every claim is supported by the context, even if not a
-# literal quote). It is the anti-hallucination safety net. Literal citation integrity
-# is NOT validated here: evidence.format_answer already handles it.
+# VALIDATION — anti-hallucination LLM judge: RELEVANCE (answers the question) + FAITHFULNESS
+# (every claim is supported by the context). Literal-citation integrity is NOT checked here;
+# evidence.format_answer already handles that.
 # ---------------------------------------------------------------------------
 _VALIDATE_SYS = f"""Eres un VALIDADOR de respuestas clínicas sobre VIH. Recibes una PREGUNTA, un CONTEXTO (fragmentos de guías) y una RESPUESTA. Decide si la respuesta es APTA según DOS criterios:
 
@@ -512,20 +487,15 @@ def validate(question: str, answer: dict, formatted_context: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# CLARIFICATION ASSESSMENT — decides whether to ask the doctor for missing patient data
-# before answering. It reasons from TWO sources, with CLINICAL KNOWLEDGE as the PRIMARY one:
-#   (1) IMPLICIT CLINICAL KNOWLEDGE (clinically_relevant, PRIMARY): the established modifiers
-#       that change the answer to THIS kind of question, INDEPENDENT of what was retrieved.
-#       Rationale (decided with the user): the retriever's silent recall miss is both more
-#       likely and more harmful than the question-model erring — a missed modifier yields a
-#       confident-but-generic answer (silent), whereas a slightly-off question is visible and
-#       recoverable (the doctor flags it as irrelevant; asked_questions stops repeats) and can
-#       never corrupt the answer, which is still re-retrieved and grounding-validated. So we do
-#       NOT anchor the QUESTIONS on the retrieval; only the ANSWER stays evidence-grounded.
-#   (2) EVIDENCE (branches_on, COMPLEMENT): extra context-specific dimensions the retrieved
-#       guidance conditions on — adds specificity when retrieval is good.
-# already_covered subtracts known facts + already-asked questions. questions are ordered by
-# CLINICAL IMPACT (not by source). The cheap screen (candidate_modifiers, known_facts) is in refine().
+# CLARIFICATION ASSESSMENT — decides whether to ask the doctor for missing patient data before
+# answering, reasoning from TWO sources with CLINICAL KNOWLEDGE as the PRIMARY one:
+#   (1) clinically_relevant (PRIMARY): modifiers that change the answer to THIS kind of
+#       question, independent of what was retrieved. Rationale: the retriever's silent recall
+#       miss is likelier and more harmful than an off question (which is visible, bounded by
+#       asked_questions, and can never corrupt the re-retrieved, grounding-validated answer).
+#   (2) branches_on (COMPLEMENT): extra dimensions the retrieved guidance conditions on.
+# already_covered subtracts known facts + already-asked questions; questions are ordered by
+# clinical impact. The cheap screen (candidate_modifiers / known_facts) lives in refine().
 # ---------------------------------------------------------------------------
 _ASSESS_SYS = f"""Eres un componente que decide si, ANTES de responder, conviene pedir al médico algún dato del paciente. Recibes una PREGUNTA, el CONTEXTO recuperado (fragmentos de guías de VIH), los DATOS YA CONOCIDOS del paciente, unos MODIFICADORES CANDIDATOS de un cribado previo y las PREGUNTAS YA FORMULADAS. NO respondas la pregunta.
 
@@ -567,14 +537,10 @@ def assess(question: str, formatted_context: str, known_facts: dict | None = Non
            candidate_modifiers: list | None = None, asked_questions: list | None = None,
            max_questions: int = 1) -> dict:
     """Decide whether to ask the doctor for missing patient data before answering. Returns
-    {"needs_clarification": bool, "questions": [...], "branches_on": [...],
-    "clinically_relevant": [...], "already_covered": [...]} — the reasoning fields are kept
-    for transparency (visible in the trace: which dimensions came from the evidence vs from
-    clinical knowledge). `asked_questions` are the questions already posed in previous rounds;
-    assess must NOT repeat them (the across-rounds anti-duplicate guard). `max_questions` caps
-    how many questions to ask THIS round (the LLM orders them by priority — evidence first — so
-    we keep the top ones); with max_questions=1 the doctor is asked one at a time. On LLM
-    failure it does NOT block the pipeline: returns needs_clarification=False."""
+    {needs_clarification, questions, branches_on, clinically_relevant, already_covered} — the
+    reasoning fields are kept for the trace. `asked_questions` (previous rounds) must never be
+    repeated; `max_questions` caps how many to ask THIS round (ordered by clinical impact). On
+    LLM failure it does NOT block the pipeline: returns needs_clarification=False."""
     facts = {k: v for k, v in (known_facts or {}).items() if k}
     facts_txt = ("\n".join(f"- {k}: {v}" if v else f"- {k}" for k, v in facts.items())
                  or "(ninguno aportado)")

@@ -1,34 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-contextualize.py
-================
-Contextual Retrieval (Anthropic-style) for the GeSIDA guideline chunks.
+"""Contextual Retrieval (Anthropic-style) for the GeSIDA guideline chunks.
 
-PROBLEM IT SOLVES: when the guides are chunked, each chunk loses the context it came from.
-A fragment that says "it is given at 50 mg/12 h" mentions NEITHER the drug NOR that it is the
-rifampicin regimen; a fragment about "first trimester" may not say "pregnancy". The search
-engine (dense + BM25) then fails to match that chunk to the question even if it is the right one.
+Chunking strips each fragment of its context (e.g. "given at 50 mg/12 h" names neither the
+drug nor the rifampicin regimen), so retrieval fails to match it. For each chunk, gpt-4o-mini
+writes a dense Spanish sentence that situates it within its guide (title + section_path +
+a window of neighbours). That context is PREPENDED for retrieval only (`text_for_retrieval`);
+the literal `text` is kept intact for the citation, so the synthetic text is never cited.
 
-WHAT IT DOES: for each chunk, a cheap LLM (gpt-4o-mini) writes 1-2 Spanish sentences that
-SITUATE the fragment within its guide (what it is about, which section/population it applies to),
-using as context the guide title, the section_path and a WINDOW of neighbouring chunks.
-That context is PREPENDED to the text ONLY for retrieval (`text_for_retrieval`), while the
-literal `text` is kept intact for the CITATION. That is: the synthetic text steers the
-matching, but is NEVER cited (respects priority #1: do not hallucinate / verifiable citation).
-
-OUTPUT: chunks_contextual.jsonl = the same chunks + two new fields:
-  - "context":            the generated sentence(s).
-  - "text_for_retrieval": f"{context}\n\n{text}"  (what the uploader embeds and BM25-indexes).
-Then: python chunks/upload_to_qdrant_hybrid.py chunks/chunks_contextual.jsonl --recreate
-(the uploader already uses text_for_retrieval if present, and stores the literal `text` in the payload).
-
-Resumable: if --out already exists, the already-done chunk_ids are skipped (written incrementally).
+Output: chunks_contextual.jsonl = the chunks + "context" and "text_for_retrieval" fields; feed
+it to upload_to_qdrant_hybrid.py. Resumable (already-done chunk_ids in --out are skipped).
 
 Usage:
-    python chunks/contextualize.py --dry-run                 # estimates cost, no LLM call
-    python chunks/contextualize.py --limit 10                # PROBE: only 10 (measures real cost)
-    python chunks/contextualize.py                           # all (resumable)
+    python chunks/contextualize.py --dry-run     # estimate cost, no LLM call
+    python chunks/contextualize.py --limit 10    # probe: only 10 (measures real cost)
+    python chunks/contextualize.py               # all (resumable)
 """
 
 import argparse

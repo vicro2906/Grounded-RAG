@@ -1,18 +1,12 @@
-"""
-Evaluation of the clinical HIV RAG with RAGAS — single script.
+"""RAGAS evaluation of the clinical HIV RAG.
 
-There is ONE evaluation set (EVAL_SET): every question carries a "tier" (simple /
-single_hop / multihop / adversarial) so the full RAGAS suite can be sliced by question
-type. To run the A/B, pick a retriever with PIPELINE and run; only retrieval varies
-(generation is shared), which is what makes the comparison fair.
+ONE evaluation set (EVAL_SET); every question carries a "tier" (simple / single_hop /
+multihop / adversarial) so the full RAGAS suite can be sliced by question type. To run the
+A/B, pick a retriever with PIPELINE; only retrieval varies (generation is shared), which is
+what makes the comparison fair.
 
-Flow:
-    1. (optional) review/extend the question pools that build EVAL_SET.
-    2. PIPELINE=graph python evaluation.py     # baseline | iterative | graph
-    3. Check ragas_results_<pipeline>.csv (per-question detail) and the per-tier means.
-
-Requirements:
-    ragas, langchain-openai. Env vars loaded from .env (OPENAI_API_KEY, QDRANT_*).
+    PIPELINE=graph python evaluation.py     # baseline | iterative | graph
+    -> results/ragas_results_<pipeline>.csv (per-question detail) + per-tier means.
 """
 
 import os
@@ -37,35 +31,21 @@ from rag import (retrieve, retrieve_hybrid, retrieve_rerank, search, build_conte
                  generate_answer, COLLECTION_HYBRID)
 
 # ===========================================================================
-# A/B CONFIG — pick WHICH retrieval pipeline to run over the single EVAL_SET.
-# Running the SAME questions through different retrievers (generation is shared, so
-# ONLY retrieval varies) is what makes the comparison fair.
-#
-#   PIPELINE (retrieval strategy):
-#     "baseline"  -> search: rephrase + hybrid + reranker (Phases 2-3, current system)
-#     "iterative" -> Track A: self-ask / reflect-retrieve loop (rag.iterative_search)
-#     "graph"     -> Track B: LightRAG graph retrieval (graph.lightrag_retrieve)
-#
-# The dataset is fixed (EVAL_SET, defined below). There is no dataset selector.
-#
-#   COLLECTION (Qdrant): choose which hybrid collection retrieval hits via env
-#     QDRANT_COLLECTION=<name>  (rag.py reads it; DEFAULT "guias_vih_hibrida_ctx", the
-#     Contextual-Retrieval build). To A/B against the non-contextual original WITHOUT edits:
-#     QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py
+# A/B CONFIG — which retrieval pipeline runs over the single EVAL_SET (generation is shared,
+# so only retrieval varies). Which Qdrant collection retrieval hits is set by QDRANT_COLLECTION
+# (rag.py reads it; DEFAULT the Contextual-Retrieval build), so you can A/B collections too.
+#   "baseline"  -> rephrase + hybrid + reranker
+#   "iterative" -> Track A: self-ask / reflect-retrieve loop
+#   "graph"     -> Track B: LightRAG graph retrieval
+# The run always uses the FULL RAGAS suite: gpt-4o generation (sequential, ~30k-TPM bound) +
+# a judge call per chunk for precision, so it is the expensive one — budget for it.
 # ===========================================================================
-PIPELINE = os.environ.get("PIPELINE", "baseline")   # override per A/B run without editing
-
-# The evaluation always runs the FULL RAGAS suite (generation + grounding + retrieval
-# metrics); there are no lean/partial modes. The previous RETRIEVAL_ONLY / RECALL_ONLY
-# shortcuts were removed on purpose so every run reports the complete picture per tier.
-# NB: full = generation with gpt-4o (sequential, ~30k-TPM bound) + a judge call per chunk
-# for context_precision, so a full run over EVAL_SET is the expensive one — budget for it.
+PIPELINE = os.environ.get("PIPELINE", "baseline")
 
 
 def get_pipeline(name: str):
-    """Return the retrieval function for the chosen pipeline. Track A/B retrievers are
-    imported lazily so the baseline keeps working before they exist (and so 'graph' does
-    not require LightRAG to be installed unless you actually run it)."""
+    """Return the retrieval function for the chosen pipeline. Track A/B retrievers are imported
+    lazily (so 'graph' does not require LightRAG unless you actually run it)."""
     if name == "baseline":
         return search
     if name == "iterative":
@@ -91,11 +71,7 @@ from ragas.metrics import (
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 
-# ===========================================================================
-# JUDGE CONFIG
-#   STRONG_JUDGE = False -> gpt-4o-mini (cheap, for iterating)
-#   STRONG_JUDGE = True  -> gpt-4o      (for the number you will report)
-# ===========================================================================
+# JUDGE — gpt-4o-mini (cheap, for iterating) vs gpt-4o (the number you report).
 STRONG_JUDGE = False
 CHEAP_MODEL = "gpt-4o-mini"
 STRONG_MODEL = "gpt-4o"
@@ -103,10 +79,9 @@ JUDGE_MODEL = STRONG_MODEL if STRONG_JUDGE else CHEAP_MODEL
 
 
 # ===========================================================================
-# GOLDEN SET  ->  FILL IN THE "reference" FIELD OF EACH QUESTION
-#   - "question":  already set (you can edit/add/remove)
-#   - "reference": the correct answer according to the guidelines, written by you
-#   Questions with an empty "reference" are skipped automatically.
+# QUESTION POOLS — each item has "question", "reference" (correct answer per the guides;
+# drafted by the model, pending clinical review) and tier metadata. Empty references are
+# skipped. Folded into EVAL_SET below.
 # ===========================================================================
 _PREV_SINGLE = [
     {"question": "En un paciente con VIH con carga viral indetectable en DTG/3TC, ¿qué factores obligarían a no mantener una terapia dual según las recomendaciones actuales?", "reference": "La terapia dual DTG/3TC no debe mantenerse si existe coinfección por el virus de la hepatitis B (las pautas duales no cubren el VHB), si hay resistencia conocida o sospechada a lamivudina (mutación M184V/I) o a los inhibidores de integrasa, si no se dispone de estudio de resistencias previo, si hay antecedente de fracaso virológico o si la adherencia no está garantizada. Igualmente se abandonaría ante viremia detectable/fracaso virológico o aparición de resistencias."},
@@ -539,15 +514,10 @@ def _tag(items, tier):
 
 
 # ===========================================================================
-# EVAL_SET — the SINGLE evaluation set used for everything. The formerly-separate
-# GOLDEN/MULTIHOP pools are FOLDED IN here (not discarded: more questions = more
-# statistical power, which is what makes the A/B reliable) and every question carries a
-# "tier" so performance can be sliced by question type. Tiers:
-#   simple       — atomic factual/lexical lookup (1 hop)
-#   single_hop   — single-area clinical reasoning (the former golden reasoning questions)
-#   multihop     — cross-guide / multi-step reasoning
-#   adversarial  — negation / "it depends" / distractor framing (traps a naive retriever)
-# To change the mix, edit the pools above; there is no dataset selector any more.
+# EVAL_SET — the single evaluation set (151 questions). The pools are folded in and every
+# question gets a "tier" so performance can be sliced by question type:
+#   simple — atomic factual/lexical | single_hop — single-area reasoning |
+#   multihop — cross-guide reasoning | adversarial — negation / "it depends" / distractor.
 # ===========================================================================
 EVAL_SET = (
     _tag(_PREV_SINGLE[:39], "single_hop")   # former golden: clinical-reasoning block
@@ -555,9 +525,7 @@ EVAL_SET = (
     + _tag(_PREV_MULTI, "multihop")         # former multi-hop set (keeps its own hops/guides)
     + _TIERED_NEW                           # purpose-built simple/multihop/adversarial tiers
 )
-# Cost control: EVAL_SAMPLE=N runs a STRATIFIED subset of N questions PER TIER (cheap probe
-# while iterating); unset / 0 = the full 151-question set (the number you report). The subset
-# keeps the per-tier balance so a quick run still exercises all four question types.
+# EVAL_SAMPLE=N runs a STRATIFIED subset of N per tier (cheap probe); 0/unset = the full set.
 _SAMPLE = int(os.environ.get("EVAL_SAMPLE", "0"))
 if _SAMPLE > 0:
     from collections import defaultdict
@@ -570,10 +538,8 @@ else:
 
 
 def build_dataset(dataset: list[dict], retriever) -> tuple[EvaluationDataset, list[float]]:
-    """Run each question through `retriever` + the shared generator and assemble the
-    dataset RAGAS consumes. Only retrieval varies between pipelines (generation is fixed)
-    so the comparison is fair. Also returns the per-question latency (retrieval +
-    generation) for the velocity axis of the A/B."""
+    """Run each question through `retriever` + the shared generator and assemble the dataset
+    RAGAS consumes. Also returns per-question latency (retrieval + generation) for the A/B."""
     rows = []
     omitted = []
     latencies = []
@@ -585,7 +551,7 @@ def build_dataset(dataset: list[dict], retriever) -> tuple[EvaluationDataset, li
             omitted.append(i)
             continue
 
-        # --- pipeline: swappable retrieval + shared generation (always, full eval) ---
+        # Swappable retrieval + shared generation.
         t0 = time.perf_counter()
         payloads = retriever(question)                      # list[dict]
         _, formatted_context = build_context(payloads)
@@ -622,15 +588,11 @@ def main():
         OpenAIEmbeddings(model="text-embedding-3-large")
     )
 
-    # Full RAGAS suite: faithfulness (grounding of the generated answer), context precision
-    # and context recall. answer_relevancy stays omitted on purpose — it is misleading on
-    # Spanish answers (Phase 0 artifact ~0.42) and adds cost without signal; re-add it here
-    # only if you specifically want that axis.
+    # answer_relevancy is omitted on purpose — misleading on Spanish answers (Phase 0 artifact).
     metrics = [Faithfulness(), LLMContextPrecisionWithReference(), LLMContextRecall()]
 
-    # Default RAGAS concurrency (16 workers, 180s timeout) overwhelms the judge -> NaN.
-    # 8 workers + a long timeout + retries is the stable point (16 still timed out on the
-    # heavy precision metric). Generation (gpt-4o) is sequential anyway in build_dataset.
+    # RAGAS's default 16 workers overwhelm the judge (-> NaN on the heavy precision metric);
+    # 8 workers + long timeout + retries is the stable point. Generation is sequential anyway.
     run_config = RunConfig(timeout=600, max_workers=8, max_retries=10)
     result = evaluate(
         dataset=dataset,
@@ -654,9 +616,8 @@ def main():
     print("\n=== Means per metric ===")
     print(df.select_dtypes("number").mean())
 
-    # Per-tier slice: joins the tier back onto the scored rows by question so we can read
-    # whether a pipeline degrades on the SIMPLE tier vs the SINGLE_HOP / MULTIHOP /
-    # ADVERSARIAL ones — the per-question-type performance, the whole point of this set.
+    # Per-tier slice: join the tier back onto the scored rows to read whether a pipeline
+    # degrades on some question types — the whole point of this set.
     tier_by_q = {c["question"].strip(): c.get("tier") for c in DATASET if c.get("tier")}
     if tier_by_q and "user_input" in df.columns:
         df_t = df.copy()
