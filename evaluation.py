@@ -9,7 +9,7 @@ type. To run the A/B, pick a retriever with PIPELINE and run; only retrieval var
 Flow:
     1. (optional) review/extend the question pools that build EVAL_SET.
     2. PIPELINE=graph python evaluation.py     # baseline | iterative | graph
-    3. Check resultados_ragas_<pipeline>.csv (per-question detail) and the per-tier means.
+    3. Check ragas_results_<pipeline>.csv (per-question detail) and the per-tier means.
 
 Requirements:
     ragas, langchain-openai. Env vars loaded from .env (OPENAI_API_KEY, QDRANT_*).
@@ -645,8 +645,8 @@ def main():
     print(result)
 
     df = result.to_pandas()
-    os.makedirs("resultados", exist_ok=True)
-    out_csv = os.path.join("resultados", f"resultados_ragas_{PIPELINE}.csv")  # per-pipeline file
+    os.makedirs("results", exist_ok=True)
+    out_csv = os.path.join("results", f"ragas_results_{PIPELINE}.csv")  # per-pipeline file
     df.to_csv(out_csv, index=False)
     print(f"\nDetail saved to {out_csv}")
 

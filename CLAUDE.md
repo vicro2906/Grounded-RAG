@@ -149,7 +149,7 @@ keeping strict grounding + validate.
   (faithfulness+precision+recall; answer_relevancy omitted on purpose as a Spanish artifact);
   the lean modes `RETRIEVAL_ONLY`/`RECALL_ONLY` were removed. `RunConfig(timeout=600,
   max_workers=8)` anti-timeout. Prints global means **and per tier**, measures latency and
-  dumps `resultados/resultados_ragas_<PIPELINE>.csv`. The references were drafted by the model
+  dumps `results/ragas_results_<PIPELINE>.csv`. The references were drafted by the model
   from the guidelines → **pending clinical review**.
 - `abbreviations.py` — ABBREVIATION→name dictionary from the guides (values in Spanish).
 - **`agentic/`** — Track A (Phase 4). `iterative.py`: `iterative_search` (plan/hop/reflect).
@@ -163,7 +163,7 @@ keeping strict grounding + validate.
   (non-extrapolable peculiarities), using `pymupdf4llm` (transcribes, **does not invent**). The prompt
   that guided the conversion (absolute fidelity, inspection→script→validation→iteration) is in
   `data/prompt.txt`. See `data/README.md`.
-- `docs/` — design documents and architecture diagrams. `resultados/` — RAGAS evaluation CSVs.
+- `docs/` — design documents and architecture diagrams. `results/` — RAGAS evaluation CSVs.
 - `langgraph.json` — LangGraph Studio config (exposes `main.py:app`).
 
 ## Models and services
@@ -238,7 +238,7 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
 - **Phase 0 — Compass: DONE.** RAGAS golden set with references (drafted by the model, not a
   doctor → caveat). Dense baseline (gpt-4o-mini judge): faithfulness 0.81,
   answer_relevancy 0.58 (MISLEADING, artifact of the metric in Spanish), context_precision
-  0.97, context_recall 0.94 (somewhat inflated). Detail in `resultados/resultados_ragas.csv`.
+  0.97, context_recall 0.94 (somewhat inflated). Detail in `results/ragas_results.csv`.
 - **Phase 1 — LangGraph + LangSmith: DONE.**
 - **Phase 2 — Cheap retrieval: DONE.** Hybrid (2a) + reranker (2b).
 - **Phase 3 — Refine: DONE.** rephrasing + abbreviation normalization; **domain guardrail**
@@ -317,9 +317,9 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
    navigation. Increment 2 pending: "implicit knowledge modifiers" path in `assess` (flagged
    and always followed by re-retrieval + validate).
 
-Evaluation artifacts versioned in `resultados/`: `resultados_ragas.csv` (Phase-0 baseline) and
-`resultados_ragas_{baseline,iterative,graph}_retrieval.csv` (Phase-4 A/B, context_recall). The
-new A/B over `EVAL_SET` dumps `resultados/resultados_ragas_<PIPELINE>.csv` (full RAGAS).
+Evaluation artifacts versioned in `results/`: `ragas_results.csv` (Phase-0 baseline) and
+`ragas_results_{baseline,iterative,graph}_retrieval.csv` (Phase-4 A/B, context_recall). The
+new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS).
 
 ## Important findings (do not lose)
 

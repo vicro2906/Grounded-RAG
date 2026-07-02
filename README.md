@@ -176,7 +176,7 @@ QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py   # A/B 
 | `agentic/` · `graph/` | Iterative retrieval (Track A) and LightRAG graph retrieval (Track B). |
 | `chunks/` | Chunking, contextualization and upload to Qdrant (includes `chunks.jsonl`). |
 | `data/` | Corpus: `markdown/` (the 7 GeSIDA guides, real source) and `textos/`. The original PDFs (`pdfs/`) are not versioned (see `data/README.md`). |
-| `resultados/` | RAGAS evaluation CSVs (one file per pipeline). |
+| `results/` | RAGAS evaluation CSVs (one file per pipeline). |
 | `docs/` | Design documents and architecture diagrams. |
 | `CLAUDE.md` | Living document of context, decisions and findings. |
 
