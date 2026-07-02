@@ -1,410 +1,434 @@
-# CLAUDE.md — Chatbot médico VIH (RAG sobre guías GeSIDA)
+# CLAUDE.md — HIV medical chatbot (RAG over GeSIDA guidelines)
 
-Contexto del proyecto para retomarlo en cualquier conversación nueva. Mantener
-este archivo al día cuando cambien decisiones, estado o hallazgos importantes.
+Project context to resume it in any new conversation. Keep this file up to date when
+important decisions, status or findings change.
 
-## Qué es
+> **Language note.** This document (and the codebase comments/docs) are in English so
+> non-Spanish-speaking colleagues can read them. What stays in Spanish is only: the
+> doctor-facing UI, the LLM prompts, the guideline/chunk content, and the values of
+> `abbreviations.py` (see the Conventions section). Keep speaking to the user (Victor) in
+> Spanish in chat.
 
-Chatbot RAG para **médicos** que responde preguntas sobre las **guías clínicas de
-VIH de GeSIDA** (7 PDFs, en español). Naturaleza actual: **prototipo para demostrar**
-(aún sin usuarios reales). Prioridades, por orden: (1) **reducir alucinaciones**,
-(2) **conectar conceptos abstractos** para navegar las guías, (3) **UX tipo Claude**.
+## What it is
 
-Cumplimiento: por RGPD, todo modelo/servicio debe ser privado o local y, a ser posible,
-en región UE. Los datos del médico pueden incluir información de salud (Art. 9 RGPD).
+RAG chatbot for **doctors** that answers questions about the **HIV clinical guidelines from
+GeSIDA** (7 PDFs, in Spanish). Current nature: **prototype for demonstration** (no real users
+yet). Priorities, in order: (1) **reduce hallucinations**, (2) **connect abstract concepts**
+to navigate the guidelines, (3) **Claude-style UX**.
 
-## Arquitectura actual (LangGraph)
+Compliance: under GDPR, every model/service must be private or local and, where possible, in
+an EU region. The doctor's data may include health information (GDPR Art. 9).
 
-Punto de entrada: `main.py` (grafo compilado `app`). Nodos del grafo:
+## Current architecture (LangGraph)
+
+Entry point: `main.py` (compiled graph `app`). Graph nodes:
 
 ```
-question ─▶ rephrase ─┬─ fuera de dominio ─▶ out_of_domain ─▶ END
-                      └─ en dominio ─▶ [RETRIEVAL_MODE] ─▶ assess_context ⇄ clarify (interrupt)
-                             ├─ baseline : retrieve (híbrido) ─▶ rerank (20→5)        │ (al salir)
+question ─▶ rephrase ─┬─ out of domain ─▶ out_of_domain ─▶ END
+                      └─ in domain ─▶ [RETRIEVAL_MODE] ─▶ assess_context ⇄ clarify (interrupt)
+                             ├─ baseline : retrieve (hybrid) ─▶ rerank (20→5)        │ (on exit)
                              ├─ iterative: iterative_retrieve (plan→hop→reflect, →8)   ▼
-                             └─ graph    : graph_retrieve (LightRAG + híbrido propio, →8) ◀ DEFECTO
+                             └─ graph    : graph_retrieve (LightRAG + own hybrid, →8) ◀ DEFAULT
                                               re_retrieve (1×) ─▶ generate ⇄ validate ─▶ evidence ─▶ output
-                                                              (no válido+agotado ─▶ fallback)
+                                                              (not valid+exhausted ─▶ fallback)
 ```
 
-La cabecera (rephrase + guardia de dominio) y la cola (assess_context→generate→validate→evidence)
-son IDÉNTICAS en los tres modos; solo cambia el nodo de recuperación, elegido por
-`RETRIEVAL_MODE` en `main.py` (por defecto `"graph"` tras el A/B de F4).
+The head (rephrase + domain guardrail) and the tail (assess_context→generate→validate→evidence)
+are IDENTICAL across the three modes; only the retrieval node changes, chosen by
+`RETRIEVAL_MODE` in `main.py` (default `"graph"` after the Phase-4 A/B).
 
-- **rephrase** (`rag.refine`, gpt-4o-mini): una llamada que (a) clasifica si la pregunta
-  es del dominio VIH (`in_domain`); (b) reescribe la consulta SIN añadir info, normalizando
-  términos en AMBAS formas «nombre completo (SIGLA)» con `abbreviations.py`; y (c) **criba**
-  los datos del paciente ya presentes (`known_facts`→`clinical_facts`) y los modificadores
-  clínicos que la pregunta podría necesitar (`candidate_modifiers`) — la mitad barata del paso
-  de clarificación. Si está fuera de dominio → `out_of_domain` (mensaje directo, corta el
-  pipeline). La generación usa la pregunta ORIGINAL, no la reescrita.
-- **assess_context + clarify** (`rag.assess`, **gpt-4o** `ASSESS_MODEL`; nodos en `main.py`): **puerta de
-  clarificación interactiva** (F5, slot-filling) entre la recuperación y `generate`. Razona en
-  campos estructurados (orden = CoT) por DOS vías, con el **CONOCIMIENTO CLÍNICO como PRINCIPAL**:
-  **(1) `clinically_relevant`** (principal): TODOS los modificadores que clínicamente cambian la
-  respuesta a este tipo de pregunta, INDEPENDIENTE del contexto (exhaustiva dentro de lo
-  pertinente) y **(2) `branches_on`** (complemento): dimensiones extra que el contexto recuperado
-  condiciona. **Por qué conocimiento primero (decidido con el usuario):** el fallo del retriever
-  (recall miss silencioso → respuesta genérica con aire de segura) es más probable Y más grave
-  que un error del modelo de preguntas (visible, lo corrige el médico, acotado por `asked_questions`
-  y el tope, y NUNCA corrompe la respuesta, que se re-recupera y valida). Solo la RESPUESTA se
-  ancla en evidencia, no las PREGUNTAS. Resta `already_covered` (lo que `clinical_facts` ya fija en
-  cualquier unidad + lo ya preguntado) y emite `questions` ordenadas por **impacto clínico** (no por
-  vía), una por dimensión pendiente. Razonó inconsistente con gpt-4o-mini (se saltaba el CoT) → se
-  usa gpt-4o (`ASSESS_MODEL`); cuesta más (corre hasta 3× por pregunta) pero un mejor modelo extrae
-  más detalle relevante. El razonamiento se expone en el estado (`assessment`) para la traza. Es
-  seguro porque el dato NO se cita: solo dirige la rama Y re-dispara la recuperación
-  (`re_retrieve`), de modo que la evidencia condicional se recupera antes de generar y `validate`
-  sigue exigiendo grounding. Si hay preguntas → `clarify` **pausa**
-  el grafo con `interrupt()` y pregunta al médico; al reanudar, `clarify` funde la respuesta en
-  `clinical_facts` (merge a mano) y suma 1 a `clarify_rounds`. Dos cotas: `CLARIFY_MAX_ROUNDS`
-  (=3, nº de pausas) y `CLARIFY_QUESTIONS_PER_ROUND` (=1, preguntas por pausa) → por defecto se
-  pregunta UNA cosa cada vez, como mucho 3 veces. `assess` ordena las pendientes por **impacto
-  clínico** y se toman las `max_questions` primeras.
-  **`clinical_facts`/`clarify_rounds` NO llevan reducer**: se REINICIAN por pregunta en
-  `node_rephrase` (Studio persiste el estado del thread; con reducers acumulativos los datos del
-  paciente anterior y el presupuesto de rondas gastado se filtraban a la siguiente pregunta y
-  `assess_context` se saltaba). Dentro de UNA pregunta el merge/incremento lo hace `clarify` a
-  mano (lectura del estado), suficiente porque se escriben en secuencia.
-- **re_retrieve** (nodo en `main.py`): corre **UNA sola vez, al SALIR del bucle de clarificación**
-  (justo antes de `generate`), no en cada ronda. **Re-recupera con TODOS los `clinical_facts`
-  inyectados en la consulta** (despacha según `retrieval_mode`, reusa las funciones colapsadas
-  baseline/iterative/graph) y SOBRESCRIBE `contexts` → así el dato del médico TIRA de los pasajes
-  condicionales (rama de VHB, de primer trimestre…) para que `generate` los CITE, no solo dirige
-  la generación. No-op si no hay datos (p. ej. pregunta que no clarifica) → deja el contexto
-  inicial intacto. **Total: 1 retrieve inicial + 1 re_retrieve final** (antes era 1 + N por ronda).
-  El bucle `assess_context ⇄ clarify` corre todo sobre el **contexto inicial**: como `assess` es
-  primario en conocimiento, no necesita re-recuperar entre rondas (los re_retrieve intermedios
-  eran redundantes). Probado: con "coinfección VHB" entran al top-5 los chunks específicos de VHB.
-  Los `clinical_facts` entran ADEMÁS en `generate` como bloque
-  **"DATOS APORTADOS POR EL MÉDICO" NO citable** (seleccionan la rama de la guía; las citas
-  literales siguen saliendo de los chunks). Requiere checkpointer: lo provee `langgraph dev`/Studio
-  (no se compila uno propio en los grafos).
-- **Recuperación — 3 modos seleccionables (`RETRIEVAL_MODE`), todos terminan en el mismo generate:**
-  - **baseline** = `node_retrieve` (`rag.retrieve_hybrid`: densa text-embedding-3-large 3072d +
-    sparse BM25 `Qdrant/bm25`, fusión RRF, 20 candidatos) → `node_rerank` (`rag.rerank`,
-    cross-encoder local, 20→5).
+- **rephrase** (`rag.refine`, gpt-4o-mini): a single call that (a) classifies whether the
+  question belongs to the HIV domain (`in_domain`); (b) rewrites the query WITHOUT adding
+  info, normalizing terms in BOTH forms «full name (ABBR)» with `abbreviations.py`; and (c)
+  **screens** the patient data already present (`known_facts`→`clinical_facts`) and the
+  clinical modifiers the question might need (`candidate_modifiers`) — the cheap half of the
+  clarification step. If out of domain → `out_of_domain` (direct message, short-circuits the
+  pipeline). Generation uses the ORIGINAL question, not the rewritten one.
+- **assess_context + clarify** (`rag.assess`, **gpt-4o** `ASSESS_MODEL`; nodes in `main.py`):
+  **interactive clarification gate** (Phase 5, slot-filling) between retrieval and `generate`.
+  It reasons over structured fields (order = CoT) via TWO paths, with **CLINICAL KNOWLEDGE as
+  the PRIMARY one**: **(1) `clinically_relevant`** (primary): ALL modifiers that clinically
+  change the answer to this kind of question, INDEPENDENT of the context (exhaustive within
+  what is relevant) and **(2) `branches_on`** (complement): extra dimensions the retrieved
+  context conditions on. **Why knowledge first (decided with the user):** the retriever's
+  failure (silent recall miss → generic answer with a confident air) is both more likely AND
+  more harmful than the question-model erring (visible, corrected by the doctor, bounded by
+  `asked_questions` and the cap, and NEVER corrupts the answer, which is re-retrieved and
+  validated). Only the ANSWER is anchored in evidence, not the QUESTIONS. It subtracts
+  `already_covered` (what `clinical_facts` already pins in any unit + what was already asked)
+  and emits `questions` ordered by **clinical impact** (not by path), one per pending
+  dimension. It reasoned inconsistently with gpt-4o-mini (skipped the CoT) → gpt-4o is used
+  (`ASSESS_MODEL`); it costs more (runs up to 3× per question) but a better model extracts
+  more relevant detail. The reasoning is exposed in the state (`assessment`) for the trace. It
+  is safe because the datum is NOT cited: it only steers the branch AND re-triggers retrieval
+  (`re_retrieve`), so the conditional evidence is retrieved before generating and `validate`
+  still requires grounding. If there are questions → `clarify` **pauses** the graph with
+  `interrupt()` and asks the doctor; on resume, `clarify` folds the answer into
+  `clinical_facts` (manual merge) and adds 1 to `clarify_rounds`. Two caps: `CLARIFY_MAX_ROUNDS`
+  (=3, number of pauses) and `CLARIFY_QUESTIONS_PER_ROUND` (=1, questions per pause) → by
+  default it asks ONE thing at a time, at most 3 times. `assess` orders the pending ones by
+  **clinical impact** and the first `max_questions` are taken.
+  **`clinical_facts`/`clarify_rounds` carry NO reducer**: they are RESET per question in
+  `node_rephrase` (Studio persists the thread state; with accumulating reducers the previous
+  patient's data and the spent round budget leaked into the next question and `assess_context`
+  was skipped). Within ONE question the merge/increment is done by `clarify` by hand (reading
+  the state), enough because they are written sequentially.
+- **re_retrieve** (node in `main.py`): runs **ONCE, on EXIT from the clarification loop**
+  (right before `generate`), not on every round. **Re-retrieves with ALL the `clinical_facts`
+  injected into the query** (dispatches on `retrieval_mode`, reuses the collapsed
+  baseline/iterative/graph functions) and OVERWRITES `contexts` → so the doctor's datum PULLS
+  the conditional passages (the HBV branch, the first-trimester one…) so `generate` CITES
+  them, not just steers generation. No-op if there is no data (e.g. a question that does not
+  clarify) → leaves the initial context intact. **Total: 1 initial retrieve + 1 final
+  re_retrieve** (previously it was 1 + N per round). The `assess_context ⇄ clarify` loop runs
+  entirely on the **initial context**: since `assess` is knowledge-primary, it does not need
+  re-retrieval between rounds (the intermediate re_retrieves were redundant). Tested: with
+  "HBV coinfection" the HBV-specific chunks enter the top-5. The `clinical_facts` ALSO enter
+  `generate` as a NON-citable **"DATOS APORTADOS POR EL MÉDICO"** block (they select the
+  guide's branch; the literal citations still come from the chunks). Requires a checkpointer:
+  provided by `langgraph dev`/Studio (no own one is compiled in the graphs).
+- **Retrieval — 3 selectable modes (`RETRIEVAL_MODE`), all ending in the same generate:**
+  - **baseline** = `node_retrieve` (`rag.retrieve_hybrid`: dense text-embedding-3-large 3072d +
+    sparse BM25 `Qdrant/bm25`, RRF fusion, 20 candidates) → `node_rerank` (`rag.rerank`,
+    local cross-encoder, 20→5).
   - **iterative** (Track A) = `node_iterative_retrieve` → `agentic.iterative.iterative_search`
-    (plan→hop→reflect, top 8). Usa la pregunta ORIGINAL (su propio plan); ignora la reescrita.
-  - **graph** (Track B, POR DEFECTO) = `node_graph_retrieve` → `graph.lightrag_track.graph_search`
-    (grafo entidad+relación `mode="hybrid"` + complemento `retrieve_hybrid` densa+BM25 →
-    fusión dedup → rerank → top 8).
-- **rerank** (`rag.rerank`): cross-encoder local `jinaai/jina-reranker-v2-base-multilingual`
-  (fastembed/ONNX, multilingüe, RGPD-ok). Lo usan los tres modos para afinar al top final.
-- **generate** (`main._structured_llm`, gpt-4o): salida estructurada con
-  `ChatOpenAI.with_structured_output` (Pydantic `ClinicalAnswer`, json_schema estricto).
-  Devuelve dict: sufficient_information, answer, sources_used[{ref,quote}], follow_up_questions.
-- **validate** (`rag.validate`, gpt-4o-mini): juez de relevancia + grounding semántico.
-  Bucle con `generate` (inyecta feedback al reintentar), `MAX_ITER=2`. válido → evidence;
-  no válido y agotado → `fallback`; error técnico del juez → `fallback` (no se "falla abierto").
-- **evidence** (`evidence.format_answer`): formatea respuesta + panel de fuentes con
-  citas literales (fuzzy match) + preguntas de seguimiento + aviso clínico. Texto sin ANSI.
+    (plan→hop→reflect, top 8). Uses the ORIGINAL question (its own plan); ignores the rewritten one.
+  - **graph** (Track B, DEFAULT) = `node_graph_retrieve` → `graph.lightrag_track.graph_search`
+    (entity+relation graph `mode="hybrid"` + `retrieve_hybrid` dense+BM25 complement →
+    dedup fusion → rerank → top 8).
+- **rerank** (`rag.rerank`): local cross-encoder `jinaai/jina-reranker-v2-base-multilingual`
+  (fastembed/ONNX, multilingual, GDPR-ok). Used by the three modes to refine to the final top.
+- **generate** (`main._structured_llm`, gpt-4o): structured output with
+  `ChatOpenAI.with_structured_output` (Pydantic `ClinicalAnswer`, strict json_schema).
+  Returns dict: sufficient_information, answer, sources_used[{ref,quote}], follow_up_questions.
+- **validate** (`rag.validate`, gpt-4o-mini): relevance + semantic grounding judge.
+  Loop with `generate` (injects feedback on retry), `MAX_ITER=2`. valid → evidence;
+  not valid and exhausted → `fallback`; technical error of the judge → `fallback` (no "failing open").
+- **evidence** (`evidence.format_answer`): formats the answer + sources panel with
+  literal citations (fuzzy match) + follow-up questions + clinical disclaimer. Text without ANSI.
 
-`rag.search()` = rephrase → híbrido → rerank (lo usa la evaluación).
+`rag.search()` = rephrase → hybrid → rerank (used by the evaluation).
 
-### Recuperación por grafo (LightRAG): qué se usa y qué NO
+### Graph retrieval (LightRAG): what is used and what is NOT
 
-Indexado (una vez, `graph._build_index`): por cada chunk, gpt-4o-mini extrae **entidades** y
-**relaciones** con **descripción generada por el LLM**; se guardan en `lightrag_store/`:
-`kv_store_full_entities/relations.json` (descripción + chunks de origen `source_id`),
-`vdb_entities/relationships/chunks.json` (embeddings para casar), `kv_store_text_chunks.json`
-(texto literal) y `graph_chunk_entity_relation.graphml` (topología).
+Indexing (once, `graph._build_index`): for each chunk, gpt-4o-mini extracts **entities** and
+**relations** with an **LLM-generated description**; they are stored in `lightrag_store/`:
+`kv_store_full_entities/relations.json` (description + source chunks `source_id`),
+`vdb_entities/relationships/chunks.json` (embeddings for matching), `kv_store_text_chunks.json`
+(literal text) and `graph_chunk_entity_relation.graphml` (topology).
 
-Consulta (`graph_search`, modo `hybrid`): (1) LightRAG saca keywords high/low-level de la
-pregunta; (2) low-level → vdb_entities → entidades; high-level → vdb_relationships →
-relaciones; (3) recorre el grafo (vecinos) y, vía `source_id`, junta los **chunks de origen**
-(hasta `chunk_top_k=20`), mapeados a `chunks.jsonl` con `_map_to_payloads` (match exacto +
-fallback por prefijo; en prueba 20/20). (4) **Complemento (sustituye a la densa interna de
-LightRAG):** se añaden los chunks de NUESTRA `retrieve_hybrid` (densa + BM25 RRF) sobre la
-consulta reescrita — el BM25 ayuda con siglas/dosis. (5) Se **fusiona** (dedup por
-`chunk_id`, grafo primero) y el **reranker** afina a top 8.
+Query (`graph_search`, `hybrid` mode): (1) LightRAG extracts high/low-level keywords from the
+question; (2) low-level → vdb_entities → entities; high-level → vdb_relationships →
+relations; (3) it walks the graph (neighbours) and, via `source_id`, gathers the **source
+chunks** (up to `chunk_top_k=20`), mapped to `chunks.jsonl` with `_map_to_payloads` (exact
+match + prefix fallback; 20/20 in a test). (4) **Complement (replaces LightRAG's internal
+dense search):** the chunks from OUR `retrieve_hybrid` (dense + BM25 RRF) over the rewritten
+query are added — BM25 helps with abbreviations/doses. (5) It is **merged** (dedup by
+`chunk_id`, graph first) and the **reranker** refines to top 8.
 
-**Decisión de diseño (clave):** las descripciones de entidades/relaciones SÍ influyen en
-la **selección** (su embedding es lo que casa con la pregunta), pero se **descartan para la
-generación**: a gpt-4o solo le pasamos los **chunks literales**. Motivo = prioridad nº1
-(no alucinar): las descripciones son texto sintético del LLM, no citable y con posibles
-errores de extracción; nuestro `evidence.py` exige cita literal verificable. **Idea abierta
-(A/B-able):** pasar las descripciones de *relaciones* como bloque "mapa de conceptos, NO
-citable" para ayudar al razonamiento multi-hop, manteniendo el grounding estricto + validate.
+**Design decision (key):** the entity/relation descriptions DO influence the **selection**
+(their embedding is what matches the question), but are **discarded for generation**: only the
+**literal chunks** are passed to gpt-4o. Reason = priority #1 (do not hallucinate): the
+descriptions are synthetic LLM text, not citable and with possible extraction errors; our
+`evidence.py` requires a verifiable literal citation. **Open idea (A/B-able):** pass the
+*relation* descriptions as a "concept map, NOT citable" block to help multi-hop reasoning,
+keeping strict grounding + validate.
 
-## Ficheros clave
+## Key files
 
-- `main.py` — grafo LangGraph + LangSmith + generación estructurada (punto de entrada).
-- `rag.py` — pipeline: clientes, embeddings, retrieve/retrieve_hybrid, rerank, refine,
-  search, validate, generate_answer (versión cruda), SYS_PROMPT, build_user_prompt, constantes de modelo.
-- `evidence.py` — formateo de respuesta y fuentes.
-- `evaluation.py` — evaluación RAGAS. **UN ÚNICO set `EVAL_SET` (151 preguntas)** con campo
-  `tier` por pregunta (**simple / single_hop / multihop / adversarial**) → mide performance
-  POR TIPO de pregunta. Se construye fundiendo los antiguos pools (golden + multihop, ahora
-  componentes internos `_PREV_SINGLE`/`_PREV_MULTI`) con un bloque tiered nuevo
-  (`_TIERED_NEW`); ya NO hay selector de dataset. A/B con `PIPELINE`
-  (baseline/iterative/graph, vía env): solo cambia el retrieval, la generación es compartida.
-  **SIEMPRE corre el suite RAGAS completo** (faithfulness+precision+recall; answer_relevancy
-  omitida a propósito por ser artefacto en español); se eliminaron los modos lean
-  `RETRIEVAL_ONLY`/`RECALL_ONLY`. `RunConfig(timeout=600, max_workers=8)` anti-timeout.
-  Imprime medias globales **y por tier**, mide latencia y vuelca `resultados/resultados_ragas_<PIPELINE>.csv`.
-  Las referencias las redactó el modelo desde las guías → **pendiente revisión clínica**.
-- `abbreviations.py` — diccionario SIGLA→nombre de las guías (valores en español).
-- **`agentic/`** — Track A (F4). `iterative.py`: `iterative_search` (plan/hop/reflect).
-  Importa los primitivos compartidos de `rag.py` (carpeta padre).
-- **`graph/`** — Track B (F4). `lightrag_track.py`: build del grafo + `graph_search`
-  (importa `rerank` de `rag.py`, corpus de `chunks/`, store en `lightrag_store/`).
-- `chunks/` — `chunk_guias.py` (chunking estructural), `subir_a_qdrant.py` (denso),
-  `subir_a_qdrant_hibrido.py` (denso+BM25), `chunks.jsonl` (517 chunks).
-- `data/markdown/` — las 7 guías en Markdown (fuente del corpus). `data/pdfs/`, `data/textos/` — originales.
-  Los `.md` se transcribieron de los PDFs con **código generado por Claude Code adaptado a cada PDF**
-  (particularidades no extrapolables), usando `pymupdf4llm` (transcribe, **no inventa**). El prompt
-  que guió la conversión (fidelidad absoluta, inspección→script→validación→iteración) está en
-  `data/prompt.txt`. Ver `data/README.md`.
-- `docs/` — documentos de diseño y diagramas de arquitectura. `resultados/` — CSV de evaluación RAGAS.
-- `langgraph.json` — config de LangGraph Studio (expone `main.py:app`).
+- `main.py` — LangGraph graph + LangSmith + structured generation (entry point).
+- `rag.py` — pipeline: clients, embeddings, retrieve/retrieve_hybrid, rerank, refine,
+  search, validate, generate_answer (raw version), SYS_PROMPT, build_user_prompt, model constants.
+- `evidence.py` — answer and sources formatting.
+- `evaluation.py` — RAGAS evaluation. **A SINGLE set `EVAL_SET` (151 questions)** with a
+  `tier` field per question (**simple / single_hop / multihop / adversarial**) → measures
+  performance BY QUESTION TYPE. It is built by folding the old pools (golden + multihop, now
+  internal components `_PREV_SINGLE`/`_PREV_MULTI`) with a new tiered block (`_TIERED_NEW`);
+  there is NO dataset selector any more. A/B with `PIPELINE` (baseline/iterative/graph, via
+  env): only retrieval changes, generation is shared. **It ALWAYS runs the full RAGAS suite**
+  (faithfulness+precision+recall; answer_relevancy omitted on purpose as a Spanish artifact);
+  the lean modes `RETRIEVAL_ONLY`/`RECALL_ONLY` were removed. `RunConfig(timeout=600,
+  max_workers=8)` anti-timeout. Prints global means **and per tier**, measures latency and
+  dumps `resultados/resultados_ragas_<PIPELINE>.csv`. The references were drafted by the model
+  from the guidelines → **pending clinical review**.
+- `abbreviations.py` — ABBREVIATION→name dictionary from the guides (values in Spanish).
+- **`agentic/`** — Track A (Phase 4). `iterative.py`: `iterative_search` (plan/hop/reflect).
+  Imports the shared primitives from `rag.py` (parent folder).
+- **`graph/`** — Track B (Phase 4). `lightrag_track.py`: graph build + `graph_search`
+  (imports `rerank` from `rag.py`, corpus from `chunks/`, store in `lightrag_store/`).
+- `chunks/` — `chunk_guidelines.py` (structural chunking), `upload_to_qdrant.py` (dense),
+  `upload_to_qdrant_hybrid.py` (dense+BM25), `chunks.jsonl` (517 chunks).
+- `data/markdown/` — the 7 guides in Markdown (corpus source). `data/pdfs/`, `data/textos/` — originals.
+  The `.md` files were transcribed from the PDFs with **code generated by Claude Code adapted to each PDF**
+  (non-extrapolable peculiarities), using `pymupdf4llm` (transcribes, **does not invent**). The prompt
+  that guided the conversion (absolute fidelity, inspection→script→validation→iteration) is in
+  `data/prompt.txt`. See `data/README.md`.
+- `docs/` — design documents and architecture diagrams. `resultados/` — RAGAS evaluation CSVs.
+- `langgraph.json` — LangGraph Studio config (exposes `main.py:app`).
 
-## Modelos y servicios
+## Models and services
 
-- Generación: **gpt-4o** (`GENERATION_MODEL`). Rephrase/validación: **gpt-4o-mini**
+- Generation: **gpt-4o** (`GENERATION_MODEL`). Rephrase/validation: **gpt-4o-mini**
   (`REPHRASE_MODEL` / `VALIDATION_MODEL`).
 - Embeddings: `text-embedding-3-large` (3072d). Reranker: jina-reranker-v2-base-multilingual.
-- Qdrant Cloud (región **eu-west**). Colecciones: `guias_vih` (solo denso, respaldo),
-  `guias_vih_hibrida` (denso + sparse BM25, sin contexto) y **`guias_vih_hibrida_ctx`**
-  (denso + BM25 con Contextual Retrieval, **la activa por defecto**). La activa la fija
-  `COLLECTION_HYBRID` en `rag.py` (default `guias_vih_hibrida_ctx`), sobreescribible con
-  `QDRANT_COLLECTION` para A/B contra la no contextual.
-- LangSmith en región **UE**: `.env` con `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com`,
-  proyecto **`chatbot_vih`** (guion bajo). Trazado se autoactiva si hay `LANGSMITH_API_KEY`.
+- Qdrant Cloud (**eu-west** region). Collections: `guias_vih` (dense only, backup),
+  `guias_vih_hibrida` (dense + sparse BM25, no context) and **`guias_vih_hibrida_ctx`**
+  (dense + BM25 with Contextual Retrieval, **the default active one**). The active one is set
+  by `COLLECTION_HYBRID` in `rag.py` (default `guias_vih_hibrida_ctx`), overridable with
+  `QDRANT_COLLECTION` to A/B against the non-contextual one.
+- LangSmith in the **EU** region: `.env` with `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com`,
+  project **`chatbot_vih`** (underscore). Tracing auto-enables if `LANGSMITH_API_KEY` is set.
 
-## Cómo ejecutar
+## How to run
 
-- App (CLI interactivo): `.venv\Scripts\python.exe main.py`
-- LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → abre Studio (UE). Ver pasos en
-  pestaña **Trace View** (no Turn View).
-- **Elegir la estrategia de recuperación (F4):** `main.py` compila CUATRO grafos y
-  `langgraph.json` los registra para que Studio muestre un **selector de grafo**:
-  - **Grafos dedicados** `app_baseline` / `app_iterative` / `app_graph` (build_graph(mode)):
-    cada uno contiene SOLO su arquitectura, con la recuperación **EXPANDIDA en sus nodos
-    reales** (vista didáctica) en vez de esconderla tras un único `retrieve`:
+- App (interactive CLI): `.venv\Scripts\python.exe main.py`
+- LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → opens Studio (EU). See steps in the
+  **Trace View** tab (not Turn View).
+- **Choosing the retrieval strategy (Phase 4):** `main.py` compiles FOUR graphs and
+  `langgraph.json` registers them so Studio shows a **graph selector**:
+  - **Dedicated graphs** `app_baseline` / `app_iterative` / `app_graph` (build_graph(mode)):
+    each one contains ONLY its architecture, with retrieval **EXPANDED into its real nodes**
+    (teaching view) instead of hiding it behind a single `retrieve`:
       - baseline: `retrieve → rerank`
       - iterative: `iter_generate_subquestions → (iter_single | FAN-OUT Send×N
         ▶ iter_retrieve_one → iter_reflect ⇄ Send×1) → iter_rerank`. iter_generate_subquestions
-        SOLO genera las subpreguntas; cada subpregunta se recupera en su PROPIA ejecución de
-        `iter_retrieve_one` (patrón `Send`/fan-out → una llamada visible por subpregunta en la
-        traza); convergen en iter_reflect, que decide si falta evidencia y, si sí, hace otro
-        `Send` (otra ronda) o sale a iter_rerank. `pool`/`hops` se acumulan con reducers
-        (`_merge_pool` dedup, `_add_int`). Single-hop → iter_single (one-shot baseline).
-      - graph: DOS ramas PARALELAS desde rephrase que convergen en merge:
-        `rephrase ─┬ graph_keywords (LLM: keywords high-level→relaciones, low-level→entidades)
-        → graph_select (cosine entidades/relaciones + traversía + chunks) ─┬ graph_merge
-        → graph_rerank` y `└ graph_hybrid (denso+BM25) ─┘`. graph_select pasa las keywords ya
-        extraídas a `aquery_data` (LightRAG se salta su LLM interno) y expone entidades/
-        relaciones/chunks en el estado. `graph_merge` usa **`defer=True`** para correr UNA vez
-        tras ambas ramas (de distinta longitud; sin defer el fan-in se dispararía dos veces).
-    Cada nodo reusa las MISMAS primitivas que `iterative_search`/`graph_search` (sin cambio
-    de comportamiento) y los estados intermedios se ven en Studio (`IterativeState`/
-    `GraphState` extienden `RAGState`). Selección: desplegable de grafos de Studio.
-  - **Grafo combinado** `app` (build_combined_graph): las tres rutas en un grafo; expone un
-    `context_schema` (`ConfigSchema`) con el campo **`retrieval_mode`** como **desplegable**
-    en el panel de config del run (elección en vivo). Lo usa también el CLI.
-  - **Head/tail compartidos** se factorizan en `_add_common`; la sección de retrieval en
-    `_add_retrieval(mode)`. Esto es lo que hace el pipeline AGNÓSTICO al retrieval: cada nodo
-    de retrieval cumple el MISMO contrato de estado (rellena `contexts`/`chunk_index`/
-    `formatted_context`) y el tail solo lee ese contrato, nunca nada específico del modo.
-  - **Por env / CLI:** `RETRIEVAL_MODE` (env var, por defecto `"graph"`) es el modo por
-    defecto del combinado; o `python main.py iterative` para forzar uno en un run.
-  - **Resolución de modo (combinado), en `_resolve_mode`:** context (Studio) → `configurable`
-    → `RETRIEVAL_MODE`. Valores desconocidos caen al default sin romper.
-  - **Trazas:** el modo usado se registra en el estado (`retrieval_mode`) y, desde el CLI,
-    como tag `mode:<x>` y metadata → filtrables en LangSmith. La llamada LLM interna de
-    keywords de LightRAG SÍ se traza ahora (envuelta con `traceable` en
-    `_make_rag(trace_llm=True)`, solo en consulta, no en el build del índice).
-- **Construir el grafo LightRAG (una vez):** `.venv\Scripts\python.exe -m graph.lightrag_track`
-  (extracción de entidades sobre los 517 chunks; reanudable, usa caché de LLM).
-- Evaluación RAGAS / A/B: ajustar `PIPELINE` y `DATASET` en `evaluation.py` y correr
+        ONLY generates the sub-questions; each sub-question is retrieved in its OWN run of
+        `iter_retrieve_one` (`Send`/fan-out pattern → one visible call per sub-question in the
+        trace); they converge on iter_reflect, which decides whether evidence is missing and,
+        if so, does another `Send` (another round) or exits to iter_rerank. `pool`/`hops`
+        accumulate via reducers (`_merge_pool` dedup, `_add_int`). Single-hop → iter_single
+        (one-shot baseline).
+      - graph: TWO PARALLEL branches from rephrase converging on merge:
+        `rephrase ─┬ graph_keywords (LLM: high-level keywords→relations, low-level→entities)
+        → graph_select (cosine entities/relations + traversal + chunks) ─┬ graph_merge
+        → graph_rerank` and `└ graph_hybrid (dense+BM25) ─┘`. graph_select passes the
+        already-extracted keywords to `aquery_data` (LightRAG skips its internal LLM) and
+        exposes entities/relations/chunks in the state. `graph_merge` uses **`defer=True`** to
+        run ONCE after both branches (of different length; without defer the fan-in would fire
+        twice).
+    Each node reuses the SAME primitives as `iterative_search`/`graph_search` (no behaviour
+    change) and the intermediate states are visible in Studio (`IterativeState`/`GraphState`
+    extend `RAGState`). Selection: Studio's graph dropdown.
+  - **Combined graph** `app` (build_combined_graph): the three routes in one graph; it exposes
+    a `context_schema` (`ConfigSchema`) with the **`retrieval_mode`** field as a **dropdown**
+    in the run config panel (live choice). Also used by the CLI.
+  - **Shared head/tail** are factored into `_add_common`; the retrieval section into
+    `_add_retrieval(mode)`. This is what makes the pipeline RETRIEVAL-AGNOSTIC: each retrieval
+    node honours the SAME state contract (fills `contexts`/`chunk_index`/`formatted_context`)
+    and the tail only reads that contract, never anything mode-specific.
+  - **Via env / CLI:** `RETRIEVAL_MODE` (env var, default `"graph"`) is the combined graph's
+    default mode; or `python main.py iterative` to force one in a run.
+  - **Mode resolution (combined), in `_resolve_mode`:** context (Studio) → `configurable`
+    → `RETRIEVAL_MODE`. Unknown values fall back to the default without breaking.
+  - **Traces:** the used mode is recorded in the state (`retrieval_mode`) and, from the CLI,
+    as a tag `mode:<x>` and metadata → filterable in LangSmith. LightRAG's internal keyword
+    LLM call IS traced now (wrapped with `traceable` in `_make_rag(trace_llm=True)`, only at
+    query time, not at index build).
+- **Build the LightRAG graph (once):** `.venv\Scripts\python.exe -m graph.lightrag_track`
+  (entity extraction over the 517 chunks; resumable, uses the LLM cache).
+- RAGAS evaluation / A/B: set `PIPELINE` and `DATASET` in `evaluation.py` and run
   `.venv\Scripts\python.exe evaluation.py`.
-- **Dependencias: SIEMPRE `uv add` (nunca pip).** `uv` no está en PATH:
-  `& "$env:USERPROFILE\.local\bin\uv.exe" add <paquete>`.
+- **Dependencies: ALWAYS `uv add` (never pip).** `uv` is not on PATH:
+  `& "$env:USERPROFILE\.local\bin\uv.exe" add <package>`.
 
-## Roadmap por fases
+## Phased roadmap
 
-Orden acordado: medir → orquestar → retrieval barato → refine+validate → grafo (si hace falta) → UX.
+Agreed order: measure → orchestrate → cheap retrieval → refine+validate → graph (if needed) → UX.
 
-- **F0 — Brújula: HECHA.** Golden set RAGAS con referencias (las redactó el modelo, no un
-  médico → caveat). Baseline denso (juez gpt-4o-mini): faithfulness 0.81,
-  answer_relevancy 0.58 (ENGAÑOSO, artefacto de la métrica en español), context_precision
-  0.97, context_recall 0.94 (algo inflado). Detalle en `resultados/resultados_ragas.csv`.
-- **F1 — LangGraph + LangSmith: HECHA.**
-- **F2 — Retrieval barato: HECHA.** Híbrido (2a) + reranker (2b).
-- **F3 — Refine: HECHA.** rephrasing + normalización de abreviaturas; **guardrail de
-  dominio** (la clasificación `in_domain` del nodo rephrase corta las preguntas fuera de
-  tema en ~2 s, ahorrando retrieve/rerank/generate/validate); y el **bloque Validate**
-  (nodo `validate` tras `generate`, juez gpt-4o-mini de relevancia + grounding semántico;
-  bucle con reintento inyectando feedback, `MAX_ITER=2`; si se agota → `fallback` con
-  mensaje seguro; error técnico del juez → `fallback`, sin "fallar abierto"). El validador
-  NO re-chequea citas literales (eso ya lo hace `evidence`). La clasificación de tipo de
-  pregunta (vector vs grafo) se difiere a F4.
-- **F4 — Multi-hop: DECIDIDA (grafo LightRAG por defecto).** Dos vías para preguntas
-  multi-salto, comparadas con un A/B sobre `MULTIHOP_SET` (16 preguntas, en `evaluation.py`):
-  - **Track A — agéntico/iterativo** (`agentic/iterative.py`): bucle self-ask
-    plan → recuperar por sub-consulta → reflect (MAX_HOPS=3), reusa hybrid+rerank, cero
-    reindexado. HECHO y probado.
-  - **Track B — grafo LightRAG** (`graph/lightrag_track.py`): grafo entidad-relación en
-    almacenamiento de ficheros (`lightrag_store/`), recupera chunks por traversía y los
-    mapea a nuestros payloads (conserva citas). Índice CONSTRUIDO (517 chunks, ~1.5 h).
-  - Decisión por el A/B (calidad multi-hop primero; luego velocidad/coste/actualización).
-    Ambas vías son seleccionables en el grafo vía `RETRIEVAL_MODE` y en la eval vía
-    `PIPELINE`, y terminan en el MISMO generate→validate→evidence.
-  - **RESULTADO A/B (16 multi-hop, context_recall, juez gpt-4o-mini): graph 0.979 >>
-    iterative 0.863 > baseline 0.844.** Latencia: graph ~11 s ≈ baseline, iterative ~24 s.
-    **DECISIÓN: graph (LightRAG) por defecto** (`RETRIEVAL_MODE="graph"`). Caveats: solo se
-    midió context_recall limpio (context_precision y faithfulness se cayeron por timeouts
-    del juez con muchos workers → NaN; pendiente medir precision del ganador a baja
-    concurrencia); n=16, referencias del modelo. El recall alto del grafo podría venir con
-    algo menos de precisión (recupera más amplio), mitigado por reranker→top8 + validate.
-- **F5 — UX tipo Claude:** Streamlit/web, streaming, citaciones, memoria multi-turno.
-  - **EN CURSO — preguntas de clarificación (slot-filling): HECHO (validación en Studio).**
-    Puerta `assess_context`/`clarify` entre retrieval y generate (ver Arquitectura). Esquema
-    **híbrido**: cribado en `refine` (`known_facts`/`candidate_modifiers`) + confirmación
-    anclada en la evidencia en `rag.assess` (razonamiento estructurado
-    `branches_on`/`already_covered`/`questions`, gpt-4o-mini). Pausa con `interrupt()`, funde
-    respuestas en `clinical_facts` (no citable, dirige la generación), cota `CLARIFY_MAX_ROUNDS=1`.
-    Probado end-to-end (baseline + MemorySaver) y casos unitarios de `assess` (condicional /
-    dato ya conocido en cualquier unidad / no condicional). Validación final: LangGraph Studio
-    (`langgraph dev`, persistencia la pone la plataforma).
-  - **Re-recuperación enriquecida: HECHO** (nodo `re_retrieve`, incremento 1). Tras clarificar,
-    los `clinical_facts` se inyectan en la consulta y re-disparan la recuperación → el dato del
-    médico tira de los pasajes condicionales antes de generar (probado: VHB cambia el top-5).
-    PENDIENTE: streaming, web, memoria multi-turno de conversación, y (incremento 2) vía de
-    "modificadores por conocimiento implícito" en `assess` (marcada y siempre seguida de
-    re-retrieval + validate) como red de seguridad ante fallos de recuperación.
+- **Phase 0 — Compass: DONE.** RAGAS golden set with references (drafted by the model, not a
+  doctor → caveat). Dense baseline (gpt-4o-mini judge): faithfulness 0.81,
+  answer_relevancy 0.58 (MISLEADING, artifact of the metric in Spanish), context_precision
+  0.97, context_recall 0.94 (somewhat inflated). Detail in `resultados/resultados_ragas.csv`.
+- **Phase 1 — LangGraph + LangSmith: DONE.**
+- **Phase 2 — Cheap retrieval: DONE.** Hybrid (2a) + reranker (2b).
+- **Phase 3 — Refine: DONE.** rephrasing + abbreviation normalization; **domain guardrail**
+  (the `in_domain` classification of the rephrase node cuts off out-of-topic questions in ~2 s,
+  saving retrieve/rerank/generate/validate); and the **Validate block** (node `validate` after
+  `generate`, gpt-4o-mini judge of relevance + semantic grounding; loop with retry injecting
+  feedback, `MAX_ITER=2`; if exhausted → `fallback` with a safe message; technical error of
+  the judge → `fallback`, no "failing open"). The validator does NOT re-check literal
+  citations (that is already done by `evidence`). The question-type classification (vector vs
+  graph) was deferred to Phase 4.
+- **Phase 4 — Multi-hop: DECIDED (LightRAG graph by default).** Two paths for multi-hop
+  questions, compared with an A/B over `MULTIHOP_SET` (16 questions, in `evaluation.py`):
+  - **Track A — agentic/iterative** (`agentic/iterative.py`): self-ask loop
+    plan → retrieve per sub-query → reflect (MAX_HOPS=3), reuses hybrid+rerank, zero
+    reindexing. DONE and tested.
+  - **Track B — LightRAG graph** (`graph/lightrag_track.py`): entity-relation graph in file
+    storage (`lightrag_store/`), retrieves chunks by traversal and maps them to our payloads
+    (preserves citations). Index BUILT (517 chunks, ~1.5 h).
+  - Decision by the A/B (multi-hop quality first; then speed/cost/updating). Both paths are
+    selectable in the graph via `RETRIEVAL_MODE` and in the eval via `PIPELINE`, and end in the
+    SAME generate→validate→evidence.
+  - **A/B RESULT (16 multi-hop, context_recall, gpt-4o-mini judge): graph 0.979 >>
+    iterative 0.863 > baseline 0.844.** Latency: graph ~11 s ≈ baseline, iterative ~24 s.
+    **DECISION: graph (LightRAG) by default** (`RETRIEVAL_MODE="graph"`). Caveats: only clean
+    context_recall was measured (context_precision and faithfulness dropped due to judge
+    timeouts with many workers → NaN; pending measuring the winner's precision at low
+    concurrency); n=16, model-drafted references. The graph's high recall might come with
+    slightly less precision (retrieves broader), mitigated by reranker→top8 + validate.
+- **Phase 5 — Claude-style UX:** Streamlit/web, streaming, citations, multi-turn memory.
+  - **IN PROGRESS — clarification questions (slot-filling): DONE (validated in Studio).**
+    `assess_context`/`clarify` gate between retrieval and generate (see Architecture). **Hybrid**
+    scheme: screening in `refine` (`known_facts`/`candidate_modifiers`) + evidence-grounded
+    confirmation in `rag.assess` (structured reasoning `branches_on`/`already_covered`/`questions`,
+    gpt-4o-mini). Pauses with `interrupt()`, folds answers into `clinical_facts` (non-citable,
+    steers generation), cap `CLARIFY_MAX_ROUNDS=1`. Tested end-to-end (baseline + MemorySaver)
+    and unit cases of `assess` (conditional / datum already known in any unit / non-conditional).
+    Final validation: LangGraph Studio (`langgraph dev`, persistence provided by the platform).
+  - **Enriched re-retrieval: DONE** (node `re_retrieve`, increment 1). After clarifying, the
+    `clinical_facts` are injected into the query and re-trigger retrieval → the doctor's datum
+    pulls the conditional passages before generating (tested: HBV changes the top-5).
+    PENDING: streaming, web, multi-turn conversation memory, and (increment 2) an "implicit
+    knowledge modifiers" path in `assess` (flagged and always followed by re-retrieval +
+    validate) as a safety net against retrieval failures.
 
-## Pendiente / próximos pasos (a fecha 2026-06-29)
+## Pending / next steps (as of 2026-06-29)
 
-0. **`EVAL_SET` (151 preguntas, 4 tiers) HECHO** y preparado en `evaluation.py` (ver bullet).
-   Sustituye al instrumento del A/B de F4 (el multihop saturaba recall del grafo a 0.979 y
-   no tenía preguntas simples). PENDIENTE: lanzarlo (full RAGAS, ~$15 con juez mini por las 3
-   pipelines, ~$15 más con juez gpt-4o para el número final) y revisión clínica de referencias.
-   Antes de lanzar, sonda con un subconjunto (~10) para medir coste real en el dashboard.
-1. **Contextual Retrieval (enriquecer chunks con contexto) — HECHO (índice construido).**
-   `chunks/contextualize.py`: por chunk, gpt-4o-mini genera UNA frase densa de contexto
-   (entidades/siglas/grado de recomendación; situándolo en su guía vía título+section_path+
-   ventana de vecinos `--window`, resumible, `max_retries` alto por el tope de 200k TPM) →
-   `chunks_contextual.jsonl` (517) con `context` y `text_for_retrieval` (= contexto + texto).
-   El uploader embebe/BM25-indexa `text_for_retrieval` PERO el payload conserva `text` literal
-   (citable). Subido a colección NUEVA **`guias_vih_hibrida_ctx`** (la original
-   `guias_vih_hibrida` intacta). **Colección elegible** vía `QDRANT_COLLECTION` (env, lo lee
-   `rag.py`) o `--collection` (uploader) → repunta los TRES retrievers a la vez. Coste real
-   ~$0.23 (contextualizar) + ~$0.03 (re-embeber). PENDIENTE: **A/B `EVAL_SET` contra
-   `guias_vih_hibrida` vs `guias_vih_hibrida_ctx`** para confirmar la mejora antes de hacerla
-   la colección por defecto.
-2. **Decidir capa de desviación (router simple→baseline) SOLO con datos:** correr `EVAL_SET`
-   con pipelines puras y leer si el grafo se degrada en los tiers `simple`/`single_hop`. Si no
-   hay gap → el router no aporta calidad (solo latencia). NO añadir antes de medir (ensucia el
-   test: el tier simple pasaría a medir baseline, no la pipeline elegida).
-3. **(Idea) Descripciones de relaciones como "mapa de conceptos" no citable** en el prompt
-   de generación del grafo, para ayudar al razonamiento multi-hop sin romper el grounding.
-   Prototipar tras un flag y A/B contra la versión actual (faithfulness + recall).
-4. **(Idea) HippoRAG 2 como reemplazo de LightRAG:** mejor evidencia en multi-hop, menos
-   tokens, y —clave— NO degrada las preguntas simples (a diferencia de LightRAG/GraphRAG).
-   Spike previo: verificar backends swappables a Azure/EU (RGPD) y licencia. A/B tras EVAL_SET.
-5. **F5 — UX.** Clarificación interactiva + re-recuperación enriquecida HECHAS (validar en
-   Studio); seguir con streaming, web (Streamlit/Chainlit), memoria multi-turno y navegación
-   por conceptos. Incremento 2 pendiente: vía de "modificadores por conocimiento implícito" en
-   `assess` (marcada y siempre seguida de re-retrieval + validate).
+0. **`EVAL_SET` (151 questions, 4 tiers) DONE** and prepared in `evaluation.py` (see bullet).
+   Replaces the Phase-4 A/B instrument (the multihop pool saturated graph recall at 0.979 and
+   had no simple questions). PENDING: launch it (full RAGAS, ~$15 with the mini judge for the 3
+   pipelines, ~$15 more with the gpt-4o judge for the final number) and clinical review of the
+   references. Before launching, probe with a subset (~10) to measure real cost in the dashboard.
+1. **Contextual Retrieval (enrich chunks with context) — DONE (index built).**
+   `chunks/contextualize.py`: per chunk, gpt-4o-mini generates ONE dense context sentence
+   (entities/abbreviations/recommendation grade; situating it in its guide via
+   title+section_path+neighbour window `--window`, resumable, high `max_retries` because of the
+   200k TPM cap) → `chunks_contextual.jsonl` (517) with `context` and `text_for_retrieval`
+   (= context + text). The uploader embeds/BM25-indexes `text_for_retrieval` BUT the payload
+   keeps the literal `text` (citable). Uploaded to a NEW collection
+   **`guias_vih_hibrida_ctx`** (the original `guias_vih_hibrida` intact). **Collection
+   selectable** via `QDRANT_COLLECTION` (env, read by `rag.py`) or `--collection` (uploader) →
+   boosts the THREE retrievers at once. Real cost ~$0.23 (contextualizing) + ~$0.03
+   (re-embedding). PENDING: **A/B `EVAL_SET` against `guias_vih_hibrida` vs
+   `guias_vih_hibrida_ctx`** to confirm the improvement before making it the default collection.
+2. **Decide the diversion layer (simple→baseline router) ONLY with data:** run `EVAL_SET`
+   with pure pipelines and read whether the graph degrades on the `simple`/`single_hop` tiers.
+   If there is no gap → the router adds no quality (only latency). Do NOT add before measuring
+   (it dirties the test: the simple tier would then measure baseline, not the chosen pipeline).
+3. **(Idea) Relation descriptions as a non-citable "concept map"** in the graph's generation
+   prompt, to help multi-hop reasoning without breaking grounding. Prototype behind a flag and
+   A/B against the current version (faithfulness + recall).
+4. **(Idea) HippoRAG 2 as a replacement for LightRAG:** better evidence on multi-hop, fewer
+   tokens, and —key— does NOT degrade simple questions (unlike LightRAG/GraphRAG). Prior spike:
+   verify backends swappable to Azure/EU (GDPR) and the license. A/B after EVAL_SET.
+5. **Phase 5 — UX.** Interactive clarification + enriched re-retrieval DONE (validate in
+   Studio); continue with streaming, web (Streamlit/Chainlit), multi-turn memory and concept
+   navigation. Increment 2 pending: "implicit knowledge modifiers" path in `assess` (flagged
+   and always followed by re-retrieval + validate).
 
-Artefactos de evaluación versionados en `resultados/`: `resultados_ragas.csv` (baseline F0) y
-`resultados_ragas_{baseline,iterative,graph}_retrieval.csv` (A/B F4, context_recall). El A/B
-nuevo sobre `EVAL_SET` vuelca `resultados/resultados_ragas_<PIPELINE>.csv` (full RAGAS).
+Evaluation artifacts versioned in `resultados/`: `resultados_ragas.csv` (Phase-0 baseline) and
+`resultados_ragas_{baseline,iterative,graph}_retrieval.csv` (Phase-4 A/B, context_recall). The
+new A/B over `EVAL_SET` dumps `resultados/resultados_ragas_<PIPELINE>.csv` (full RAGAS).
 
-## Hallazgos importantes (no perder)
+## Important findings (do not lose)
 
-- **Abreviaturas (resuelto en gran parte):** el corpus usa sobre todo siglas (DTG 144 vs
-  "dolutegravir" 23, BIC 54 vs 8...) pero también nombres completos. Por eso el rephrase
-  incluye AMBAS formas y el glosario está también en SYS_PROMPT (son parte de las guías,
-  no conocimiento externo). El problema era de 3 capas: recuperación (rephrase), comprensión
-  del generador (glosario) y capacidad del modelo.
-- **Modelo de generación:** gpt-4o-mini era el cuello de botella de calidad — fallaba o
-  respondía MAL en casos con matices/abreviaturas aun teniendo la evidencia. **gpt-4o lo
-  resuelve.** Por eso la generación está en gpt-4o.
-- **El reranker mejora precisión/orden pero NO subió el recall@5** en el set de prueba
-  (6/8 igual que el híbrido). Útil pero no imprescindible.
+- **Abbreviations (largely resolved):** the corpus mostly uses abbreviations (DTG 144 vs
+  "dolutegravir" 23, BIC 54 vs 8...) but also full names. That is why the rephrase includes
+  BOTH forms and the glossary is also in SYS_PROMPT (they are part of the guides, not external
+  knowledge). The problem had 3 layers: retrieval (rephrase), generator comprehension
+  (glossary) and model capability.
+- **Generation model:** gpt-4o-mini was the quality bottleneck — it failed or answered BADLY
+  in cases with nuances/abbreviations even when it had the evidence. **gpt-4o solves it.** That
+  is why generation is on gpt-4o.
+- **The reranker improves precision/ordering but did NOT raise recall@5** on the test set
+  (6/8 same as the hybrid). Useful but not essential.
 
-## Optimizaciones / problemas conocidos
+## Optimizations / known issues
 
-- **LATENCIA DEL RERANKER (RESUELTO, F4):** el rerank tardaba **~128 s** (95% del tiempo
-  total) porque el cross-encoder rellena (padding) el lote a la longitud del chunk más
-  largo en CPU. **Fix aplicado en `rag.rerank`: se puntúa solo `p["text"][:512]`
-  (constante `RERANK_SCORE_CHARS`) y se devuelven los payloads completos.** Una consulta
-  multi-hop bajó de ~145 s a ~23 s (en frío). Crítico para Track A, que rerankea varias
-  veces. Equipo: 12 cores. `RERANK_SCORE_CHARS` ahora es env-configurable (default 512).
-- **EL RERANKER SIGUE SIENDO EL CUELLO DE LA RECUPERACIÓN (medido):** `retrieve_hybrid`
-  (embed+Qdrant+BM25) ~0.44 s vs `rerank` de 20 docs **~3.8 s @512** (escala ~lineal:
-  ~1.8 s @256, ~1.0 s @128). Se llama 1× (baseline/graph) hasta 4× (iterative: 3 subpreguntas
-  + final). Bajar a 256 da ~2× pero **cambia el top-8** (hasta ~3/8 en algunas consultas) →
-  no se baja el default (prioridad nº1: no alucinar). **La paralelización rinde poco en
-  iterative (~1.1×)** porque 3 rerankers en CPU saturan los núcleos; sí ayuda en graph
-  (traversía ∥ híbrido = recursos distintos).
-- **Optimizaciones aplicadas (esta sesión):** (1) `iterative_search` recupera las
-  subpreguntas planificadas EN PARALELO (`ThreadPoolExecutor`); (2) `graph_search` corre
-  traversía ∥ híbrido en paralelo; (3) `rag.warmup()` precarga reranker+BM25 y `main.py` lo
-  lanza en un hilo daemon al importar (mata el ~3.5 s de la 1ª consulta); (4) locks
-  thread-safe en las cargas perezosas de modelos. Los grafos dedicados de Studio ya
-  paralelizaban (Send / ramas).
-- **RERANKER EN GPU (HECHO, la mayor mejora de latencia).** Medido: `rerank` 20 docs pasó de
-  **~3.8 s (CPU) a ~0.45 s (GPU GTX 1650)** → retrieval: baseline 7.6→5.5 s, **iterative
-  15.8→4.9 s (~3.2×, tenía 4 reranks)**, graph 11.5→7.7 s. Ahora el tiempo restante son las
-  llamadas LLM (rephrase/plan) y `graph_select` (LightRAG), no el reranker. Setup (Windows):
-  - Driver NVIDIA reciente (610.62, soporta CUDA 13.3). **OJO:** la actualización dejó el
-    servicio `nvlddmkm` deshabilitado (`Start=4`) y archivos del driver a medias →
-    reinstalación limpia del driver lo arregló.
-  - **`onnxruntime-gpu==1.22.0`** (build CUDA **12**; el 1.27 de PyPI es CUDA **13** y no casa)
-    + wheels `nvidia-cudnn-cu12`, `nvidia-cublas-cu12`, `nvidia-cuda-runtime-cu12`,
-    `nvidia-cufft-cu12`, `nvidia-curand-cu12` (NO el CUDA Toolkit completo). Versión de
-    onnxruntime-gpu debe casar con la CUDA major de las wheels (ver qué `cublas64_XX`/`cufft64_XX`
-    importa `onnxruntime_providers_cuda.dll`).
-  - **Truco clave (Windows):** las DLLs de las wheels (`site-packages/nvidia/*/bin`) NO están
-    en el search path, así que `_init_cuda_dlls()` en `rag.py` las añade Y las **pre-carga**
-    con `ctypes.WinDLL` antes de importar fastembed (sin esto el provider CUDA falla y cae a
-    CPU en silencio). Se ejecuta solo si `RERANK_DEVICE` es `cuda`/`auto`.
-  - Activar: `RERANK_DEVICE=cuda` en `.env` (gitignored; específico de esta máquina). Quitarlo
-    o `cpu` vuelve a CPU. `onnxruntime-gpu` NO va en `pyproject` (rompería máquinas sin GPU).
-- **El coste del reranker es IRREDUCIBLE en CPU sin perder calidad (medido).** Probado:
-  (a) bajar chars 512→256 cambia top‑8 (hasta 3/8); (b) reranquear menos candidatos (top15
-  vs top20) cambia top‑5 (24/30 coinciden; alguna consulta 2/5); (c) una sola pasada de
-  rerank en iterative cambia top‑8 (3‑6/8). El cross-encoder reordena fuerte (un chunk en
-  el puesto 18 del híbrido entra a su top‑5), así que necesita los 20 candidatos @512. NO
-  aplicadas: degradarían la evidencia (prioridad nº1). La única vía real es la GPU.
-- **GPU disponible: GTX 1650 4 GB, driver 511.09 (CUDA máx 11.6).** Para `onnxruntime-gpu`
-  hay que ACTUALIZAR driver (≥522 para CUDA 11.8, o ≥528 para CUDA 12) + CUDA toolkit +
-  cuDNN, luego `RERANK_DEVICE=cuda`. Setup de sistema (admin), no inmediato.
-- Modelos locales (BM25, reranker) con carga perezosa + `warmup()`: sin warm-up, la 1ª
-  consulta paga ~3.5 s de carga. Studio mantiene los modelos cargados entre consultas.
-- generate (gpt-4o) ~5 s: considerar streaming para mejorar latencia percibida (F5).
-- **LÍMITE OpenAI: gpt-4o a 30.000 TPM (bajo).** La generación NO se puede paralelizar:
-  correr varios pipelines a la vez en la eval → `429 RateLimitError` y crash. Correr los
-  pipelines en SECUENCIAL (la generación de `build_dataset` ya es secuencial → no peta).
-- **RAGAS apenas paraleliza** (≈serial aunque subas `max_workers`) y `context_precision` es
-  la métrica pesada/frágil (1 llamada de juez por chunk → con muchos workers da TimeoutError
-  → NaN). `context_recall` es la ligera y robusta. Config estable: `RunConfig(timeout=600,
-  max_workers=8, max_retries=10)`. Para A/B barato usar `RETRIEVAL_ONLY=1` (sin generación
-  gpt-4o) o `RECALL_ONLY=1` (solo recall) en `evaluation.py`.
-- **Build del grafo LightRAG:** cuello de botella = `max_parallel_insert` (default 2 → subido
-  a 8 en `graph.lightrag_track`; también `llm_model_max_async=16`). Aun así ~1.5 h por las
-  ~517 extracciones. Reanudable y con caché de LLM (re-correr es barato).
-- **Suspensión del equipo:** dormir el portátil MATA las corridas largas (cae la conexión).
-  Para jobs largos desactivar suspensión (`powercfg /change standby-timeout-ac/dc 0`) y
-  restaurarla luego. (Pasó: una corrida nocturna murió al dormirse la máquina.)
-- LangSmith + LangGraph Studio **verificados OK** esta sesión (Studio arranca y traza; el
-  endpoint UE responde 204 al enviar metadata).
+- **RERANKER LATENCY (RESOLVED, Phase 4):** the rerank took **~128 s** (95% of the total
+  time) because the cross-encoder pads the batch to the length of the longest chunk on CPU.
+  **Fix applied in `rag.rerank`: only `p["text"][:512]` is scored (constant
+  `RERANK_SCORE_CHARS`) and the full payloads are returned.** A multi-hop query dropped from
+  ~145 s to ~23 s (cold). Critical for Track A, which reranks several times. Machine: 12 cores.
+  `RERANK_SCORE_CHARS` is now env-configurable (default 512).
+- **THE RERANKER IS STILL THE RETRIEVAL BOTTLENECK (measured):** `retrieve_hybrid`
+  (embed+Qdrant+BM25) ~0.44 s vs `rerank` of 20 docs **~3.8 s @512** (scales ~linearly:
+  ~1.8 s @256, ~1.0 s @128). Called 1× (baseline/graph) up to 4× (iterative: 3 sub-questions
+  + final). Lowering to 256 gives ~2× but **changes the top-8** (up to ~3/8 on some queries) →
+  the default is not lowered (priority #1: do not hallucinate). **Parallelization yields little
+  in iterative (~1.1×)** because 3 rerankers on CPU saturate the cores; it does help in graph
+  (traversal ∥ hybrid = different resources).
+- **Optimizations applied (this session):** (1) `iterative_search` retrieves the planned
+  sub-questions IN PARALLEL (`ThreadPoolExecutor`); (2) `graph_search` runs traversal ∥ hybrid
+  in parallel; (3) `rag.warmup()` preloads reranker+BM25 and `main.py` launches it on a daemon
+  thread at import (kills the ~3.5 s of the 1st query); (4) thread-safe locks on the lazy model
+  loads. Studio's dedicated graphs already parallelized (Send / branches).
+- **RERANKER ON GPU (DONE, the biggest latency improvement).** Measured: `rerank` 20 docs went
+  from **~3.8 s (CPU) to ~0.45 s (GPU GTX 1650)** → retrieval: baseline 7.6→5.5 s, **iterative
+  15.8→4.9 s (~3.2×, it had 4 reranks)**, graph 11.5→7.7 s. Now the remaining time is the LLM
+  calls (rephrase/plan) and `graph_select` (LightRAG), not the reranker. Setup (Windows):
+  - Recent NVIDIA driver (610.62, supports CUDA 13.3). **NOTE:** the update left the
+    `nvlddmkm` service disabled (`Start=4`) and driver files half-done → a clean driver
+    reinstall fixed it.
+  - **`onnxruntime-gpu==1.22.0`** (CUDA **12** build; the 1.27 from PyPI is CUDA **13** and does
+    not match) + wheels `nvidia-cudnn-cu12`, `nvidia-cublas-cu12`, `nvidia-cuda-runtime-cu12`,
+    `nvidia-cufft-cu12`, `nvidia-curand-cu12` (NOT the full CUDA Toolkit). The onnxruntime-gpu
+    version must match the CUDA major of the wheels (see which `cublas64_XX`/`cufft64_XX`
+    `onnxruntime_providers_cuda.dll` imports).
+  - **Key trick (Windows):** the wheels' DLLs (`site-packages/nvidia/*/bin`) are NOT on the
+    search path, so `_init_cuda_dlls()` in `rag.py` adds them AND **pre-loads** them with
+    `ctypes.WinDLL` before importing fastembed (without this the CUDA provider fails and falls
+    back to CPU silently). It runs only if `RERANK_DEVICE` is `cuda`/`auto`.
+  - Enable: `RERANK_DEVICE=cuda` in `.env` (gitignored; specific to this machine). Removing it
+    or `cpu` goes back to CPU. `onnxruntime-gpu` is NOT in `pyproject` (it would break
+    machines without a GPU).
+- **The reranker cost is IRREDUCIBLE on CPU without losing quality (measured).** Tested:
+  (a) lowering chars 512→256 changes the top‑8 (up to 3/8); (b) reranking fewer candidates
+  (top15 vs top20) changes the top‑5 (24/30 match; some query 2/5); (c) a single rerank pass
+  in iterative changes the top‑8 (3‑6/8). The cross-encoder reorders strongly (a chunk at
+  position 18 of the hybrid enters its top‑5), so it needs the 20 candidates @512. NOT
+  applied: they would degrade the evidence (priority #1). The only real way is the GPU.
+- **GPU available: GTX 1650 4 GB, driver 511.09 (CUDA max 11.6).** For `onnxruntime-gpu` you
+  must UPDATE the driver (≥522 for CUDA 11.8, or ≥528 for CUDA 12) + CUDA toolkit + cuDNN,
+  then `RERANK_DEVICE=cuda`. System setup (admin), not immediate.
+- Local models (BM25, reranker) with lazy load + `warmup()`: without warm-up, the 1st query
+  pays ~3.5 s of loading. Studio keeps the models loaded between queries.
+- generate (gpt-4o) ~5 s: consider streaming to improve perceived latency (Phase 5).
+- **OpenAI LIMIT: gpt-4o at 30,000 TPM (low).** Generation CANNOT be parallelized: running
+  several pipelines at once in the eval → `429 RateLimitError` and crash. Run the pipelines
+  SEQUENTIALLY (the generation in `build_dataset` is already sequential → it does not crash).
+- **RAGAS barely parallelizes** (≈serial even if you raise `max_workers`) and
+  `context_precision` is the heavy/fragile metric (1 judge call per chunk → with many workers
+  it gives TimeoutError → NaN). `context_recall` is the light and robust one. Stable config:
+  `RunConfig(timeout=600, max_workers=8, max_retries=10)`. For a cheap A/B use
+  `RETRIEVAL_ONLY=1` (no gpt-4o generation) or `RECALL_ONLY=1` (recall only) in `evaluation.py`.
+- **LightRAG graph build:** bottleneck = `max_parallel_insert` (default 2 → raised to 8 in
+  `graph.lightrag_track`; also `llm_model_max_async=16`). Even so ~1.5 h for the ~517
+  extractions. Resumable and with an LLM cache (re-running is cheap).
+- **Machine suspension:** sleeping the laptop KILLS long runs (the connection drops). For long
+  jobs disable suspension (`powercfg /change standby-timeout-ac/dc 0`) and restore it
+  afterwards. (It happened: an overnight run died when the machine slept.)
+- LangSmith + LangGraph Studio **verified OK** this session (Studio starts and traces; the EU
+  endpoint responds 204 when sending metadata).
 
-## Convenciones
+## Conventions
 
-- **Idioma del código: inglés** (identificadores, comentarios, docstrings). Se mantiene en
-  español lo que se muestra al usuario (mensajes, etiquetas del panel), los prompts a los
-  LLM, y el contenido/manejo de las guías y chunks (incluido `chunks/` y los valores de
-  `abbreviations.py`). Al usuario se le habla en español.
-- Toda llamada LLM encapsulada para poder cambiar a Azure OpenAI (GPT-4 privado) sin
-  fricción el día que se requiera por cumplimiento.
-- Commits directos a `main` (flujo de un solo dev). Mensajes en español. **NO añadir el
-  trailer `Co-Authored-By: Claude…`** a los commits: el repo es público (portfolio) y la
-  atribución a Claude Code va en el README y la descripción, no como co-autor de git (ese
-  trailer hacía aparecer "claude" en la lista de Contributors de GitHub). En `.gitignore`:
-  `.env`, `*.log`, `.langgraph_api/`, `lightrag_store/` y `data/pdfs/` (el grafo se reconstruye
-  con `python -m graph.lightrag_track`).
+- **Language policy (updated 2026-07-02):** the code and documentation are in **English** so
+  non-Spanish-speaking colleagues can read them. Concretely:
+  - **English:** all identifiers, comments and docstrings; the project documents (`README.md`,
+    this `CLAUDE.md`, `data/README.md`, `data/prompt.txt`); and developer-facing CLI/tooling
+    output (argparse help, `print`/stderr messages, developer `SystemExit`/error messages in
+    the scripts).
+  - **Spanish (do NOT translate — it would affect functionality or is user/domain-facing):**
+    everything shown to the doctor (the `MSG_*` messages in `main.py`, the evidence panel
+    labels in `evidence.py`, the CLI `input()` prompt); the LLM prompts (`SYS_PROMPT`,
+    `build_user_prompt`, and the system prompts of refine/assess/validate/plan/reflect and of
+    `contextualize.py`); the guideline/chunk content (`data/markdown/`, `data/textos/`,
+    `chunks/*.jsonl`); the values of `abbreviations.py` and the `doc_title`/`topic` metadata in
+    `chunk_guidelines.py`'s `DOC_REGISTRY`; regexes that match Spanish guideline text; and any
+    Spanish literal that appears verbatim in generated data (e.g. the `"Preámbulo"` breadcrumb
+    fallback, the `> _[... omitido — consultar PDF original]_` omission marker). In
+    `data/prompt.txt` the prose is English but the Spanish-specific rules (connector-word list,
+    TAR/VIH/TB normalization, omission marker) stay verbatim.
+  - The user (Victor) is addressed in **Spanish** in chat, even though the files are in English.
+  - When adding new code/docs, follow this policy from the start (do not leave new Spanish
+    comments/docstrings).
+- Every LLM call is encapsulated so it can be switched to Azure OpenAI (private GPT-4) without
+  friction the day compliance requires it.
+- Direct commits to `main` (single-dev flow). Messages in Spanish. **Do NOT add the
+  `Co-Authored-By: Claude…` trailer** to commits: the repo is public (portfolio) and the
+  attribution to Claude Code goes in the README and the description, not as a git co-author
+  (that trailer made "claude" appear in GitHub's Contributors list). In `.gitignore`:
+  `.env`, `*.log`, `.langgraph_api/`, `lightrag_store/` and `data/pdfs/` (the graph is rebuilt
+  with `python -m graph.lightrag_track`).

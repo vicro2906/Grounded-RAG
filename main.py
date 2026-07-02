@@ -797,7 +797,7 @@ _threading.Thread(target=rag.warmup, daemon=True).start()
 def main_cli():
     # Optional first arg picks the retrieval mode for this run (e.g. `python main.py graph`).
     mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in VALID_MODES else RETRIEVAL_MODE
-    question = input("¿Cuál es tú pregunta?: ")
+    question = input("¿Cuál es tu pregunta?: ")
     # context -> selects the mode; tags/metadata -> make the run filterable in LangSmith.
     result = app.invoke(
         {"question": question},

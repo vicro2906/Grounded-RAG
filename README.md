@@ -1,191 +1,234 @@
-# Grounded-RAG — respuestas ancladas en documentos estructurados
+# Grounded-RAG — answers anchored in structured documents
 
-Arquitectura **RAG** que responde preguntas sobre un corpus de **documentos estructurados**
-(guías clínicas, normativa, documentación técnica…) **citando siempre la evidencia literal**.
-Construida sobre LangGraph, con foco en **no alucinar**, conectar conceptos para navegar el
-corpus y una UX conversacional cuidada.
+A **RAG** architecture that answers questions over a corpus of **structured documents**
+(clinical guidelines, regulations, technical documentation…) **always citing the literal
+evidence**. Built on LangGraph, with a focus on **not hallucinating**, connecting concepts to
+navigate the corpus, and a polished conversational UX.
 
-El diseño es **agnóstico al dominio**: aquí se demuestra sobre las **guías clínicas de VIH de
-GeSIDA** (en español, para uso médico), pero la misma arquitectura se reproduce sobre cualquier
-corpus de documentos estructurados del mismo estilo (ver [Reproducir con otro corpus](#reproducir-con-otro-corpus)).
+The design is **domain-agnostic**: here it is demonstrated on the **HIV clinical guidelines
+from GeSIDA** (in Spanish, for medical use), but the same architecture reproduces over any
+corpus of structured documents of the same style (see [Reproducing with another
+corpus](#reproducing-with-another-corpus)).
 
-> **Sobre la autoría.** Proyecto personal. El **diseño y las decisiones de arquitectura son
-> míos**; usé **Claude Code (Anthropic)** como asistente de **programación agéntica** para
-> implementarlo. El repositorio sirve también como ejemplo de hasta dónde llega ese flujo de
-> trabajo agéntico cuando las ideas y el criterio los pone la persona.
+> **On authorship.** Personal project. The **design and the architecture decisions are
+> mine**; I used **Claude Code (Anthropic)** as an **agentic programming** assistant to
+> implement it. The repository also serves as an example of how far that agentic workflow
+> goes when the ideas and judgment are supplied by the person. Detailed breakdown in
+> [Authorship and workflow](#authorship-and-workflow).
 >
-> **Estado: prototipo** para demostración (sin usuarios reales todavía).
+> **Status: prototype** for demonstration (no real users yet).
 
 ---
 
-## Prioridades de diseño (por orden)
+## Design priorities (in order)
 
-1. **Reducir alucinaciones.** Toda respuesta se ancla en **citas literales verificables** de
-   las guías; el texto sintético (descripciones del grafo, contexto de chunks, datos del
-   médico) puede *dirigir* la recuperación o la generación, pero **nunca se cita**.
-2. **Conectar conceptos abstractos** para navegar las guías (grafo de conocimiento).
-3. **UX tipo asistente conversacional** (clarificación interactiva, citaciones, seguimiento).
+1. **Reduce hallucinations.** Every answer is anchored in **verifiable literal citations**
+   from the guidelines; synthetic text (graph descriptions, chunk context, doctor-provided
+   data) may *steer* retrieval or generation, but is **never cited**.
+2. **Connect abstract concepts** to navigate the guidelines (knowledge graph).
+3. **Conversational-assistant UX** (interactive clarification, citations, follow-up).
 
-**Cumplimiento (RGPD).** El objetivo es que todo modelo/servicio sea privado o local y, a ser
-posible, en región UE (los datos del médico pueden incluir información de salud, Art. 9 RGPD).
-Cada llamada a un LLM está encapsulada para poder migrar a Azure OpenAI sin fricción; el
-reranker y BM25 corren en local; Qdrant y LangSmith en región UE.
+**Compliance (GDPR).** The goal is for every model/service to be private or local and, where
+possible, in an EU region (the doctor's data may include health information, GDPR Art. 9).
+Each LLM call is encapsulated so it can be migrated to Azure OpenAI without friction; the
+reranker and BM25 run locally; Qdrant and LangSmith in an EU region.
 
 ---
 
-## Arquitectura (LangGraph)
+## Architecture (LangGraph)
 
 ```
-question ─▶ rephrase ─┬─ fuera de dominio ─▶ out_of_domain ─▶ END
-                      └─ en dominio ─▶ [RETRIEVAL] ─▶ assess_context ⇄ clarify (interrupt)
-                             ├─ baseline : híbrido (denso + BM25) + rerank
-                             ├─ iterative: plan → sub-consultas → reflect
-                             └─ graph    : grafo entidad-relación (LightRAG) + híbrido  ◀ defecto
+question ─▶ rephrase ─┬─ out of domain ─▶ out_of_domain ─▶ END
+                      └─ in domain ─▶ [RETRIEVAL] ─▶ assess_context ⇄ clarify (interrupt)
+                             ├─ baseline : hybrid (dense + BM25) + rerank
+                             ├─ iterative: plan → sub-queries → reflect
+                             └─ graph    : entity-relation graph (LightRAG) + hybrid  ◀ default
                                               re_retrieve (1×) ─▶ generate ⇄ validate ─▶ evidence
 ```
 
-- **Cabecera y cola compartidas, recuperación intercambiable.** Los tres modos de
-  recuperación cumplen el mismo contrato de estado; la generación, validación y citación son
-  idénticas. Esto hace el pipeline **agnóstico al retriever** y barato de experimentar.
-- **Recuperación híbrida** densa (`text-embedding-3-large`) + sparse **BM25**, fusión RRF, y
-  **reranker** local multilingüe (cross-encoder, opción GPU).
-- **Contextual Retrieval.** Cada chunk se enriquece con una frase de contexto generada por un
-  LLM (qué es, a qué sección/población aplica) que se **embebe e indexa** para mejorar el
-  matching denso y léxico, **conservando el texto literal** para la cita.
-- **Puerta de clarificación (slot-filling).** Antes de responder, el sistema detecta qué dato
-  del paciente cambiaría la respuesta (embarazo, función renal, coinfección VHB…) y **pausa**
-  para preguntar al médico; el dato re-dispara la recuperación pero no se cita.
-- **Validación + evidencia.** Un juez comprueba relevancia y *grounding*; la respuesta final
-  se acompaña de un panel de fuentes con citas literales (fuzzy match) y aviso clínico.
+- **Shared head and tail, interchangeable retrieval.** The three retrieval modes honour the
+  same state contract; generation, validation and citation are identical. This makes the
+  pipeline **retriever-agnostic** and cheap to experiment with.
+- **Hybrid retrieval** dense (`text-embedding-3-large`) + sparse **BM25**, RRF fusion, and a
+  local multilingual **reranker** (cross-encoder, GPU-optional).
+- **Contextual Retrieval.** Each chunk is enriched with an LLM-generated context sentence
+  (what it is, which section/population it applies to) that is **embedded and indexed** to
+  improve dense and lexical matching, **keeping the literal text** for the citation.
+- **Clarification gate (slot-filling).** Before answering, the system detects which patient
+  datum would change the answer (pregnancy, renal function, HBV coinfection…) and **pauses**
+  to ask the doctor; the datum re-triggers retrieval but is not cited.
+- **Validation + evidence.** A judge checks relevance and *grounding*; the final answer is
+  accompanied by a sources panel with literal citations (fuzzy match) and a clinical
+  disclaimer.
 
-Detalle exhaustivo de decisiones y hallazgos en [`CLAUDE.md`](CLAUDE.md).
+Exhaustive detail of decisions and findings in [`CLAUDE.md`](CLAUDE.md).
 
 ---
 
-## Stack y modelos
+## Stack and models
 
-- **Orquestación:** LangGraph (+ LangGraph Studio para depurar) · trazas en **LangSmith (UE)**.
-- **Generación:** `gpt-4o`. **Rephrase / validación / contextualización:** `gpt-4o-mini`.
+- **Orchestration:** LangGraph (+ LangGraph Studio for debugging) · traces in **LangSmith (EU)**.
+- **Generation:** `gpt-4o`. **Rephrase / validation / contextualization:** `gpt-4o-mini`.
 - **Embeddings:** `text-embedding-3-large` (3072d). **Reranker:** `jina-reranker-v2-base-multilingual`.
-- **Vector store:** Qdrant Cloud (eu-west), colección híbrida con Contextual Retrieval.
-- **Grafo:** LightRAG (entidades + relaciones, almacenamiento en ficheros, reconstruible).
+- **Vector store:** Qdrant Cloud (eu-west), hybrid collection with Contextual Retrieval.
+- **Graph:** LightRAG (entities + relations, file storage, rebuildable).
 
 ---
 
-## Procedencia del corpus
+## Corpus provenance
 
-Los `.md` de `data/markdown/` se generaron a partir de los PDFs originales de GeSIDA (no
-redistribuidos en este repositorio; ver [`data/README.md`](data/README.md)) con
-**código de extracción generado con Claude Code y adaptado a cada PDF por separado**: cada guía
-tiene particularidades de maquetación (tablas, numeración, notas al pie) que no son
-extrapolables a las demás, así que no hubo un único script genérico sino uno ajustado a cada
-documento. La conversión se apoya en librerías de **transcripción** PDF→Markdown
-(`pymupdf4llm`) que **copian el texto, no lo generan** — el corpus es fiel al original y no
-introduce alucinaciones ya en la fuente, coherente con la prioridad nº 1 del proyecto.
+The `.md` files in `data/markdown/` were generated from the original GeSIDA PDFs (not
+redistributed in this repository; see [`data/README.md`](data/README.md)) with **extraction
+code generated with Claude Code and adapted to each PDF separately**: each guide has layout
+peculiarities (tables, numbering, footnotes) that are not extrapolable to the others, so there
+was no single generic script but one tuned to each document. The conversion relies on
+PDF→Markdown **transcription** libraries (`pymupdf4llm`) that **copy the text, they do not
+generate it** — the corpus is faithful to the original and does not introduce hallucinations
+already at the source, consistent with the project's priority #1.
 
-El **prompt** que guió todo el proceso está versionado en [`data/prompt.txt`](data/prompt.txt):
-impone fidelidad por encima de completitud (prohíbe parafrasear, resumir o reconstruir, y obliga
-a omitir con marca lo que no se extraiga con garantía), e implementa el flujo inspección del
-PDF → script adaptado → validación → iteración.
-
----
-
-## Reproducir con otro corpus
-
-La arquitectura no tiene nada intrínsecamente "de VIH": es un patrón de **grounded RAG sobre
-documentos estructurados**. Para instanciarla sobre otro corpus (otra especialidad clínica,
-normativa, manuales técnicos…) se cambia la **capa de dominio**, no el motor:
-
-**Lo que se sustituye (específico del dominio):**
-- El **corpus**: los documentos en `data/` y su transcripción (el prompt de `data/prompt.txt`
-  es reutilizable para cualquier PDF estructurado) + re-ejecutar el chunking de `chunks/`.
-- El **glosario de siglas** (`abbreviations.py`) por el del nuevo dominio.
-- La **guardia de dominio** (clasificación `in_domain` del nodo *rephrase*) que define qué
-  preguntas están "dentro de tema".
-- Los **prompts** que nombran el dominio (`SYS_PROMPT`, contextualización, *assess*) y los
-  nombres de colección en Qdrant.
-
-**Lo que se reutiliza tal cual (el motor):** el grafo LangGraph, la recuperación híbrida +
-grafo + reranker, el Contextual Retrieval, la puerta de clarificación, y la
-validación + citación literal. Es decir, **todo el valor de ingeniería es portable**; lo
-específico es la configuración del dominio.
-
-> Nota: hoy esas piezas de dominio están en el código (no parametrizadas en un fichero de
-> config). Extraerlas a configuración es trabajo futuro natural, pero la separación
-> conceptual motor/dominio ya existe.
+The **prompt** that guided the whole process is versioned in
+[`data/prompt.txt`](data/prompt.txt): it enforces fidelity over completeness (forbids
+paraphrasing, summarizing or reconstructing, and requires marking and omitting anything that
+cannot be extracted with a guarantee), and implements the flow PDF inspection → adapted script
+→ validation → iteration.
 
 ---
 
-## Cómo ejecutar
+## Reproducing with another corpus
 
-Requisitos: Python 3.12+, dependencias gestionadas con [`uv`](https://docs.astral.sh/uv/), y un
-`.env` (ver [`.env.example`](.env.example)) con `OPENAI_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY`
-y, opcionalmente, las claves de LangSmith.
+The architecture has nothing intrinsically "HIV" about it: it is a pattern of **grounded RAG
+over structured documents**. To instantiate it on another corpus (another clinical specialty,
+regulations, technical manuals…) you change the **domain layer**, not the engine:
+
+**What gets replaced (domain-specific):**
+- The **corpus**: the documents in `data/` and their transcription (the `data/prompt.txt`
+  prompt is reusable for any structured PDF) + re-running the chunking in `chunks/`.
+- The **abbreviation glossary** (`abbreviations.py`) with the new domain's.
+- The **domain guardrail** (the `in_domain` classification of the *rephrase* node) that
+  defines which questions are "on topic".
+- The **prompts** that name the domain (`SYS_PROMPT`, contextualization, *assess*) and the
+  Qdrant collection names.
+
+**What is reused as-is (the engine):** the LangGraph graph, the hybrid + graph + reranker
+retrieval, the Contextual Retrieval, the clarification gate, and the validation + literal
+citation. That is, **all the engineering value is portable**; what is specific is the domain
+configuration.
+
+> Note: today those domain pieces live in the code (not parameterized in a config file).
+> Extracting them into configuration is natural future work, but the conceptual
+> engine/domain separation already exists.
+
+---
+
+## How to run
+
+Requirements: Python 3.12+, dependencies managed with [`uv`](https://docs.astral.sh/uv/), and
+a `.env` (see [`.env.example`](.env.example)) with `OPENAI_API_KEY`, `QDRANT_URL`,
+`QDRANT_API_KEY` and, optionally, the LangSmith keys.
 
 ```bash
-# CLI interactivo
+# interactive CLI
 python main.py
 
-# LangGraph Studio (depuración visual del grafo, paso a paso)
+# LangGraph Studio (visual step-by-step debugging of the graph)
 langgraph dev --no-reload
 
-# Forzar un modo de recuperación
+# Force a retrieval mode
 python main.py iterative        # baseline | iterative | graph
 ```
 
-Indexado del corpus (una vez):
+Corpus indexing (once):
 
 ```bash
-python chunks/contextualize.py                                      # enriquece los chunks
-python chunks/subir_a_qdrant_hibrido.py chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
-python -m graph.lightrag_track                                      # construye el grafo
+python chunks/contextualize.py                                      # enriches the chunks
+python chunks/upload_to_qdrant_hybrid.py chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
+python -m graph.lightrag_track                                      # builds the graph
 ```
 
 ---
 
-## Evaluación
+## Evaluation
 
-Un único conjunto **`EVAL_SET`** (151 preguntas) etiquetadas por tipo
-(**simple / single_hop / multihop / adversarial**) mide la calidad **por tipo de pregunta** con
-**RAGAS** (faithfulness + context precision + context recall). El A/B entre retrievers solo
-cambia la recuperación (la generación es compartida), y la colección es elegible por env para
-comparar versiones del índice:
+A single **`EVAL_SET`** (151 questions) labelled by type
+(**simple / single_hop / multihop / adversarial**) measures quality **by question type** with
+**RAGAS** (faithfulness + context precision + context recall). The A/B between retrievers only
+changes retrieval (generation is shared), and the collection is selectable via env to compare
+index versions:
 
 ```bash
 PIPELINE=graph python evaluation.py
-QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py   # A/B sin contexto
+QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py   # A/B without context
 ```
 
-> Las referencias del set las redactó el modelo a partir de las guías y **están pendientes de
-> revisión clínica**; los números son indicativos.
+> The set's references were drafted by the model from the guidelines and **are pending
+> clinical review**; the numbers are indicative.
 
 ---
 
-## Estructura del repositorio
+## Repository structure
 
-| Ruta | Qué es |
+| Path | What it is |
 |------|--------|
-| `main.py` | Grafo LangGraph + generación estructurada (punto de entrada). |
-| `rag.py` | Pipeline de recuperación: híbrido, rerank, refine, validate, prompts. |
-| `evidence.py` | Formateo de respuesta y panel de fuentes con citas literales. |
-| `evaluation.py` | Evaluación RAGAS (`EVAL_SET`, por tier). |
-| `agentic/` · `graph/` | Recuperación iterativa (Track A) y por grafo LightRAG (Track B). |
-| `chunks/` | Chunking, contextualización y subida a Qdrant (incluye `chunks.jsonl`). |
-| `data/` | Corpus: `markdown/` (las 7 guías GeSIDA, fuente real) y `textos/`. Los PDFs originales (`pdfs/`) no se versionan (ver `data/README.md`). |
-| `resultados/` | CSV de evaluación RAGAS (un fichero por pipeline). |
-| `docs/` | Documentos de diseño y diagramas de arquitectura. |
-| `CLAUDE.md` | Documento vivo de contexto, decisiones y hallazgos. |
+| `main.py` | LangGraph graph + structured generation (entry point). |
+| `rag.py` | Retrieval pipeline: hybrid, rerank, refine, validate, prompts. |
+| `evidence.py` | Answer formatting and sources panel with literal citations. |
+| `evaluation.py` | RAGAS evaluation (`EVAL_SET`, per tier). |
+| `agentic/` · `graph/` | Iterative retrieval (Track A) and LightRAG graph retrieval (Track B). |
+| `chunks/` | Chunking, contextualization and upload to Qdrant (includes `chunks.jsonl`). |
+| `data/` | Corpus: `markdown/` (the 7 GeSIDA guides, real source) and `textos/`. The original PDFs (`pdfs/`) are not versioned (see `data/README.md`). |
+| `resultados/` | RAGAS evaluation CSVs (one file per pipeline). |
+| `docs/` | Design documents and architecture diagrams. |
+| `CLAUDE.md` | Living document of context, decisions and findings. |
 
 ---
 
-## Licencia
+## Authorship and workflow
 
-El **código** se publica bajo licencia **MIT** (ver [`LICENSE`](LICENSE)): úsalo, cópialo o
-modifícalo libremente conservando el aviso de copyright. La licencia **NO cubre el contenido de
-`data/`**: las guías de GeSIDA son obra y propiedad de sus autores y se incluyen únicamente para
-la demostración del prototipo.
+This project was built with an **agentic programming** workflow: I supply the **ideas,
+judgment and decisions**, and **Claude Code (Anthropic)** carries out the implementation under
+that direction. The important distinction is not "hand-written vs. generated code", but **who
+decides what gets done and why**: that is mine from start to finish.
 
-## Aviso
+**What I did (design and judgment):**
+- **Conception and goal** of the system: an evidence-grounded medical RAG for the GeSIDA
+  guidelines, with the explicit priority #1 of **not hallucinating**.
+- **Architecture and design decisions:** the LangGraph pipeline with a shared head/tail and
+  interchangeable retrieval; the clarification gate (*slot-filling*) with clinical knowledge
+  as the primary path; the enriched re-retrieval; the decision to **discard the graph's
+  synthetic text for generation** and cite only literal text. I resolved every trade-off
+  (cost, latency, quality), and the "why" of each is documented in [`CLAUDE.md`](CLAUDE.md).
+- **Stack choice** (LangGraph, Qdrant EU, LightRAG, local reranker) and the **constraints**
+  that condition it (GDPR, EU region, encapsulating the LLM calls to migrate to Azure).
+- **Evaluation methodology:** defining the question *tiers*, which RAGAS metrics are reliable
+  and which are artifacts, and reading the A/Bs to decide (e.g. graph as the default).
+- **The corpus and its handling:** the requirement of absolute fidelity in the PDF→Markdown
+  transcription and the prompt that governs it ([`data/prompt.txt`](data/prompt.txt)).
+- **Continuous direction:** the phased roadmap, the review of every change, and the course
+  corrections when the implementation did not fit the judgment.
 
-Herramienta de apoyo a la decisión clínica en fase de prototipo. **No sustituye el juicio
-médico** ni constituye consejo clínico.
+**What I delegated to Claude Code (implementation under direction):**
+- **Writing the code** of the nodes, retrieval primitives, integrations (Qdrant, LangSmith,
+  LightRAG) and utilities, from my design decisions.
+- **The PDF→Markdown extraction scripts**, adapted to each guide's peculiarities.
+- **Debugging and iteration:** environment setup (including the reranker's GPU acceleration),
+  error resolution, refactors and repetitive work.
+- **Drafting documentation artifacts** (including much of this README and of
+  [`CLAUDE.md`](CLAUDE.md)) following my outline and corrections.
+
+In short: **the engineering of decisions is mine; the mechanical execution is assisted.** The
+value I want to show here is twofold — the system design and the ability to direct an agentic
+development workflow with judgment.
+
+---
+
+## License
+
+The **code** is published under the **MIT** license (see [`LICENSE`](LICENSE)): use, copy or
+modify it freely while keeping the copyright notice. The license **does NOT cover the contents
+of `data/`**: the GeSIDA guidelines are the work and property of their authors and are included
+solely for the prototype's demonstration.
+
+## Disclaimer
+
+Clinical decision-support tool in prototype stage. It **does not replace medical judgment**
+nor does it constitute clinical advice.

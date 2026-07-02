@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-subir_a_qdrant_hibrido.py
-=========================
-Igual que subir_a_qdrant.py, pero crea una colección NUEVA preparada para
-búsqueda híbrida (densa + sparse) sin tocar la colección original 'guias_vih'.
+upload_to_qdrant_hybrid.py
+==========================
+Same as upload_to_qdrant.py, but creates a NEW collection prepared for
+hybrid search (dense + sparse) without touching the original 'guias_vih' collection.
 
-Cada punto lleva DOS vectores:
-  - "dense": embedding semántico de OpenAI (text-embedding-3-large, 3072 dim).
-  - "bm25":  vector sparse léxico (BM25, calculado en LOCAL con fastembed). El
-             IDF lo calcula Qdrant en su lado (Modifier.IDF).
+Each point carries TWO vectors:
+  - "dense": OpenAI semantic embedding (text-embedding-3-large, 3072 dim).
+  - "bm25":  sparse lexical vector (BM25, computed LOCALLY with fastembed). The
+             IDF is computed by Qdrant on its side (Modifier.IDF).
 
-La búsqueda híbrida se hace en query-time con la Query API de Qdrant
-(prefetch denso + prefetch sparse, fusionados con RRF). Ver rag.py.
+The hybrid search is done at query time with Qdrant's Query API
+(dense prefetch + sparse prefetch, fused with RRF). See rag.py.
 
-Uso:
-    python chunks/subir_a_qdrant_hibrido.py chunks/chunks.jsonl
-    python chunks/subir_a_qdrant_hibrido.py chunks/chunks.jsonl --recreate
-    python chunks/subir_a_qdrant_hibrido.py chunks/chunks.jsonl --dry-run
-    # Contextual Retrieval a una coleccion NUEVA (no toca la actual; permite A/B y volver atras):
-    python chunks/subir_a_qdrant_hibrido.py chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
+Usage:
+    python chunks/upload_to_qdrant_hybrid.py chunks/chunks.jsonl
+    python chunks/upload_to_qdrant_hybrid.py chunks/chunks.jsonl --recreate
+    python chunks/upload_to_qdrant_hybrid.py chunks/chunks.jsonl --dry-run
+    # Contextual Retrieval to a NEW collection (does not touch the current one; allows A/B and rollback):
+    python chunks/upload_to_qdrant_hybrid.py chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
 """
 
 import argparse
@@ -42,13 +42,13 @@ QDRANT_URL     = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-COLLECTION = "guias_vih_hibrida"     # colección NUEVA; la original queda intacta
+COLLECTION = "guias_vih_hibrida"     # NEW collection; the original stays intact
 
 EMBED_MODEL = "text-embedding-3-large"
 EMBED_DIM   = 3072
-TRUNCATE_DIM = None                  # None = 3072 nativo
+TRUNCATE_DIM = None                  # None = native 3072
 
-BM25_MODEL = "Qdrant/bm25"           # sparse léxico, corre en local
+BM25_MODEL = "Qdrant/bm25"           # sparse lexical, runs locally
 
 BATCH_SIZE = 96
 PRICE_PER_1M_TOKENS = 0.13
@@ -63,7 +63,7 @@ def load_chunks(path: Path):
 
 
 def stable_id(chunk_id: str) -> str:
-    """UUID determinista a partir del chunk_id -> upserts idempotentes."""
+    """Deterministic UUID from the chunk_id -> idempotent upserts."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))
 
 
@@ -72,19 +72,19 @@ def vector_dim() -> int:
 
 
 def embed_batch(client: OpenAI, texts):
-    """Embeddings densos de OpenAI con reintentos simples."""
+    """OpenAI dense embeddings with simple retries."""
     kwargs = {"model": EMBED_MODEL, "input": texts}
     if TRUNCATE_DIM:
         kwargs["dimensions"] = TRUNCATE_DIM
-    for intento in range(5):
+    for attempt in range(5):
         try:
             resp = client.embeddings.create(**kwargs)
             return [d.embedding for d in resp.data]
         except Exception as e:
-            wait = 2 ** intento
-            print(f"    aviso: fallo de API ({e}); reintento en {wait}s", file=sys.stderr)
+            wait = 2 ** attempt
+            print(f"    warning: API failure ({e}); retrying in {wait}s", file=sys.stderr)
             time.sleep(wait)
-    raise RuntimeError("Fallaron los reintentos de embeddings")
+    raise RuntimeError("Embedding retries failed")
 
 
 def ensure_collection(client: QdrantClient, recreate: bool, collection: str):
@@ -95,7 +95,7 @@ def ensure_collection(client: QdrantClient, recreate: bool, collection: str):
     if not exists:
         client.create_collection(
             collection_name=collection,
-            # Vectores con NOMBRE: denso + sparse en cada punto.
+            # NAMED vectors: dense + sparse on each point.
             vectors_config={
                 "dense": models.VectorParams(
                     size=vector_dim(),
@@ -103,7 +103,7 @@ def ensure_collection(client: QdrantClient, recreate: bool, collection: str):
                 ),
             },
             sparse_vectors_config={
-                # Qdrant calcula el IDF de BM25 en su lado a partir del corpus.
+                # Qdrant computes the BM25 IDF on its side from the corpus.
                 "bm25": models.SparseVectorParams(modifier=models.Modifier.IDF),
             },
         )
@@ -115,54 +115,54 @@ def ensure_collection(client: QdrantClient, recreate: bool, collection: str):
             client.create_payload_index(
                 collection, field_name=f,
                 field_schema=models.PayloadSchemaType.INTEGER)
-        print(f"Coleccion '{collection}' creada (dense {vector_dim()}d coseno + sparse bm25 IDF).")
+        print(f"Collection '{collection}' created (dense {vector_dim()}d cosine + sparse bm25 IDF).")
     else:
-        print(f"Coleccion '{collection}' ya existe; se hara upsert.")
+        print(f"Collection '{collection}' already exists; will upsert.")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("jsonl", help="Archivo chunks.jsonl")
+    ap.add_argument("jsonl", help="chunks.jsonl file")
     ap.add_argument("--collection", default=COLLECTION,
-                    help=f"Nombre de la coleccion destino (por defecto '{COLLECTION}'). "
-                         "Usa otro nombre (p.ej. guias_vih_hibrida_ctx) para NO sobrescribir "
-                         "la actual y poder hacer A/B o volver atras.")
-    ap.add_argument("--recreate", action="store_true", help="Borra la coleccion antes de subir")
-    ap.add_argument("--dry-run", action="store_true", help="No sube; valida y estima coste")
+                    help=f"Target collection name (default '{COLLECTION}'). "
+                         "Use another name (e.g. guias_vih_hibrida_ctx) to NOT overwrite "
+                         "the current one and be able to A/B or roll back.")
+    ap.add_argument("--recreate", action="store_true", help="Delete the collection before uploading")
+    ap.add_argument("--dry-run", action="store_true", help="No upload; validate and estimate cost")
     args = ap.parse_args()
 
     chunks = load_chunks(Path(args.jsonl))
     tot_tokens = sum(c.get("n_tokens", 0) for c in chunks)
-    coste = tot_tokens / 1_000_000 * PRICE_PER_1M_TOKENS
+    cost = tot_tokens / 1_000_000 * PRICE_PER_1M_TOKENS
     print(f"{len(chunks)} chunks | ~{tot_tokens:,} tokens | "
-          f"coste estimado embeddings ~ ${coste:.3f}")
+          f"estimated embedding cost ~ ${cost:.3f}")
 
     if args.dry_run:
-        print("dry-run: no se sube nada.")
+        print("dry-run: nothing is uploaded.")
         return
 
     missing = [n for n, v in [("OPENAI_API_KEY", OPENAI_API_KEY),
                               ("QDRANT_URL", QDRANT_URL),
                               ("QDRANT_API_KEY", QDRANT_API_KEY)] if not v]
     if missing:
-        print(f"Faltan variables de entorno: {', '.join(missing)}", file=sys.stderr)
+        print(f"Missing environment variables: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
 
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
     qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-    bm25 = SparseTextEmbedding(BM25_MODEL)        # descarga el modelo la 1ª vez
+    bm25 = SparseTextEmbedding(BM25_MODEL)        # downloads the model the 1st time
     ensure_collection(qdrant, args.recreate, args.collection)
 
     for start in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[start:start + BATCH_SIZE]
-        # Contextual Retrieval: si el chunk trae "text_for_retrieval" (contexto + texto,
-        # generado por chunks/contextualize.py), se EMBEBE e INDEXA en BM25 esa versión
-        # enriquecida para mejorar el matching; si no, cae al texto crudo (compatibilidad).
-        # El payload conserva el chunk entero, así que p["text"] sigue siendo el LITERAL
-        # citable (evidence.py cita "text", no "text_for_retrieval").
-        textos = [c.get("text_for_retrieval", c["text"]) for c in batch]
-        dense_vecs = embed_batch(openai_client, textos)
-        sparse_vecs = list(bm25.embed(textos))    # BM25 local (documentos)
+        # Contextual Retrieval: if the chunk carries "text_for_retrieval" (context + text,
+        # produced by chunks/contextualize.py), that enriched version is EMBEDDED and
+        # BM25-INDEXED to improve matching; otherwise it falls back to the raw text (compat).
+        # The payload keeps the whole chunk, so p["text"] is still the citable LITERAL
+        # (evidence.py cites "text", not "text_for_retrieval").
+        texts = [c.get("text_for_retrieval", c["text"]) for c in batch]
+        dense_vecs = embed_batch(openai_client, texts)
+        sparse_vecs = list(bm25.embed(texts))    # local BM25 (documents)
         points = [
             models.PointStruct(
                 id=stable_id(c["chunk_id"]),
@@ -178,9 +178,9 @@ def main():
             for c, dense, sp in zip(batch, dense_vecs, sparse_vecs)
         ]
         qdrant.upsert(collection_name=args.collection, points=points)
-        print(f"  subidos {min(start + BATCH_SIZE, len(chunks))}/{len(chunks)}")
+        print(f"  uploaded {min(start + BATCH_SIZE, len(chunks))}/{len(chunks)}")
 
-    print(f"Listo. Ingesta hibrida completada en Qdrant Cloud (coleccion '{args.collection}').")
+    print(f"Done. Hybrid ingestion completed in Qdrant Cloud (collection '{args.collection}').")
 
 
 if __name__ == "__main__":

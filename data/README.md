@@ -1,32 +1,33 @@
-# Datos / corpus
+# Data / corpus
 
-Material fuente del chatbot: las 7 guías clínicas de VIH de **GeSIDA**.
+Source material of the chatbot: the 7 HIV clinical guidelines from **GeSIDA**.
 
-- **`pdfs/`** — los PDFs originales. **No se versionan en este repositorio** (están en
-  `.gitignore`): son obra de GeSIDA, así que se mantienen solo en local y no se redistribuyen.
-  Se descargan de GeSIDA si se necesitan.
-- **`markdown/`** — los PDFs convertidos a Markdown; es el **corpus real** del que se hace el
-  chunking (`../chunks/`).
-- **`textos/`** — extracciones de texto plano de los originales (provenance / respaldo).
+- **`pdfs/`** — the original PDFs. **Not versioned in this repository** (they are in
+  `.gitignore`): they are the work of GeSIDA, so they are kept locally only and not
+  redistributed. Downloaded from GeSIDA if needed.
+- **`markdown/`** — the PDFs converted to Markdown; this is the **actual corpus** that the
+  chunking (`../chunks/`) runs on.
+- **`textos/`** — plain-text extractions of the originals (provenance / backup).
 
-## Cómo se generaron los Markdown
+## How the Markdown was generated
 
-Cada `.md` se obtuvo del PDF correspondiente con **código de extracción generado con Claude
-Code y adaptado a cada PDF por separado**. No hay un único script genérico: cada guía tiene
-particularidades de maquetación (tablas, numeración de secciones, notas al pie, columnas) que
-no son extrapolables a las demás, de modo que la extracción se ajustó documento a documento.
+Each `.md` was obtained from the corresponding PDF with **extraction code generated with Claude
+Code and adapted to each PDF separately**. There is no single generic script: each guide has
+layout peculiarities (tables, section numbering, footnotes, columns) that are not
+extrapolable to the others, so the extraction was tuned document by document.
 
-La conversión se apoya en la librería de **transcripción** PDF→Markdown `pymupdf4llm`, que
-**copia el texto literal, no lo genera** (sin modelos de visión que "interpreten" la
-estructura). Es una decisión deliberada: el objetivo nº 1 del proyecto es no alucinar, y eso
-empieza por que el corpus sea **fiel al original**, sin que un modelo "reescriba" el contenido
-de las guías en el paso de ingesta.
+The conversion relies on the PDF→Markdown **transcription** library `pymupdf4llm`, which
+**copies the literal text, it does not generate it** (no vision models "interpreting" the
+structure). This is a deliberate decision: the project's #1 goal is not to hallucinate, and
+that starts with the corpus being **faithful to the original**, without a model "rewriting"
+the guidelines' content in the ingestion step.
 
-El **prompt** que se usó para dirigir esta conversión está en [`prompt.txt`](prompt.txt). Marca
-la fidelidad como regla absoluta (no parafrasear/resumir/reconstruir; omitir con una marca
-`> _[... omitido — consultar PDF original]_` lo que no se pueda extraer con garantía) y define
-el proceso: inspeccionar el PDF para hallar sus particularidades → construir un script
-`pymupdf4llm` adaptado a ellas → validar encabezados y muestras → iterar hasta que sea fiel.
+The **prompt** used to drive this conversion is in [`prompt.txt`](prompt.txt). It sets
+fidelity as an absolute rule (no paraphrasing/summarizing/reconstructing; omit, with a
+`> _[... omitido — consultar PDF original]_` marker, anything that cannot be extracted
+reliably) and defines the process: inspect the PDF to find its peculiarities → build a
+`pymupdf4llm` script adapted to them → validate headings and samples → iterate until it is
+faithful.
 
-> Los derechos y la autoría del contenido pertenecen a GeSIDA; aquí solo se transcribe para uso
-> del prototipo.
+> The rights and authorship of the content belong to GeSIDA; here it is only transcribed for
+> use by the prototype.

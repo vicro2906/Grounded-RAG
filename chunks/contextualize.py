@@ -3,32 +3,32 @@
 """
 contextualize.py
 ================
-Contextual Retrieval (estilo Anthropic) para los chunks de las guías GeSIDA.
+Contextual Retrieval (Anthropic-style) for the GeSIDA guideline chunks.
 
-PROBLEMA QUE RESUELVE: al trocear las guías, cada chunk pierde el contexto del que vino.
-Un fragmento que dice "se administra a 50 mg/12 h" no menciona NI el fármaco NI que es la
-pauta con rifampicina; un fragmento sobre "primer trimestre" puede no decir "embarazo".
-El buscador (denso + BM25) entonces no casa ese chunk con la pregunta aunque sea el correcto.
+PROBLEM IT SOLVES: when the guides are chunked, each chunk loses the context it came from.
+A fragment that says "it is given at 50 mg/12 h" mentions NEITHER the drug NOR that it is the
+rifampicin regimen; a fragment about "first trimester" may not say "pregnancy". The search
+engine (dense + BM25) then fails to match that chunk to the question even if it is the right one.
 
-QUÉ HACE: por cada chunk, un LLM barato (gpt-4o-mini) escribe 1-2 frases en español que
-SITÚAN el fragmento dentro de su guía (de qué trata, a qué sección/población aplica),
-usando como contexto el título de la guía, el section_path y una VENTANA de chunks vecinos.
-Ese contexto se ANTEPONE al texto SOLO para la recuperación (`text_for_retrieval`), mientras
-que el `text` literal se conserva intacto para la CITA. Es decir: el texto sintético dirige
-el matching, pero NUNCA se cita (respeta la prioridad nº1: no alucinar / cita verificable).
+WHAT IT DOES: for each chunk, a cheap LLM (gpt-4o-mini) writes 1-2 Spanish sentences that
+SITUATE the fragment within its guide (what it is about, which section/population it applies to),
+using as context the guide title, the section_path and a WINDOW of neighbouring chunks.
+That context is PREPENDED to the text ONLY for retrieval (`text_for_retrieval`), while the
+literal `text` is kept intact for the CITATION. That is: the synthetic text steers the
+matching, but is NEVER cited (respects priority #1: do not hallucinate / verifiable citation).
 
-SALIDA: chunks_contextual.jsonl = los mismos chunks + dos campos nuevos:
-  - "context":            la(s) frase(s) generada(s).
-  - "text_for_retrieval": f"{context}\n\n{text}"  (lo que el uploader embebe e indexa en BM25).
-Luego: python chunks/subir_a_qdrant_hibrido.py chunks/chunks_contextual.jsonl --recreate
-(el uploader ya usa text_for_retrieval si existe, y guarda `text` literal en el payload).
+OUTPUT: chunks_contextual.jsonl = the same chunks + two new fields:
+  - "context":            the generated sentence(s).
+  - "text_for_retrieval": f"{context}\n\n{text}"  (what the uploader embeds and BM25-indexes).
+Then: python chunks/upload_to_qdrant_hybrid.py chunks/chunks_contextual.jsonl --recreate
+(the uploader already uses text_for_retrieval if present, and stores the literal `text` in the payload).
 
-Resumible: si --out ya existe, se saltan los chunk_id ya hechos (se escribe incremental).
+Resumable: if --out already exists, the already-done chunk_ids are skipped (written incrementally).
 
-Uso:
-    python chunks/contextualize.py --dry-run                 # estima coste, no llama al LLM
-    python chunks/contextualize.py --limit 10                # SONDA: solo 10 (mide coste real)
-    python chunks/contextualize.py                           # todos (resumible)
+Usage:
+    python chunks/contextualize.py --dry-run                 # estimates cost, no LLM call
+    python chunks/contextualize.py --limit 10                # PROBE: only 10 (measures real cost)
+    python chunks/contextualize.py                           # all (resumable)
 """
 
 import argparse
@@ -48,13 +48,13 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 DEFAULT_IN  = "chunks/chunks.jsonl"
 DEFAULT_OUT = "chunks/chunks_contextual.jsonl"
-DEFAULT_MODEL = "gpt-4o-mini"     # barato; encapsulado aquí para poder migrar a Azure si hace falta
-DEFAULT_WINDOW = 2                # nº de chunks vecinos (antes y después) que se pasan como contexto
+DEFAULT_MODEL = "gpt-4o-mini"     # cheap; encapsulated here so we can migrate to Azure if needed
+DEFAULT_WINDOW = 2                # number of neighbour chunks (before and after) passed as context
 
-# Precios gpt-4o-mini (verificar; pueden cambiar). Para la estimación del --dry-run.
+# gpt-4o-mini prices (verify; may change). For the --dry-run estimate.
 PRICE_IN_PER_1M  = 0.15
 PRICE_OUT_PER_1M = 0.60
-EST_OUT_TOKENS = 80              # las 1-2 frases de contexto
+EST_OUT_TOKENS = 80              # the 1-2 context sentences
 
 SYS_PROMPT = (
     "Eres un asistente que prepara fragmentos de guías clínicas de VIH (GeSIDA) para un "
@@ -77,7 +77,7 @@ def load_chunks(path: Path):
 
 
 def group_ordered(chunks):
-    """Agrupa por guía y ordena por chunk_index, para poder dar a cada chunk sus vecinos."""
+    """Group by guide and sort by chunk_index, so each chunk can be given its neighbours."""
     by_doc = {}
     for c in chunks:
         by_doc.setdefault(c.get("source_file", "?"), []).append(c)
@@ -100,14 +100,14 @@ def build_user_prompt(chunk, neighbors_text):
 
 
 def neighbors_for(doc_chunks, i, window):
-    """Texto de los `window` chunks antes y después del chunk i dentro de su guía."""
+    """Text of the `window` chunks before and after chunk i within its guide."""
     lo, hi = max(0, i - window), min(len(doc_chunks), i + window + 1)
     parts = [doc_chunks[j]["text"] for j in range(lo, hi) if j != i]
     return "\n---\n".join(parts) or "(sin vecinos)"
 
 
 def estimate_cost(by_doc, window):
-    """Estimación de tokens/coste SIN llamar al LLM (usa n_tokens de cada chunk)."""
+    """Token/cost estimate WITHOUT calling the LLM (uses each chunk's n_tokens)."""
     sys_tok = len(SYS_PROMPT) // 4
     in_tok = 0
     n = 0
@@ -115,7 +115,7 @@ def estimate_cost(by_doc, window):
         for i, c in enumerate(doc):
             lo, hi = max(0, i - window), min(len(doc), i + window + 1)
             neigh = sum(doc[j].get("n_tokens", 0) for j in range(lo, hi) if j != i)
-            in_tok += sys_tok + c.get("n_tokens", 0) + neigh + 120  # 120 = scaffolding aprox
+            in_tok += sys_tok + c.get("n_tokens", 0) + neigh + 120  # 120 = approx scaffolding
             n += 1
     out_tok = n * EST_OUT_TOKENS
     cost = in_tok / 1e6 * PRICE_IN_PER_1M + out_tok / 1e6 * PRICE_OUT_PER_1M
@@ -137,39 +137,39 @@ def contextualize_one(client, model, chunk, neighbors_text):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="inp", default=DEFAULT_IN, help="chunks.jsonl de entrada")
-    ap.add_argument("--out", default=DEFAULT_OUT, help="jsonl de salida (resumible)")
+    ap.add_argument("--in", dest="inp", default=DEFAULT_IN, help="input chunks.jsonl")
+    ap.add_argument("--out", default=DEFAULT_OUT, help="output jsonl (resumable)")
     ap.add_argument("--model", default=DEFAULT_MODEL)
-    ap.add_argument("--window", type=int, default=DEFAULT_WINDOW, help="vecinos antes/después")
-    ap.add_argument("--limit", type=int, default=0, help="solo N chunks (SONDA de coste real)")
-    ap.add_argument("--source", default="", help="solo chunks cuyo source_file contenga este "
-                    "texto (p.ej. VIH_TB) — para sondear casos difíciles; vecinos se toman del doc completo")
+    ap.add_argument("--window", type=int, default=DEFAULT_WINDOW, help="neighbours before/after")
+    ap.add_argument("--limit", type=int, default=0, help="only N chunks (real-cost PROBE)")
+    ap.add_argument("--source", default="", help="only chunks whose source_file contains this "
+                    "text (e.g. VIH_TB) — to probe hard cases; neighbours are taken from the whole doc")
     ap.add_argument("--max-workers", type=int, default=2,
-                    help="concurrencia; bajo (2) para no saturar el tope de TPM (200k en mini)")
-    ap.add_argument("--dry-run", action="store_true", help="estima coste; no llama al LLM")
+                    help="concurrency; low (2) so as not to saturate the TPM cap (200k on mini)")
+    ap.add_argument("--dry-run", action="store_true", help="estimate cost; no LLM call")
     args = ap.parse_args()
 
     chunks = load_chunks(Path(args.inp))
     by_doc = group_ordered(chunks)
 
     n, in_tok, out_tok, cost = estimate_cost(by_doc, args.window)
-    print(f"{n} chunks | ~{in_tok:,} tok entrada + ~{out_tok:,} tok salida | "
-          f"coste estimado (mini) ~ ${cost:.3f}")
+    print(f"{n} chunks | ~{in_tok:,} input tok + ~{out_tok:,} output tok | "
+          f"estimated cost (mini) ~ ${cost:.3f}")
     if args.dry_run:
-        print("dry-run: no se llama al LLM.")
+        print("dry-run: the LLM is not called.")
         return
 
     if not OPENAI_API_KEY:
-        print("Falta OPENAI_API_KEY", file=sys.stderr)
+        print("Missing OPENAI_API_KEY", file=sys.stderr)
         sys.exit(1)
 
     out_path = Path(args.out)
     done = set()
     if out_path.exists():
         done = {json.loads(l)["chunk_id"] for l in out_path.open(encoding="utf-8")}
-        print(f"Reanudando: {len(done)} chunks ya hechos en {out_path.name}, se saltan.")
+        print(f"Resuming: {len(done)} chunks already done in {out_path.name}, skipped.")
 
-    # Lista de trabajo: (chunk, neighbors_text), saltando los ya hechos y respetando --limit.
+    # Work list: (chunk, neighbors_text), skipping the already-done ones and honouring --limit.
     work = []
     for doc in by_doc.values():
         for i, c in enumerate(doc):
@@ -180,13 +180,13 @@ def main():
             work.append((c, neighbors_for(doc, i, args.window)))
     if args.limit:
         work = work[:args.limit]
-    print(f"A procesar: {len(work)} chunks (modelo {args.model}, ventana {args.window}).")
+    print(f"To process: {len(work)} chunks (model {args.model}, window {args.window}).")
 
-    # max_retries alto: el SDK reintenta los 429 (TPM) con backoff exponencial respetando
-    # Retry-After, así el job se autorregula al tope de tokens/min en vez de saltarse chunks.
+    # High max_retries: the SDK retries 429s (TPM) with exponential backoff honouring
+    # Retry-After, so the job self-regulates to the tokens/min cap instead of skipping chunks.
     client = OpenAI(api_key=OPENAI_API_KEY, max_retries=10)
     write_lock = threading.Lock()
-    f_out = out_path.open("a", encoding="utf-8")   # append: incremental + resumible
+    f_out = out_path.open("a", encoding="utf-8")   # append: incremental + resumable
 
     def task(item):
         chunk, neigh = item
@@ -205,20 +205,20 @@ def main():
                 try:
                     enriched = fut.result()
                 except Exception as e:
-                    print(f"  fallo en {chunk['chunk_id']}: {e}", file=sys.stderr)
+                    print(f"  failure on {chunk['chunk_id']}: {e}", file=sys.stderr)
                     continue
                 with write_lock:
                     f_out.write(json.dumps(enriched, ensure_ascii=False) + "\n")
                     f_out.flush()
                     n_ok += 1
                     if n_ok % 25 == 0:
-                        print(f"  {n_ok}/{len(work)} contextualizados")
+                        print(f"  {n_ok}/{len(work)} contextualized")
     finally:
         f_out.close()
 
-    print(f"Listo: {n_ok} chunks contextualizados -> {out_path}")
-    print("Siguiente (sube a una coleccion NUEVA, no sobrescribe la actual):")
-    print(f"  python chunks/subir_a_qdrant_hibrido.py {args.out} "
+    print(f"Done: {n_ok} chunks contextualized -> {out_path}")
+    print("Next (upload to a NEW collection, does not overwrite the current one):")
+    print(f"  python chunks/upload_to_qdrant_hybrid.py {args.out} "
           "--collection guias_vih_hibrida_ctx")
 
 

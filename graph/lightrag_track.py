@@ -158,7 +158,7 @@ def _ensure_rag():
     if _rag is None:
         if not os.path.isdir(WORKING_DIR):
             raise SystemExit(
-                f"No existe {WORKING_DIR}/. Construye el grafo primero: "
+                f"{WORKING_DIR}/ does not exist. Build the graph first: "
                 f".venv\\Scripts\\python.exe -m graph.lightrag_track"
             )
         _loop = asyncio.new_event_loop()

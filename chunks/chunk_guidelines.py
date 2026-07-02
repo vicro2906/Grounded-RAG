@@ -1,35 +1,34 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-chunk_guias.py
-==============
-Trocea guías clínicas de VIH (GeSIDA/SPNS) en formato Markdown en *chunks*
-estructurados con metadatos, listos para indexar en un sistema RAG.
+chunk_guidelines.py
+===================
+Splits HIV clinical guidelines (GeSIDA/SPNS) in Markdown into structured *chunks*
+with metadata, ready to index in a RAG system.
 
-Section (texto crudo por encabezados, tamaño irregular) → normalize ajusta el tamaño y 
-produce units (texto del tamaño bueno + metadatos estructurales heredados) → 
-build_chunks le añade los metadatos que dependen del texto final y le antepone el breadcrumb 
-al cuerpo → Chunk (el objeto definitivo que se serializa a JSONL y se sube a Qdrant).
+Section (raw text per heading, irregular size) → normalize adjusts the size and
+produces units (well-sized text + inherited structural metadata) →
+build_chunks adds the metadata that depends on the final text and prepends the breadcrumb
+to the body → Chunk (the final object serialized to JSONL and uploaded to Qdrant).
 
-Estrategia: troceo CONSCIENTE DE LA ESTRUCTURA (header-aware) con
-normalización de tamaño.
-  1. Parsea cada .md en un árbol de secciones según los encabezados ##, ###,
-     ####, #####  conservando la ruta jerárquica completa (breadcrumb).
-  2. Cada sección "hoja" (texto hasta el siguiente encabezado) es la unidad base.
-  3. Normaliza tamaño:
-        - secciones grandes  -> se parten por párrafos con solape.
-        - secciones pequeñas -> se fusionan con hermanas del mismo padre H2.
-        - tablas / recomendaciones / abreviaturas -> se mantienen intactas.
-  4. Etiqueta cada chunk con metadatos (tema, ruta, tipo de contenido, grados
-     de evidencia, números de sección, etc.).
-  5. Exporta a JSONL (un chunk por línea) -> formato estándar de ingesta RAG.
+Strategy: STRUCTURE-AWARE (header-aware) chunking with size normalization.
+  1. Parse each .md into a tree of sections by the ##, ###, ####, ##### headings,
+     keeping the full hierarchical path (breadcrumb).
+  2. Each "leaf" section (text up to the next heading) is the base unit.
+  3. Normalize size:
+        - large sections  -> split by paragraphs with overlap.
+        - small sections  -> merged with siblings under the same H2 parent.
+        - tables / recommendations / abbreviations -> kept intact.
+  4. Tag each chunk with metadata (topic, path, content type, evidence grades,
+     section numbers, etc.).
+  5. Export to JSONL (one chunk per line) -> standard RAG ingestion format.
 
-Sin dependencias obligatorias (solo librería estándar). Si 'tiktoken' está
-instalado se usa para contar tokens; si no, se usa una estimación por caracteres.
+No mandatory dependencies (standard library only). If 'tiktoken' is installed it is
+used to count tokens; otherwise a character-based estimate is used.
 
-Uso:
-    python chunk_guias.py /ruta/a/los/md  -o salida.jsonl
-    python chunk_guias.py archivo1.md archivo2.md -o salida.jsonl
+Usage:
+    python chunk_guidelines.py /path/to/the/md  -o output.jsonl
+    python chunk_guidelines.py file1.md file2.md -o output.jsonl
 """
 
 import argparse
@@ -42,18 +41,18 @@ from pathlib import Path
 from typing import List, Optional
 
 # ---------------------------------------------------------------------------
-# 0. CONFIGURACIÓN
+# 0. CONFIGURATION
 # ---------------------------------------------------------------------------
 
-# Tamaños objetivo expresados en TOKENS (aprox). Ajustables a tu modelo de
-# embeddings. ~512-800 tokens es un buen rango para recuperación clínica.
-TARGET_TOKENS = 600     # tamaño ideal de un chunk
-MAX_TOKENS    = 900     # por encima de esto se parte una sección
-MIN_TOKENS    = 200     # por debajo de esto se intenta fusionar
-OVERLAP_TOKENS = 80     # solape al partir secciones grandes
+# Target sizes expressed in TOKENS (approx). Tunable to your embedding model.
+# ~512-800 tokens is a good range for clinical retrieval.
+TARGET_TOKENS = 600     # ideal size of a chunk
+MAX_TOKENS    = 900     # above this a section is split
+MIN_TOKENS    = 200     # below this we try to merge
+OVERLAP_TOKENS = 80     # overlap when splitting large sections
 
-# Registro de documentos: metadatos a nivel de fichero. Es más fiable
-# asignarlos aquí que intentar parsearlos del texto. Edítalo si añades docs.
+# Document registry: file-level metadata. It is more reliable to set it here than
+# to try to parse it from the text. Edit it when you add docs.
 DOC_REGISTRY = {
     "TAR_2022.md": {
         "doc_title": "Documento de consenso de GeSIDA/PNS sobre TAR en adultos con VIH",
@@ -106,13 +105,13 @@ DEFAULT_META = {
 
 
 def _norm_name(name: str) -> str:
-    """Normaliza un nombre de archivo para buscarlo en el registro:
-    minúsculas y espacios/guiones -> guion bajo. Así 'medicina preventiva.md'
-    y 'medicina_preventiva.md' apuntan a la misma entrada."""
+    """Normalize a filename to look it up in the registry: lowercase and
+    spaces/hyphens -> underscore. So 'medicina preventiva.md' and
+    'medicina_preventiva.md' point to the same entry."""
     return re.sub(r"[\s\-]+", "_", name.strip().lower())
 
 
-# Registro indexado por nombre normalizado (se construye una sola vez).
+# Registry indexed by normalized name (built once).
 _NORMALIZED_REGISTRY = {_norm_name(k): v for k, v in DOC_REGISTRY.items()}
 
 
@@ -123,7 +122,7 @@ def lookup_meta(filename: str) -> dict:
     return meta
 
 # ---------------------------------------------------------------------------
-# 1. CONTEO DE TOKENS
+# 1. TOKEN COUNTING
 # ---------------------------------------------------------------------------
 try:
     import tiktoken
@@ -131,21 +130,21 @@ try:
     def count_tokens(text: str) -> int:
         return len(_ENC.encode(text))
 except Exception:
-    # Estimación: ~4 caracteres por token (razonable para español).
+    # Estimate: ~4 characters per token (reasonable for Spanish).
     def count_tokens(text: str) -> int:
         return max(1, round(len(text) / 4))
 
 # ---------------------------------------------------------------------------
-# 2. EXPRESIONES REGULARES
+# 2. REGULAR EXPRESSIONS
 # ---------------------------------------------------------------------------
 RE_HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-# Número de sección al inicio del encabezado: "3.2.2." o "1." -> "3.2.2"
+# Section number at the start of the heading: "3.2.2." or "1." -> "3.2.2"
 RE_SECNUM  = re.compile(r"^(\d+(?:\.\d+)*)\.?\s")
-# Grados de evidencia: (A-I), (A-II), (B-III), también (AII), (B-I), con/sin **
+# Evidence grades: (A-I), (A-II), (B-III), also (AII), (B-I), with/without **
 RE_GRADE   = re.compile(r"\(\s*\*{0,2}\s*([ABC])\s*-?\s*(I{1,3})\s*\*{0,2}\s*\)")
 RE_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
 
-# Encabezados que marcan un tipo de contenido especial
+# Headings that mark a special content type (match Spanish guideline text).
 RE_RECS    = re.compile(r"recomendaci(o|ó)n", re.IGNORECASE)
 RE_ABREV   = re.compile(r"abreviatura|listado de abreviaturas", re.IGNORECASE)
 RE_TABLA_H = re.compile(r"^(tabla|figura)\b", re.IGNORECASE)
@@ -154,16 +153,16 @@ RE_METODO  = re.compile(r"metodolog(i|í)a", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
-# 3. ESTRUCTURAS DE DATOS
+# 3. DATA STRUCTURES
 # ---------------------------------------------------------------------------
 @dataclass
 class Section:
-    """Una sección 'hoja': un encabezado y el texto hasta el siguiente encabezado."""
+    """A 'leaf' section: a heading and the text up to the next heading."""
     level: int
     heading: str
     body: str
-    breadcrumb: List[str]          # encabezados ancestros incluido el propio
-    section_number: Optional[str]  # "3.2.2"  o None
+    breadcrumb: List[str]          # ancestor headings, including its own
+    section_number: Optional[str]  # "3.2.2"  or None
 
     @property
     def tokens(self) -> int:
@@ -178,23 +177,23 @@ class Chunk:
     topic: str
     organization: str
     year: Optional[int]
-    section_path: List[str]        # breadcrumb de encabezados
+    section_path: List[str]        # heading breadcrumb
     section_number: Optional[str]
     heading: str
     heading_level: int
     content_type: str              # text|recommendations|table|abbreviations|appendix|methodology
     evidence_grades: List[str]
-    chunk_index: int               # índice dentro del documento
+    chunk_index: int               # index within the document
     n_tokens: int
     n_chars: int
-    text: str                      # texto del chunk, con breadcrumb antepuesto
+    text: str                      # chunk text, with the breadcrumb prepended
 
 
 # ---------------------------------------------------------------------------
-# 4. PARSEO -> lista de Section
+# 4. PARSING -> list of Section
 # ---------------------------------------------------------------------------
 def parse_sections(md_text: str) -> List[Section]:
-    """Divide el markdown en secciones hoja conservando la ruta de encabezados."""
+    """Split the markdown into leaf sections keeping the heading path."""
     lines = md_text.splitlines()
     sections: List[Section] = []
     stack: List[tuple] = []        # [(level, heading_text), ...]
@@ -203,8 +202,8 @@ def parse_sections(md_text: str) -> List[Section]:
 
     def flush():
         body = "\n".join(buf).strip()
-        # Guardamos también secciones vacías solo si tienen encabezado real;
-        # las vacías se fusionarán luego o se descartan en normalización.
+        # We also keep empty sections only if they have a real heading;
+        # empty ones will later be merged or dropped during normalization.
         sections.append(Section(
             level=cur_level,
             heading=cur_heading,
@@ -216,11 +215,11 @@ def parse_sections(md_text: str) -> List[Section]:
     for line in lines:
         m = RE_HEADING.match(line)
         if m:
-            # cerrar la sección anterior
+            # close the previous section
             flush()
             level = len(m.group(1))
             heading = m.group(2).strip()
-            # actualizar la pila de ancestros
+            # update the ancestor stack
             while stack and stack[-1][0] >= level:
                 stack.pop()
             stack.append((level, heading))
@@ -232,7 +231,7 @@ def parse_sections(md_text: str) -> List[Section]:
             buf.append(line)
     flush()
 
-    # descartar el bloque "Preámbulo" si está vacío
+    # drop the "Preámbulo" block if it is empty
     return [s for s in sections if not (s.heading == "Preámbulo" and not s.body)]
 
 
@@ -242,13 +241,13 @@ def _secnum(heading: str) -> Optional[str]:
 
 
 def _common_secnum(numbers: List[Optional[str]]) -> Optional[str]:
-    """Prefijo numérico común de varios números de sección.
-    Sirve para etiquetar correctamente un chunk que fusiona subsecciones:
+    """Common numeric prefix of several section numbers.
+    Used to correctly label a chunk that merges subsections:
         ['4.2.1', '4.2.2']        -> '4.2'
         ['4.2.4.1', '4.2.4.2']    -> '4.2.4'
         ['4.1', '4.2']            -> '4'
         ['4.1', '4.1.1']          -> '4.1'
-    Si no hay prefijo común (números de ramas distintas) devuelve None.
+    Returns None if there is no common prefix (numbers from different branches).
     """
     nums = [n for n in numbers if n]
     if not nums:
@@ -266,9 +265,9 @@ def _common_secnum(numbers: List[Optional[str]]) -> Optional[str]:
 
 
 def _ancestor_for_secnum(breadcrumb: List[str], secnum: Optional[str]):
-    """Localiza en el breadcrumb el ancestro cuyo número de sección es `secnum`.
-    Devuelve (heading_del_ancestro, breadcrumb_truncado_hasta_él) o (None, None)
-    si no se encuentra (p.ej. el ancestro era un contenedor sin encabezado propio).
+    """Locate in the breadcrumb the ancestor whose section number is `secnum`.
+    Returns (ancestor_heading, breadcrumb_truncated_up_to_it) or (None, None)
+    if not found (e.g. the ancestor was a container without its own heading).
     """
     if not secnum:
         return None, None
@@ -279,7 +278,7 @@ def _ancestor_for_secnum(breadcrumb: List[str], secnum: Optional[str]):
 
 
 # ---------------------------------------------------------------------------
-# 5. CLASIFICACIÓN Y EXTRACCIÓN DE METADATOS
+# 5. CLASSIFICATION AND METADATA EXTRACTION
 # ---------------------------------------------------------------------------
 def classify(sec: Section) -> str:
     h = sec.heading
@@ -293,7 +292,7 @@ def classify(sec: Section) -> str:
         return "appendix"
     if RE_METODO.search(h):
         return "methodology"
-    # tabla "incrustada": cuerpo mayoritariamente filas de tabla
+    # "embedded" table: body mostly made of table rows
     body_lines = [l for l in sec.body.splitlines() if l.strip()]
     if body_lines:
         table_lines = sum(1 for l in body_lines if RE_TABLE_ROW.match(l))
@@ -303,7 +302,7 @@ def classify(sec: Section) -> str:
 
 
 def extract_grades(text: str) -> List[str]:
-    """Devuelve grados normalizados ('A-II', 'B-III'...) sin duplicados, en orden."""
+    """Return normalized grades ('A-II', 'B-III'...) without duplicates, in order."""
     out, seen = [], set()
     for letter, roman in RE_GRADE.findall(text):
         g = f"{letter.upper()}-{roman.upper()}"
@@ -318,10 +317,10 @@ def has_table(body: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 6. NORMALIZACIÓN DE TAMAÑO (merge + split)
+# 6. SIZE NORMALIZATION (merge + split)
 # ---------------------------------------------------------------------------
 def split_large(sec: Section) -> List[str]:
-    """Parte un cuerpo grande por párrafos con solape, sin romper tablas."""
+    """Split a large body by paragraphs with overlap, without breaking tables."""
     paras = re.split(r"\n\s*\n", sec.body)
     pieces, cur, cur_tok = [], [], 0
     for p in paras:
@@ -329,7 +328,7 @@ def split_large(sec: Section) -> List[str]:
         if not p:
             continue
         ptok = count_tokens(p)
-        # una tabla o párrafo enorme va en su propia pieza
+        # a table or huge paragraph goes in its own piece
         if ptok > MAX_TOKENS:
             if cur:
                 pieces.append("\n\n".join(cur)); cur, cur_tok = [], 0
@@ -337,7 +336,7 @@ def split_large(sec: Section) -> List[str]:
             continue
         if cur_tok + ptok > MAX_TOKENS and cur:
             pieces.append("\n\n".join(cur))
-            # solape: arrastrar los últimos párrafos hasta OVERLAP_TOKENS
+            # overlap: carry the last paragraphs up to OVERLAP_TOKENS
             overlap, otok = [], 0
             for q in reversed(cur):
                 qt = count_tokens(q)
@@ -353,9 +352,9 @@ def split_large(sec: Section) -> List[str]:
 
 def normalize(sections: List[Section]) -> List[dict]:
     """
-    Convierte secciones en unidades de chunk (dicts con body+meta), aplicando
-    fusión de secciones pequeñas y partición de las grandes.
-    Devuelve dicts con: body, heading, level, breadcrumb, section_number,
+    Convert sections into chunk units (dicts with body+meta), applying
+    merging of small sections and splitting of large ones.
+    Returns dicts with: body, heading, level, breadcrumb, section_number,
     content_type.
     """
     units: List[dict] = []
@@ -364,9 +363,9 @@ def normalize(sections: List[Section]) -> List[dict]:
              section_number: Optional[str] = None,
              heading: Optional[str] = None,
              breadcrumb: Optional[List[str]] = None):
-        # Los parámetros opcionales permiten sobrescribir la identidad de la
-        # sección cuando se fusionan varias subsecciones (ver bloque de merge):
-        # el chunk se etiqueta con el ancestro común y no con la 1ª subsección.
+        # The optional parameters allow overriding the section's identity when
+        # several subsections are merged (see the merge block): the chunk is
+        # tagged with the common ancestor, not with the 1st subsection.
         units.append({
             "body": body,
             "heading": sec.heading if heading is None else heading,
@@ -382,29 +381,29 @@ def normalize(sections: List[Section]) -> List[dict]:
         sec = sections[i]
         ctype = classify(sec)
 
-        # Encabezado contenedor sin texto propio (p.ej. "## 4." seguido de
-        # "### 4.1."): no genera chunk; su título vive en el breadcrumb de
-        # las subsecciones.
+        # Container heading with no text of its own (e.g. "## 4." followed by
+        # "### 4.1."): produces no chunk; its title lives in the breadcrumb of
+        # the subsections.
         if ctype == "text" and not sec.body.strip():
             i += 1
             continue
 
-        # Tipos que NO se fusionan ni se parten arbitrariamente
+        # Types that are NOT merged nor split arbitrarily
         if ctype in ("table", "abbreviations"):
             emit(sec, sec.body, ctype)
             i += 1
             continue
 
-        # Sección grande -> partir
+        # Large section -> split
         if sec.tokens > MAX_TOKENS:
             for piece in split_large(sec):
-                # reclasificar por si la pieza es una tabla
+                # reclassify in case the piece is a table
                 sub = Section(sec.level, sec.heading, piece, sec.breadcrumb, sec.section_number)
                 emit(sec, piece, "table" if (ctype == "text" and has_table(piece)) else ctype)
             i += 1
             continue
 
-        # Sección pequeña -> intentar fusionar con hermanas siguientes del mismo H2
+        # Small section -> try to merge with the following siblings under the same H2
         if sec.tokens < MIN_TOKENS and ctype == "text":
             merged_body = sec.body
             merged_heads = [sec.heading]
@@ -415,7 +414,7 @@ def normalize(sections: List[Section]) -> List[dict]:
                 nxt = sections[j]
                 nxt_type = classify(nxt)
                 nxt_parent = nxt.breadcrumb[1] if len(nxt.breadcrumb) > 1 else (nxt.breadcrumb[0] if nxt.breadcrumb else "")
-                # no fusionar tablas/abreviaturas/recos ni cruzar de sección H2
+                # do not merge tables/abbreviations/recos nor cross an H2 section
                 if nxt_type in ("table", "abbreviations") or nxt_parent != parent_h2:
                     break
                 if not nxt.body.strip():
@@ -429,18 +428,18 @@ def normalize(sections: List[Section]) -> List[dict]:
                 merged_secnums.append(nxt.section_number)
                 j += 1
             if merged_body.strip():
-                # Si realmente se han fusionado >1 subsección, el chunk ya no
-                # pertenece a la 1ª subsección sino a su ancestro común: lo
-                # reetiquetamos (p.ej. 4.2.1 + 4.2.2 -> 4.2) para que quien
-                # busque por número encuentre el contenido en el nivel correcto.
+                # If more than 1 subsection was actually merged, the chunk no
+                # longer belongs to the 1st subsection but to their common
+                # ancestor: we relabel it (e.g. 4.2.1 + 4.2.2 -> 4.2) so that
+                # whoever searches by number finds the content at the right level.
                 if len(merged_heads) > 1:
                     common = _common_secnum(merged_secnums)
                     if common and common != sec.section_number:
                         anc_head, anc_bc = _ancestor_for_secnum(sec.breadcrumb, common)
                         emit(sec, merged_body, ctype,
                              section_number=common,
-                             heading=anc_head,      # None -> conserva el de sec
-                             breadcrumb=anc_bc)      # None -> conserva el de sec
+                             heading=anc_head,      # None -> keeps sec's own
+                             breadcrumb=anc_bc)      # None -> keeps sec's own
                     else:
                         emit(sec, merged_body, ctype)
                 else:
@@ -448,7 +447,7 @@ def normalize(sections: List[Section]) -> List[dict]:
             i = max(j, i + 1)
             continue
 
-        # Sección de tamaño normal
+        # Normal-sized section
         if sec.body.strip():
             emit(sec, sec.body, ctype)
         i += 1
@@ -457,7 +456,7 @@ def normalize(sections: List[Section]) -> List[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 7. CONSTRUCCIÓN DE CHUNKS CON METADATOS
+# 7. BUILDING CHUNKS WITH METADATA
 # ---------------------------------------------------------------------------
 def build_chunks(path: Path) -> List[Chunk]:
     md = path.read_text(encoding="utf-8")
@@ -466,20 +465,20 @@ def build_chunks(path: Path) -> List[Chunk]:
     units = normalize(sections)
 
     chunks: List[Chunk] = []
-    seen_text: set = set()          # para deduplicar chunks de texto idéntico
+    seen_text: set = set()          # to deduplicate chunks with identical text
     for idx, u in enumerate(units):
         breadcrumb = u["breadcrumb"]
-        # El preámbulo (texto antes del primer encabezado) no tiene ruta:
-        # le damos como contexto el título del documento.
+        # The preamble (text before the first heading) has no path:
+        # we give it the document title as context.
         if not breadcrumb:
             breadcrumb = [meta.get("doc_title") or "Preámbulo"]
-        # Anteponer el breadcrumb al texto mejora mucho la recuperación:
-        # el embedding "ve" el contexto jerárquico de la sección.
+        # Prepending the breadcrumb to the text greatly improves retrieval:
+        # the embedding "sees" the section's hierarchical context.
         context_prefix = " > ".join(breadcrumb)
         text = f"{context_prefix}\n\n{u['body']}".strip() if context_prefix else u["body"]
 
-        # Dedup: si dos secciones generan exactamente el mismo texto, conservamos
-        # solo la primera (p.ej. subencabezados repetidos en formularios de anexo).
+        # Dedup: if two sections produce exactly the same text, we keep only
+        # the first (e.g. repeated subheadings in appendix forms).
         norm = text.strip()
         if norm in seen_text:
             continue
@@ -525,15 +524,15 @@ def gather_md_files(inputs: List[str]) -> List[Path]:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Trocea guías VIH (Markdown) en chunks con metadatos.")
-    ap.add_argument("inputs", nargs="+", help="Archivos .md o carpeta con .md")
-    ap.add_argument("-o", "--output", default="chunks.jsonl", help="Archivo JSONL de salida")
-    ap.add_argument("--stats", action="store_true", help="Imprime estadísticas")
+    ap = argparse.ArgumentParser(description="Split HIV guidelines (Markdown) into chunks with metadata.")
+    ap.add_argument("inputs", nargs="+", help=".md files or a folder with .md files")
+    ap.add_argument("-o", "--output", default="chunks.jsonl", help="Output JSONL file")
+    ap.add_argument("--stats", action="store_true", help="Print statistics")
     args = ap.parse_args()
 
     files = gather_md_files(args.inputs)
     if not files:
-        print("No se encontraron archivos .md", file=sys.stderr)
+        print("No .md files found", file=sys.stderr)
         sys.exit(1)
 
     all_chunks: List[Chunk] = []
@@ -546,19 +545,19 @@ def main():
         for c in all_chunks:
             fh.write(json.dumps(asdict(c), ensure_ascii=False) + "\n")
 
-    print(f"\n{len(all_chunks)} chunks escritos en {args.output}", file=sys.stderr)
+    print(f"\n{len(all_chunks)} chunks written to {args.output}", file=sys.stderr)
 
     if args.stats:
         import statistics as st
         toks = [c.n_tokens for c in all_chunks]
         from collections import Counter
         ctypes = Counter(c.content_type for c in all_chunks)
-        print("\n--- ESTADÍSTICAS ---", file=sys.stderr)
+        print("\n--- STATISTICS ---", file=sys.stderr)
         print(f"tokens/chunk: min={min(toks)} med={int(st.median(toks))} "
-              f"media={int(st.mean(toks))} max={max(toks)}", file=sys.stderr)
-        print(f"tipos de contenido: {dict(ctypes)}", file=sys.stderr)
+              f"mean={int(st.mean(toks))} max={max(toks)}", file=sys.stderr)
+        print(f"content types: {dict(ctypes)}", file=sys.stderr)
         graded = sum(1 for c in all_chunks if c.evidence_grades)
-        print(f"chunks con grado de evidencia: {graded}", file=sys.stderr)
+        print(f"chunks with evidence grade: {graded}", file=sys.stderr)
 
 
 if __name__ == "__main__":
