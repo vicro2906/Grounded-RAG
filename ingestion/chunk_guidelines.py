@@ -27,8 +27,8 @@ No mandatory dependencies (standard library only). If 'tiktoken' is installed it
 used to count tokens; otherwise a character-based estimate is used.
 
 Usage:
-    python chunk_guidelines.py /path/to/the/md  -o output.jsonl
-    python chunk_guidelines.py file1.md file2.md -o output.jsonl
+    python ingestion/chunk_guidelines.py data/markdown -o data/chunks/chunks.jsonl
+    python ingestion/chunk_guidelines.py file1.md file2.md -o output.jsonl
 """
 
 import argparse
@@ -526,7 +526,7 @@ def gather_md_files(inputs: List[str]) -> List[Path]:
 def main():
     ap = argparse.ArgumentParser(description="Split HIV guidelines (Markdown) into chunks with metadata.")
     ap.add_argument("inputs", nargs="+", help=".md files or a folder with .md files")
-    ap.add_argument("-o", "--output", default="chunks.jsonl", help="Output JSONL file")
+    ap.add_argument("-o", "--output", default="data/chunks/chunks.jsonl", help="Output JSONL file")
     ap.add_argument("--stats", action="store_true", help="Print statistics")
     args = ap.parse_args()
 

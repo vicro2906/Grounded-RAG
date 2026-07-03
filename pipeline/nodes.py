@@ -11,7 +11,7 @@ from langgraph.types import interrupt
 
 from rag import (refine, retrieve_hybrid, rerank, build_context, validate, assess,
                  SYS_PROMPT, build_user_prompt)
-from agentic.iterative import iterative_search
+from retrieval.iterative import iterative_search
 from evidence import format_answer
 
 from .config import (MAX_ITER, CLARIFY_MAX_ROUNDS, CLARIFY_QUESTIONS_PER_ROUND,
@@ -102,7 +102,7 @@ def node_graph_retrieve(state: RAGState) -> dict:
     """Track B: LightRAG graph retrieval, mapped back to our payloads (same context shape).
     Imported lazily so baseline/iterative runs never load LightRAG. Reuses the rephrased query
     for the hybrid complement (BM25 benefits from the normalized abbreviations)."""
-    from graph.lightrag_track import graph_search
+    from retrieval.graph import graph_search
     contexts = graph_search(state["question"], top_k=8, hybrid_query=state.get("search_query"))
     chunk_index, formatted_context = build_context(contexts)
     return {"contexts": contexts, "chunk_index": chunk_index,
@@ -177,7 +177,7 @@ def node_re_retrieve(state: RAGState, config) -> dict:
         contexts = iterative_search(f"{state['question']}\n{patient}", top_k=8,
                                     search_query=enriched)
     elif mode == "graph":
-        from graph.lightrag_track import graph_search
+        from retrieval.graph import graph_search
         contexts = graph_search(f"{state['question']}\n{patient}", top_k=8,
                                 hybrid_query=enriched)
     else:  # baseline

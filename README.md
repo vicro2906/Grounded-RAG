@@ -102,7 +102,7 @@ regulations, technical manuals…) you change the **domain layer**, not the engi
 
 **What gets replaced (domain-specific):**
 - The **corpus**: the documents in `data/` and their transcription (the `data/prompt.txt`
-  prompt is reusable for any structured PDF) + re-running the chunking in `chunks/`.
+  prompt is reusable for any structured PDF) + re-running the chunking in `ingestion/`.
 - The **abbreviation glossary** (`abbreviations.py`) with the new domain's.
 - The **domain guardrail** (the `in_domain` classification of the *rephrase* node) that
   defines which questions are "on topic".
@@ -140,9 +140,9 @@ python main.py iterative        # baseline | iterative | graph
 Corpus indexing (once):
 
 ```bash
-python chunks/contextualize.py                                      # enriches the chunks
-python chunks/upload_to_qdrant_hybrid.py chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
-python -m graph.lightrag_track                                      # builds the graph
+python ingestion/contextualize.py                                   # enriches the chunks
+python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
+python -m retrieval.graph                                           # builds the graph
 ```
 
 ---
@@ -174,9 +174,9 @@ QDRANT_COLLECTION=guias_vih_hibrida PIPELINE=graph python evaluation.py   # A/B 
 | `rag.py` | Retrieval/generation primitives: hybrid, rerank, refine, validate, prompts. |
 | `evidence.py` | Answer formatting and sources panel with literal citations. |
 | `evaluation.py` | RAGAS evaluation (`EVAL_SET`, per tier). |
-| `agentic/` · `graph/` | Iterative retrieval (Track A) and LightRAG graph retrieval (Track B). |
-| `chunks/` | Chunking, contextualization and upload to Qdrant (includes `chunks.jsonl`). |
-| `data/` | Corpus: `markdown/` (the 7 GeSIDA guides, real source) and `textos/`. The original PDFs (`pdfs/`) are not versioned (see `data/README.md`). |
+| `retrieval/` | The three interchangeable retrieval architectures, one module per mode: `baseline.py`, `iterative.py` (Track A) and `graph.py` (Track B, LightRAG). |
+| `ingestion/` | Corpus→index scripts: chunking, contextualization and upload to Qdrant. |
+| `data/` | Corpus and derived data: `markdown/` (the 7 GeSIDA guides, real source), `textos/`, `chunks/` (the chunked corpus, `chunks.jsonl`) and `lightrag_store/` (generated graph index, not versioned). The original PDFs (`pdfs/`) are not versioned (see `data/README.md`). |
 | `results/` | RAGAS evaluation CSVs (one file per pipeline). |
 | `docs/` | Design documents and architecture diagrams. |
 | `CLAUDE.md` | Living document of context, decisions and findings. |

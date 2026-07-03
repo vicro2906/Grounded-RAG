@@ -17,8 +17,8 @@ wheels/
 # LangGraph dev server (caché local)
 .langgraph_api/
 
-# LightRAG knowledge-graph store (Track B, F4) — regenerable con lightrag_track.py
-lightrag_store/
+# LightRAG knowledge-graph store (Track B, F4) — rebuilt with: python -m retrieval.graph
+data/lightrag_store/
 _probe_store/
 
 # PDFs originales de GeSIDA: se conservan en local pero NO se redistribuyen (© GeSIDA)

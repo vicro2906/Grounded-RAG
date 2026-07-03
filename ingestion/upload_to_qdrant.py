@@ -16,9 +16,9 @@ Credentials via environment variables (do not put them in the code):
     export QDRANT_API_KEY="..."          # API key of the Qdrant Cloud cluster
 
 Usage:
-    python upload_to_qdrant.py chunks.jsonl
-    python upload_to_qdrant.py chunks.jsonl --recreate     # deletes and recreates the collection
-    python upload_to_qdrant.py chunks.jsonl --dry-run      # no upload; only validate and estimate cost
+    python ingestion/upload_to_qdrant.py data/chunks/chunks.jsonl
+    python ingestion/upload_to_qdrant.py data/chunks/chunks.jsonl --recreate  # deletes and recreates the collection
+    python ingestion/upload_to_qdrant.py data/chunks/chunks.jsonl --dry-run   # no upload; only validate and estimate cost
 """
 
 import argparse

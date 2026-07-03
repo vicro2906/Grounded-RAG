@@ -12,9 +12,9 @@ Output: chunks_contextual.jsonl = the chunks + "context" and "text_for_retrieval
 it to upload_to_qdrant_hybrid.py. Resumable (already-done chunk_ids in --out are skipped).
 
 Usage:
-    python chunks/contextualize.py --dry-run     # estimate cost, no LLM call
-    python chunks/contextualize.py --limit 10    # probe: only 10 (measures real cost)
-    python chunks/contextualize.py               # all (resumable)
+    python ingestion/contextualize.py --dry-run     # estimate cost, no LLM call
+    python ingestion/contextualize.py --limit 10    # probe: only 10 (measures real cost)
+    python ingestion/contextualize.py               # all (resumable)
 """
 
 import argparse
@@ -32,8 +32,8 @@ load_dotenv(find_dotenv(usecwd=True))
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-DEFAULT_IN  = "chunks/chunks.jsonl"
-DEFAULT_OUT = "chunks/chunks_contextual.jsonl"
+DEFAULT_IN  = "data/chunks/chunks.jsonl"
+DEFAULT_OUT = "data/chunks/chunks_contextual.jsonl"
 DEFAULT_MODEL = "gpt-4o-mini"     # cheap; encapsulated here so we can migrate to Azure if needed
 DEFAULT_WINDOW = 2                # number of neighbour chunks (before and after) passed as context
 
@@ -204,7 +204,7 @@ def main():
 
     print(f"Done: {n_ok} chunks contextualized -> {out_path}")
     print("Next (upload to a NEW collection, does not overwrite the current one):")
-    print(f"  python chunks/upload_to_qdrant_hybrid.py {args.out} "
+    print(f"  python ingestion/upload_to_qdrant_hybrid.py {args.out} "
           "--collection guias_vih_hibrida_ctx")
 
 

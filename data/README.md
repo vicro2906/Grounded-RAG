@@ -6,8 +6,12 @@ Source material of the chatbot: the 7 HIV clinical guidelines from **GeSIDA**.
   `.gitignore`): they are the work of GeSIDA, so they are kept locally only and not
   redistributed. Downloaded from GeSIDA if needed.
 - **`markdown/`** — the PDFs converted to Markdown; this is the **actual corpus** that the
-  chunking (`../chunks/`) runs on.
+  chunking (`../ingestion/`) runs on.
 - **`textos/`** — plain-text extractions of the originals (provenance / backup).
+- **`chunks/`** — the chunked corpus (`chunks.jsonl`, `chunks_contextual.jsonl`), produced by
+  `../ingestion/` and consumed by retrieval and the LightRAG index build.
+- **`lightrag_store/`** — the generated LightRAG graph index (not versioned; rebuilt with
+  `python -m retrieval.graph`).
 
 ## How the Markdown was generated
 

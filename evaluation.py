@@ -27,8 +27,8 @@ warnings.filterwarnings(
 )
 
 # --- Existing pipeline ---
-from rag import (retrieve, retrieve_hybrid, retrieve_rerank, search, build_context,
-                 generate_answer, COLLECTION_HYBRID)
+from rag import build_context, generate_answer, COLLECTION_HYBRID
+from retrieval.baseline import search
 
 # ===========================================================================
 # A/B CONFIG — which retrieval pipeline runs over the single EVAL_SET (generation is shared,
@@ -49,10 +49,10 @@ def get_pipeline(name: str):
     if name == "baseline":
         return search
     if name == "iterative":
-        from agentic.iterative import iterative_search   # Track A package
+        from retrieval.iterative import iterative_search   # Track A
         return iterative_search
     if name == "graph":
-        from graph.lightrag_track import graph_search     # Track B package
+        from retrieval.graph import graph_search            # Track B (needs LightRAG)
         return graph_search
     raise SystemExit(f"Unknown PIPELINE: {name!r} (use baseline | iterative | graph)")
 

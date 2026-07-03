@@ -8,8 +8,9 @@ the combined graph keeps the collapsed nodes in nodes.py.
 """
 from langgraph.types import Send
 
-from rag import retrieve_hybrid, rerank, retrieve_rerank, build_context
-from agentic.iterative import _plan, _reflect, MAX_HOPS, PER_HOP
+from rag import retrieve_hybrid, rerank, build_context
+from retrieval.baseline import retrieve_rerank
+from retrieval.iterative import _plan, _reflect, MAX_HOPS, PER_HOP
 
 from .state import IterativeState, GraphState
 
@@ -84,7 +85,7 @@ def node_iter_rerank(state: IterativeState) -> dict:
 def node_graph_keywords(state: GraphState) -> dict:
     """LightRAG's LLM extracts high-level keywords (-> RELATIONS) and low-level keywords
     (-> ENTITIES) from the question."""
-    from graph.lightrag_track import graph_extract_keywords
+    from retrieval.graph import graph_extract_keywords
     kw = graph_extract_keywords(state["question"])
     return {"graph_hl": kw["hl_keywords"], "graph_ll": kw["ll_keywords"],
             "retrieval_mode": "graph"}
@@ -94,7 +95,7 @@ def node_graph_select(state: GraphState) -> dict:
     """Vector search + graph walk (NO LLM): cosine of the low-level keywords vs the ENTITY
     store and high-level vs the RELATION store, walk the graph, gather the source chunks. Also
     surfaces the selected entities/relations so the traversal is visible in the state."""
-    from graph.lightrag_track import graph_select
+    from retrieval.graph import graph_select
     res = graph_select(state["question"], state.get("graph_hl") or [], state.get("graph_ll") or [])
     return {"graph_payloads": res["payloads"], "graph_entities": res["entities"],
             "graph_relationships": res["relationships"]}
@@ -109,7 +110,7 @@ def node_graph_hybrid(state: GraphState) -> dict:
 
 def node_graph_merge(state: GraphState) -> dict:
     """Union the two chunk sources, deduped by chunk_id (graph chunks first)."""
-    from graph.lightrag_track import _merge_dedup
+    from retrieval.graph import _merge_dedup
     merged = _merge_dedup(state.get("graph_payloads") or [], state.get("hybrid_payloads") or [])
     return {"merged": merged}
 

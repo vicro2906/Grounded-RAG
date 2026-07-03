@@ -94,11 +94,11 @@ are IDENTICAL across the three modes; only the retrieval node changes, chosen by
   - **baseline** = `node_retrieve` (`rag.retrieve_hybrid`: dense text-embedding-3-large 3072d +
     sparse BM25 `Qdrant/bm25`, RRF fusion, 20 candidates) → `node_rerank` (`rag.rerank`,
     local cross-encoder, 20→5).
-  - **iterative** (Track A) = `node_iterative_retrieve` → `agentic.iterative.iterative_search`
+  - **iterative** (Track A) = `node_iterative_retrieve` → `retrieval.iterative.iterative_search`
     (plan→hop→reflect, top 8). Plans over the ORIGINAL question; the single-hop fallback reuses
     the caller's rewritten query (`search_query` param) instead of re-rephrasing (saves one LLM
     call per single-hop run; without the param, e.g. from the eval, it rephrases itself).
-  - **graph** (Track B, DEFAULT) = `node_graph_retrieve` → `graph.lightrag_track.graph_search`
+  - **graph** (Track B, DEFAULT) = `node_graph_retrieve` → `retrieval.graph.graph_search`
     (entity+relation graph `mode="hybrid"` + `retrieve_hybrid` dense+BM25 complement →
     dedup fusion → rerank → top 8).
 - **rerank** (`rag.rerank`): local cross-encoder `jinaai/jina-reranker-v2-base-multilingual`
@@ -112,12 +112,12 @@ are IDENTICAL across the three modes; only the retrieval node changes, chosen by
 - **evidence** (`evidence.format_answer`): formats the answer + sources panel with
   literal citations (fuzzy match) + follow-up questions + clinical disclaimer. Text without ANSI.
 
-`rag.search()` = rephrase → hybrid → rerank (used by the evaluation).
+`retrieval.baseline.search()` = rephrase → hybrid → rerank (used by the evaluation).
 
 ### Graph retrieval (LightRAG): what is used and what is NOT
 
-Indexing (once, `graph._build_index`): for each chunk, gpt-4o-mini extracts **entities** and
-**relations** with an **LLM-generated description**; they are stored in `lightrag_store/`:
+Indexing (once, `retrieval.graph._build_index`): for each chunk, gpt-4o-mini extracts **entities** and
+**relations** with an **LLM-generated description**; they are stored in `data/lightrag_store/`:
 `kv_store_full_entities/relations.json` (description + source chunks `source_id`),
 `vdb_entities/relationships/chunks.json` (embeddings for matching), `kv_store_text_chunks.json`
 (literal text) and `graph_chunk_entity_relation.graphml` (topology).
@@ -148,9 +148,9 @@ keeping strict grounding + validate.
   `nodes.py` (combined-pipeline nodes + routing), `nodes_expanded.py` (one-node-per-step
   retrieval for the dedicated Studio graphs), `builder.py` (head/tail assembly +
   `build_graph`/`build_combined_graph`), `generation.py` (structured `ClinicalAnswer` LLM).
-- `rag.py` — retrieval/generation primitives: clients, embeddings, retrieve/retrieve_hybrid,
-  rerank, refine, search, validate, assess, generate_answer (raw version), SYS_PROMPT,
-  build_user_prompt, model constants.
+- `rag.py` — retrieval/generation primitives ONLY (no architecture lives here): clients,
+  embeddings, retrieve/retrieve_hybrid, rerank, refine, validate, assess, generate_answer
+  (raw version), SYS_PROMPT, build_user_prompt, model constants.
 - `evidence.py` — answer and sources formatting.
 - `evaluation.py` — RAGAS evaluation. **A SINGLE set `EVAL_SET` (151 questions)** with a
   `tier` field per question (**simple / single_hop / multihop / adversarial**) → measures
@@ -164,12 +164,18 @@ keeping strict grounding + validate.
   dumps `results/ragas_results_<PIPELINE>.csv`. The references were drafted by the model
   from the guidelines → **pending clinical review**.
 - `abbreviations.py` — ABBREVIATION→name dictionary from the guides (values in Spanish).
-- **`agentic/`** — Track A (Phase 4). `iterative.py`: `iterative_search` (plan/hop/reflect).
-  Imports the shared primitives from `rag.py` (parent folder).
-- **`graph/`** — Track B (Phase 4). `lightrag_track.py`: graph build + `graph_search`
-  (imports `rerank` from `rag.py`, corpus from `chunks/`, store in `lightrag_store/`).
-- `chunks/` — `chunk_guidelines.py` (structural chunking), `upload_to_qdrant.py` (dense),
-  `upload_to_qdrant_hybrid.py` (dense+BM25), `chunks.jsonl` (517 chunks).
+- **`retrieval/`** — the three interchangeable architectures, one module per `RETRIEVAL_MODE`
+  value, all honouring the same contract (question in → chunk payloads out) and composing
+  `rag.py`'s primitives: `baseline.py` (`search`: rephrase → hybrid → rerank; the building
+  block the other two reuse), `iterative.py` (Track A, `iterative_search`: plan/hop/reflect)
+  and `graph.py` (Track B, `graph_search`: LightRAG index build + traversal; corpus from
+  `data/chunks/`, store in `data/lightrag_store/`).
+- `ingestion/` — corpus→index scripts (run once per corpus change): `chunk_guidelines.py`
+  (structural chunking), `contextualize.py` (Contextual Retrieval), `upload_to_qdrant.py`
+  (dense) and `upload_to_qdrant_hybrid.py` (dense+BM25).
+- `data/chunks/` — the chunked corpus: `chunks.jsonl` (517 chunks) and
+  `chunks_contextual.jsonl` (with the Contextual-Retrieval sentence). `data/lightrag_store/` —
+  the generated LightRAG graph index (gitignored, rebuilt with `python -m retrieval.graph`).
 - `data/markdown/` — the 7 guides in Markdown (corpus source). `data/pdfs/`, `data/textos/` — originals.
   The `.md` files were transcribed from the PDFs with **code generated by Claude Code adapted to each PDF**
   (non-extrapolable peculiarities), using `pymupdf4llm` (transcribes, **does not invent**). The prompt
@@ -237,7 +243,7 @@ keeping strict grounding + validate.
     as a tag `mode:<x>` and metadata → filterable in LangSmith. LightRAG's internal keyword
     LLM call IS traced now (wrapped with `traceable` in `_make_rag(trace_llm=True)`, only at
     query time, not at index build).
-- **Build the LightRAG graph (once):** `.venv\Scripts\python.exe -m graph.lightrag_track`
+- **Build the LightRAG graph (once):** `.venv\Scripts\python.exe -m retrieval.graph`
   (entity extraction over the 517 chunks; resumable, uses the LLM cache).
 - RAGAS evaluation / A/B: set `PIPELINE` and `DATASET` in `evaluation.py` and run
   `.venv\Scripts\python.exe evaluation.py`.
@@ -264,11 +270,11 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
   graph) was deferred to Phase 4.
 - **Phase 4 — Multi-hop: DECIDED (LightRAG graph by default).** Two paths for multi-hop
   questions, compared with an A/B over `MULTIHOP_SET` (16 questions, in `evaluation.py`):
-  - **Track A — agentic/iterative** (`agentic/iterative.py`): self-ask loop
+  - **Track A — iterative** (`retrieval/iterative.py`): self-ask loop
     plan → retrieve per sub-query → reflect (MAX_HOPS=3), reuses hybrid+rerank, zero
     reindexing. DONE and tested.
-  - **Track B — LightRAG graph** (`graph/lightrag_track.py`): entity-relation graph in file
-    storage (`lightrag_store/`), retrieves chunks by traversal and maps them to our payloads
+  - **Track B — LightRAG graph** (`retrieval/graph.py`): entity-relation graph in file
+    storage (`data/lightrag_store/`), retrieves chunks by traversal and maps them to our payloads
     (preserves citations). Index BUILT (517 chunks, ~1.5 h).
   - Decision by the A/B (multi-hop quality first; then speed/cost/updating). Both paths are
     selectable in the graph via `RETRIEVAL_MODE` and in the eval via `PIPELINE`, and end in the
@@ -304,7 +310,7 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
    pipelines, ~$15 more with the gpt-4o judge for the final number) and clinical review of the
    references. Before launching, probe with a subset (~10) to measure real cost in the dashboard.
 1. **Contextual Retrieval (enrich chunks with context) — DONE (index built).**
-   `chunks/contextualize.py`: per chunk, gpt-4o-mini generates ONE dense context sentence
+   `ingestion/contextualize.py`: per chunk, gpt-4o-mini generates ONE dense context sentence
    (entities/abbreviations/recommendation grade; situating it in its guide via
    title+section_path+neighbour window `--window`, resumable, high `max_retries` because of the
    200k TPM cap) → `chunks_contextual.jsonl` (517) with `context` and `text_for_retrieval`
@@ -418,7 +424,7 @@ new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS
   `RunConfig(timeout=600, max_workers=8, max_retries=10)`. For a cheap A/B use
   `RETRIEVAL_ONLY=1` (no gpt-4o generation) or `RECALL_ONLY=1` (recall only) in `evaluation.py`.
 - **LightRAG graph build:** bottleneck = `max_parallel_insert` (default 2 → raised to 8 in
-  `graph.lightrag_track`; also `llm_model_max_async=16`). Even so ~1.5 h for the ~517
+  `retrieval.graph`; also `llm_model_max_async=16`). Even so ~1.5 h for the ~517
   extractions. Resumable and with an LLM cache (re-running is cheap).
 - **Machine suspension:** sleeping the laptop KILLS long runs (the connection drops). For long
   jobs disable suspension (`powercfg /change standby-timeout-ac/dc 0`) and restore it
@@ -431,8 +437,8 @@ new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS
 - **Software-architecture fundamentals (ALWAYS, non-negotiable):** every change must uphold
   sound software-architecture principles — this is a portfolio repository and the code quality
   is itself on display. Concretely: **separation of concerns / single responsibility** (each
-  module and function does one thing; e.g. `rag.py` = primitives, `pipeline/` = the graph,
-  `evidence.py` = formatting), **no leaky abstractions** (retrieval honours the `RAGState`
+  module and function does one thing; e.g. `rag.py` = primitives, `retrieval/` = the three
+  architectures, `pipeline/` = the graph, `evidence.py` = formatting), **no leaky abstractions** (retrieval honours the `RAGState`
   contract; the tail never reads anything mode-specific), **DRY** (share primitives, do not
   duplicate logic across tracks), small and readable functions, meaningful names, and comments
   that explain a non-obvious WHY rather than restating the code. When adding or modifying code,
@@ -449,7 +455,7 @@ new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS
     labels in `evidence.py`, the CLI `input()` prompt); the LLM prompts (`SYS_PROMPT`,
     `build_user_prompt`, and the system prompts of refine/assess/validate/plan/reflect and of
     `contextualize.py`); the guideline/chunk content (`data/markdown/`, `data/textos/`,
-    `chunks/*.jsonl`); the values of `abbreviations.py` and the `doc_title`/`topic` metadata in
+    `data/chunks/*.jsonl`); the values of `abbreviations.py` and the `doc_title`/`topic` metadata in
     `chunk_guidelines.py`'s `DOC_REGISTRY`; regexes that match Spanish guideline text; and any
     Spanish literal that appears verbatim in generated data (e.g. the `"Preámbulo"` breadcrumb
     fallback, the `> _[... omitido — consultar PDF original]_` omission marker). In
@@ -464,5 +470,5 @@ new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS
   `Co-Authored-By: Claude…` trailer** to commits: the repo is public (portfolio) and the
   attribution to Claude Code goes in the README and the description, not as a git co-author
   (that trailer made "claude" appear in GitHub's Contributors list). In `.gitignore`:
-  `.env`, `*.log`, `.langgraph_api/`, `lightrag_store/` and `data/pdfs/` (the graph is rebuilt
-  with `python -m graph.lightrag_track`).
+  `.env`, `*.log`, `.langgraph_api/`, `data/lightrag_store/` and `data/pdfs/` (the graph is
+  rebuilt with `python -m retrieval.graph`).

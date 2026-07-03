@@ -12,8 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
-from rag import (retrieve_rerank, rerank, rephrase, REPHRASE_MODEL, _ABBREV_LIST,
-                 _get_reranker, _get_bm25)
+from rag import rerank, rephrase, REPHRASE_MODEL, _ABBREV_LIST, _get_reranker, _get_bm25
+
+from .baseline import retrieve_rerank
 
 MAX_HOPS = 3        # total retrieval rounds (initial sub-queries + reflect follow-ups)
 PER_HOP  = 5        # chunks kept per sub-query before pooling

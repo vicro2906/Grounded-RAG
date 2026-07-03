@@ -1,9 +1,9 @@
-"""Retrieval + generation primitives shared by every pipeline and track.
+"""Retrieval + generation primitives shared by every architecture.
 
 Holds the OpenAI/Qdrant clients, hybrid search, the reranker, the rephrase/validate/assess
-LLM steps and the prompts. The `agentic/` (iterative) and `graph/` (LightRAG) tracks import
-from here, as does main.py's graph. LLM calls are isolated so they can be swapped to Azure
-OpenAI (private EU model) the day GDPR requires it.
+LLM steps and the prompts. The three architectures in `retrieval/` compose these primitives,
+as does main.py's graph. LLM calls are isolated so they can be swapped to Azure OpenAI
+(private EU model) the day GDPR requires it.
 """
 import os
 import sys
@@ -202,13 +202,6 @@ def rerank(query: str, payloads: list, top_k: int = 5) -> list:
     return [p for _, p in ordered[:top_k]]
 
 
-def retrieve_rerank(query: str, top_k: int = 5, candidates: int = 20) -> list:
-    """Phase 2 retrieval pipeline: retrieve 'candidates' via hybrid search and
-    reorder them with the cross-encoder, returning the best top_k."""
-    cand = retrieve_hybrid(query, top_k=candidates, prefetch_limit=30)
-    return rerank(query, cand, top_k=top_k)
-
-
 # ---------------------------------------------------------------------------
 # REPHRASING — query preprocessing: rewrite the question WITHOUT adding content and normalize
 # terms into BOTH forms «full name (ABBR)» (the guides use both), to improve retrieval. Also
@@ -290,13 +283,8 @@ def refine(query: str) -> dict:
 
 
 def rephrase(query: str) -> str:
-    """Rewritten query only (compatibility helper; used by the evaluation)."""
+    """Rewritten query only (the piece of refine() the retrievers need)."""
     return refine(query)["query"]
-
-
-def search(query: str, top_k: int = 5) -> list:
-    """Baseline retrieval: rephrase -> hybrid -> reranker."""
-    return retrieve_rerank(rephrase(query), top_k=top_k)
 
 
 def build_context(context: list):

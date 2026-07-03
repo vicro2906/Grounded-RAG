@@ -9,7 +9,7 @@ original chunks they point to. The LLM/embedding are isolated in LLM_COMPLETE / 
 switching to Azure OpenAI (EU, for GDPR) is a one-line change.
 
 Usage:
-    1. Build the graph once:   .venv\\Scripts\\python.exe -m graph.lightrag_track
+    1. Build the graph once:   .venv\\Scripts\\python.exe -m retrieval.graph
     2. Evaluate it:            set PIPELINE = "graph" in evaluation.py and run it.
 """
 import os
@@ -24,7 +24,7 @@ except (AttributeError, ValueError):
     pass
 
 # Project root = parent of this package, so the shared parent modules/files resolve no
-# matter the cwd (and `python graph/lightrag_track.py` finds `rag` on sys.path too).
+# matter the cwd (and `python retrieval/graph.py` finds `rag` on sys.path too).
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -43,8 +43,8 @@ from rag import (rerank, retrieve_hybrid, rephrase,  # shared retrieval primitiv
                  _get_reranker, _get_bm25)
 
 # --- Config ---------------------------------------------------------------
-WORKING_DIR = os.path.join(ROOT, "lightrag_store")          # file-based graph + vector store
-CHUNKS_PATH = os.path.join(ROOT, "chunks", "chunks.jsonl")  # shared corpus (parent folder)
+WORKING_DIR = os.path.join(ROOT, "data", "lightrag_store")          # file-based graph + vector store
+CHUNKS_PATH = os.path.join(ROOT, "data", "chunks", "chunks.jsonl")  # shared corpus
 EMBEDDING_MODEL = "text-embedding-3-large"                  # same as Qdrant -> 3072 dims
 EMBEDDING_DIM = 3072
 
@@ -91,7 +91,7 @@ def _make_rag(trace_llm: bool = False) -> LightRAG:
 
 
 # ---------------------------------------------------------------------------
-# INDEX BUILD  (run as a module:  python -m graph.lightrag_track)
+# INDEX BUILD  (run as a module:  python -m retrieval.graph)
 # ---------------------------------------------------------------------------
 def _load_chunks() -> list[dict]:
     with open(CHUNKS_PATH, encoding="utf-8") as fh:
@@ -142,7 +142,7 @@ def _ensure_rag():
         if not os.path.isdir(WORKING_DIR):
             raise SystemExit(
                 f"{WORKING_DIR}/ does not exist. Build the graph first: "
-                f".venv\\Scripts\\python.exe -m graph.lightrag_track"
+                f".venv\\Scripts\\python.exe -m retrieval.graph"
             )
         _loop = asyncio.new_event_loop()
         _rag = _make_rag(trace_llm=True)  # query path: trace LightRAG's internal LLM

@@ -15,11 +15,11 @@ The hybrid search is done at query time with Qdrant's Query API
 (dense prefetch + sparse prefetch, fused with RRF). See rag.py.
 
 Usage:
-    python chunks/upload_to_qdrant_hybrid.py chunks/chunks.jsonl
-    python chunks/upload_to_qdrant_hybrid.py chunks/chunks.jsonl --recreate
-    python chunks/upload_to_qdrant_hybrid.py chunks/chunks.jsonl --dry-run
+    python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks.jsonl
+    python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks.jsonl --recreate
+    python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks.jsonl --dry-run
     # Contextual Retrieval to a NEW collection (does not touch the current one; allows A/B and rollback):
-    python chunks/upload_to_qdrant_hybrid.py chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
+    python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
 """
 
 import argparse
@@ -156,7 +156,7 @@ def main():
     for start in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[start:start + BATCH_SIZE]
         # Contextual Retrieval: if the chunk carries "text_for_retrieval" (context + text,
-        # produced by chunks/contextualize.py), that enriched version is EMBEDDED and
+        # produced by ingestion/contextualize.py), that enriched version is EMBEDDED and
         # BM25-INDEXED to improve matching; otherwise it falls back to the raw text (compat).
         # The payload keeps the whole chunk, so p["text"] is still the citable LITERAL
         # (evidence.py cites "text", not "text_for_retrieval").

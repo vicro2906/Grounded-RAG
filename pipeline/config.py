@@ -16,7 +16,7 @@ CLARIFY_QUESTIONS_PER_ROUND = 1
 #   "iterative" -> Track A: self-ask / reflect-retrieve loop for multi-hop
 #   "graph"     -> Track B: LightRAG entity-relation graph (default; wins the F4 A/B on
 #                  multi-hop recall at baseline latency). Needs the index built once:
-#                  python -m graph.lightrag_track
+#                  python -m retrieval.graph
 RETRIEVAL_MODE = os.environ.get("RETRIEVAL_MODE", "graph")
 VALID_MODES = ("baseline", "iterative", "graph")
 
