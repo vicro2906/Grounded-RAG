@@ -359,9 +359,9 @@ def _format_concept_map(concept_map: str | None) -> str:
     question touches) as a NON-CITABLE block. Returns "" when the mode produced none, so the
     prompt is unchanged for the modes that do not.
 
-    It is placed AFTER the context and just before the question on purpose: the paths are
-    ordered by ascending reliability, so the most reliable one lands next to the question,
-    where long-context models attend best."""
+    It is placed AFTER the context and just before the question on purpose: the entries are
+    ordered worst-to-best, so the strongest one lands next to the question, where long-context
+    models attend best."""
     text = (concept_map or "").strip()
     if not text:
         return ""

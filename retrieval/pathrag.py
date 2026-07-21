@@ -192,14 +192,18 @@ def _chunk_ids_of(attrs: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 # STAGE 2: node retrieval
 # ---------------------------------------------------------------------------
-def retrieve_nodes(keywords: list[str], top_n: int = NODE_TOP_N) -> list[str]:
-    """Match the keywords against the entity embeddings and return the top_n distinct CONCEPTS.
+def retrieve_nodes(keywords: list[str], top_n: int = NODE_TOP_N) -> dict[str, float]:
+    """Match the keywords against the entity embeddings; return {node: relevance} for the
+    top_n distinct CONCEPTS.
 
     Distinct concepts, not distinct nodes: the index holds up to seven spellings of «TAR», and
     without collapsing them by `canonical_key` they alone would fill a sixth of the budget,
     starving the concepts that actually discriminate the question (measured: the top-40 for an
     HBV question was mostly TAR variants). Keywords are abbreviation-expanded so «DTG» matches
-    a node written «dolutegravir»."""
+    a node written «dolutegravir».
+
+    The similarity is RETURNED, not discarded: path reliability needs it to stay anchored to
+    the question (see `retrieve_paths`)."""
     store = _get_store()
     vecs = []
     for kw in keywords:
@@ -209,17 +213,17 @@ def retrieve_nodes(keywords: list[str], top_n: int = NODE_TOP_N) -> list[str]:
         except Exception:
             continue
     if not vecs:
-        return []
+        return {}
     # Best score across keywords per node (a node is relevant if ANY keyword matches it),
     # rather than an average that would dilute a strong single-keyword hit.
     sims = (store.node_emb @ np.vstack(vecs).T).max(axis=1)
-    out, seen = [], set()
+    out, seen = {}, set()
     for i in np.argsort(-sims):
         name = store.node_names[i]
         key = canonical_key(name)
         if name in store.graph and key not in seen:
             seen.add(key)
-            out.append(name)
+            out[name] = float(sims[i])
             if len(out) >= top_n:
                 break
     return out
@@ -231,7 +235,13 @@ def retrieve_nodes(keywords: list[str], top_n: int = NODE_TOP_N) -> list[str]:
 @dataclass
 class _Path:
     nodes: list[str]
-    reliability: float
+    flow: float          # S(P) from the paper: how strongly the endpoints are connected
+    relevance: float     # how close the path's endpoints are to the question (cosine)
+
+    @property
+    def score(self) -> float:
+        """Final ranking score. See `retrieve_paths` for why flow alone is not enough."""
+        return self.flow * self.relevance
 
 
 def _flow_paths(start: str, targets: set[str], decay: float, threshold: float,
@@ -242,8 +252,8 @@ def _flow_paths(start: str, targets: set[str], decay: float, threshold: float,
     Resource flowing into a node is its predecessor's resource, decayed by `decay` and split
     across that predecessor's neighbours — so distant and highly-connected (i.e. generic)
     nodes contribute little, which is exactly the redundancy PathRAG set out to prune. A
-    branch dies as soon as its resource falls below `threshold`. Path reliability is the mean
-    resource over its nodes, normalized by the number of edges (eq. 4)."""
+    branch dies as soon as its resource falls below `threshold`. The flow value is the sum of
+    the resources along the path, normalized by the number of edges (eq. 4)."""
     graph = _get_store().graph
     paths: list[_Path] = []
     # Each stack item is a partial path: (nodes so far, resource at the tip, resource sum).
@@ -268,31 +278,44 @@ def _flow_paths(start: str, targets: set[str], decay: float, threshold: float,
             extended = nodes + [nxt]
             acc = total + flow
             if nxt in targets:
-                paths.append(_Path(nodes=extended, reliability=acc / (len(extended) - 1)))
+                paths.append(_Path(nodes=extended, flow=acc / (len(extended) - 1),
+                                   relevance=1.0))   # set by retrieve_paths
             stack.append((extended, flow, acc))
     return paths
 
 
-def retrieve_paths(nodes: list[str], max_paths: int = MAX_PATHS, decay: float = DECAY,
+def retrieve_paths(nodes: dict[str, float], max_paths: int = MAX_PATHS, decay: float = DECAY,
                    threshold: float = PRUNE_THRESHOLD, max_hops: int = MAX_HOPS) -> list[_Path]:
-    """Key relational paths among the retrieved nodes, most reliable first. Only the best path
-    per node PAIR enters the pool (the paper's per-pair selection), so one densely connected
-    pair cannot crowd out the rest of the query's structure."""
+    """Key relational paths among the retrieved nodes, best first. Only the best path per node
+    PAIR enters the pool (the paper's per-pair selection), so one densely connected pair cannot
+    crowd out the rest of the query's structure.
+
+    Paths are ranked by flow × relevance, NOT by flow alone. The paper ranks on flow because it
+    assumes every retrieved node is relevant, leaving flow to discriminate how strongly two of
+    them connect. That assumption breaks on this graph: since flow is split across a node's
+    neighbours, a path between two LEAF nodes keeps almost all of it (degree 1 -> 1.70) while a
+    path between the concepts that actually matter is penalized for being well connected (VHB,
+    degree 23 -> 1.03; TAR, degree 210 -> 1.00). Ranking on flow alone therefore ordered the
+    paths almost inversely to their clinical usefulness — «Pre-TAR Era -> Post-TAR Era» beat
+    «TAF -> VHB» on an HBV question. Multiplying by the endpoints' cosine similarity to the
+    question (already computed in `retrieve_nodes`) restores the paper's premise explicitly."""
     targets = set(nodes)
     best_per_pair: dict[tuple[str, str], _Path] = {}
     for start in nodes:
         for path in _flow_paths(start, targets - {start}, decay, threshold, max_hops):
+            path.relevance = (nodes.get(path.nodes[0], 0.0)
+                              + nodes.get(path.nodes[-1], 0.0)) / 2
             pair = tuple(sorted((path.nodes[0], path.nodes[-1])))
             current = best_per_pair.get(pair)
-            if current is None or path.reliability > current.reliability:
+            if current is None or path.score > current.score:
                 best_per_pair[pair] = path
-    return heapq.nlargest(max_paths, best_per_pair.values(), key=lambda p: p.reliability)
+    return heapq.nlargest(max_paths, best_per_pair.values(), key=lambda p: p.score)
 
 
 def _path_chunk_ids(paths: list[_Path]) -> list[str]:
-    """Chunk ids behind the paths, ordered by path reliability (most reliable first). Both the
-    nodes and the EDGES contribute: an edge's source chunk is the passage that stated the
-    relation, which is often the one that actually answers a multi-hop question."""
+    """Chunk ids behind the paths, best-scoring path first. Both the nodes and the EDGES
+    contribute: an edge's source chunk is the passage that stated the relation, which is often
+    the one that actually answers a multi-hop question."""
     graph = _get_store().graph
     ordered: list[str] = []
     for path in paths:
@@ -312,14 +335,19 @@ def _describe(attrs: dict) -> str:
 
 def format_paths(paths: list[_Path]) -> str:
     """Render the paths as the non-citable concept map (Spanish: it goes into the generation
-    prompt). Ordered by ASCENDING reliability so the most reliable path sits closest to the
-    question at the end of the prompt — the paper's answer to the "lost in the middle" effect,
-    adapted to our template (context first, question last)."""
+    prompt). Ordered by ASCENDING score so the best path sits closest to the question at the
+    end of the prompt — the paper's answer to the "lost in the middle" effect, adapted to our
+    template (context first, question last).
+
+    The scores themselves are deliberately NOT printed. They rank the paths, but a flow value
+    is a topological quantity: shown to a clinical generator (or read off a trace by a doctor)
+    a bare «1.70» invites reading it as confidence in the recommendation, which it is not.
+    `path_scores` exposes them for tracing instead."""
     if not paths:
         return ""
     graph = _get_store().graph
     lines = []
-    for path in sorted(paths, key=lambda p: p.reliability):
+    for path in sorted(paths, key=lambda p: p.score):
         parts = []
         for i, node in enumerate(path.nodes):
             desc = _describe(graph.nodes[node])
@@ -330,9 +358,37 @@ def format_paths(paths: list[_Path]) -> str:
     return "\n".join(lines)
 
 
+def path_scores(paths: list[_Path]) -> list[dict]:
+    """The ranking behind the concept map, for traces and debugging: which path won, and
+    whether it won on graph structure (`flow`) or on closeness to the question (`relevance`).
+    Best first — the reverse of the order they appear in the prompt."""
+    return [{"path": " -> ".join(p.nodes), "score": round(p.score, 4),
+             "flow": round(p.flow, 4), "relevance": round(p.relevance, 4)}
+            for p in sorted(paths, key=lambda p: -p.score)]
+
+
 # ---------------------------------------------------------------------------
 # RETRIEVAL  (imported by the registry, the pipeline node and the evaluation)
 # ---------------------------------------------------------------------------
+def _trace_paths(query: str, paths: list[_Path]) -> None:
+    """Record the path ranking in LangSmith as its own step, so a run can be inspected for WHY
+    a path was chosen (the prompt only shows the resulting order). Silent no-op without
+    tracing configured — it must never affect retrieval."""
+    if not paths or not os.environ.get("LANGSMITH_API_KEY"):
+        return
+    try:
+        from langsmith import traceable
+
+        @traceable(name="pathrag_ranking", run_type="retriever")
+        def _record(query: str) -> list[dict]:
+            return path_scores(paths)
+
+        _record(query)
+    except Exception:
+        pass
+
+
+
 def pathrag_search_with_paths(query: str, top_k: int = 8, node_top_n: int = NODE_TOP_N,
                               max_paths: int = MAX_PATHS, decay: float = DECAY,
                               rewritten_query: str | None = None) -> tuple[list, str]:
@@ -344,6 +400,7 @@ def pathrag_search_with_paths(query: str, top_k: int = 8, node_top_n: int = NODE
     keywords = extract_keywords(query)
     nodes = retrieve_nodes(keywords, top_n=node_top_n)
     paths = retrieve_paths(nodes, max_paths=max_paths, decay=decay) if nodes else []
+    _trace_paths(query, paths)
     primary = map_chunk_ids_to_payloads(_path_chunk_ids(paths))[:PRIMARY_CHUNK_CAP]
     return house_tail(query, primary, rewritten_query, top_k=top_k), format_paths(paths)
 
@@ -368,15 +425,15 @@ if __name__ == "__main__":
     keywords = extract_keywords(demo)
     print(f"\nQuery: {demo}\nKeywords: {keywords}")
     nodes = retrieve_nodes(keywords)
-    print(f"Nodes ({len(nodes)}): {nodes[:10]}")
+    print(f"Nodes ({len(nodes)}): {list(nodes)[:10]}")
     paths = retrieve_paths(nodes)
-    print(f"Paths ({len(paths)}), most reliable first:")
-    for p in paths[:5]:
-        print(f"  {p.reliability:.4f}  {' -> '.join(p.nodes)}")
+    print(f"Paths ({len(paths)}), best first  [score = flow x relevance]:")
+    for p in path_scores(paths)[:8]:
+        print(f"  {p['score']:.4f} = {p['flow']:.3f} x {p['relevance']:.3f}   {p['path']}")
     selected = map_chunk_ids_to_payloads(_path_chunk_ids(paths))
     payloads = selected[:PRIMARY_CHUNK_CAP]
     print(f"\nChunks selected by the paths: {len(selected)} -> keeping {len(payloads)}")
     for p in payloads:
         print(f"  {p['chunk_id']} | {p['source_file']} | {(p.get('heading') or '')[:60]}")
-    print("\nConcept map (ascending reliability, non-citable):")
+    print("\nConcept map (ascending score, non-citable — scores not shown to the LLM):")
     print(format_paths(paths)[:1200])

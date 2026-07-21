@@ -408,12 +408,26 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
    used). NO new index: it reads `data/lightrag_store/` directly (graphml + `vdb_entities`
    base64 float32 matrix + `kv_store_text_chunks`), all format knowledge isolated in
    `_PathStore` — the ONE point coupled to the lightrag-hku layout, validated on load.
-   **Key finding while testing:** the LightRAG graph holds up to SEVEN spellings of the same
-   concept («TAR», «Tratamiento Antirretroviral», «TAR=Tratamiento Antirretroviral»…; 163 of
-   3382 nodes are such duplicates). Without collapsing them the top-40 node budget filled with
-   TAR variants and the paths were trivial → `_common.canonical_key` (accent/case/punctuation
-   folding + name→abbreviation contraction + repeated-token drop) collapses them, and the
-   selection became relevant. Same helper is used for HippoRAG's phrase nodes.
+   **Two findings while testing, both fixed:**
+   (a) The LightRAG graph holds up to SEVEN spellings of the same concept («TAR»,
+   «Tratamiento Antirretroviral», «TAR=Tratamiento Antirretroviral»…; 163 of 3382 nodes are
+   such duplicates). Without collapsing them the top-40 node budget filled with TAR variants
+   and the paths were trivial → `_common.canonical_key` (accent/case/punctuation folding +
+   name→abbreviation contraction + repeated-token drop) collapses them. Same helper is used
+   for HippoRAG's phrase nodes.
+   (b) **Ranking paths by the paper's flow value alone ordered them almost INVERSELY to
+   clinical usefulness.** Flow is split across a node's neighbours, so for a one-edge path
+   `S(P) = 1 + α/degree`: two leaf nodes keep nearly all of it (degree 1 → 1.70) while the
+   concepts that matter are penalized for being well connected (VHB, degree 23 → 1.03; TAR,
+   degree 210 → 1.00). On the HBV question «Pre-TAR Era → Post-TAR Era» outranked
+   «TAF → VHB» — and since the map is ordered worst-to-best, the noise landed in the
+   highest-attention slot next to the question. The paper does not hit this because it assumes
+   every retrieved node is already relevant, leaving flow to judge only connection strength.
+   **Fix: rank by `flow × relevance`**, relevance being the endpoints' cosine to the question,
+   which `retrieve_nodes` already computed and was throwing away. After it, FTC→TAF and
+   TAF→VHB rank top and Pre-TAR Era drops to 5th. The scores are NOT printed in the prompt (a
+   bare «1.70» invites being read as clinical confidence); `path_scores` exposes them and
+   `_trace_paths` records them in LangSmith.
 5. **Phase 5 — UX.** Interactive clarification + enriched re-retrieval DONE (validate in
    Studio); continue with streaming, web (Streamlit/Chainlit), multi-turn memory and concept
    navigation. Increment 2 pending: "implicit knowledge modifiers" path in `assess` (flagged
