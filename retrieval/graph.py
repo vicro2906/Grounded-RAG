@@ -14,7 +14,6 @@ Usage:
 """
 import os
 import sys
-import json
 import atexit
 import asyncio
 
@@ -39,12 +38,12 @@ from lightrag.llm.openai import openai_embed, gpt_4o_mini_complete
 
 from concurrent.futures import ThreadPoolExecutor
 
-from rag import (rerank, retrieve_hybrid, rephrase,  # shared retrieval primitives (parent)
-                 _get_reranker, _get_bm25)
+from rag import rerank, retrieve_hybrid, rephrase, _get_reranker, _get_bm25
+
+from ._common import load_chunks, map_to_payloads, merge_dedup
 
 # --- Config ---------------------------------------------------------------
-WORKING_DIR = os.path.join(ROOT, "data", "lightrag_store")          # file-based graph + vector store
-CHUNKS_PATH = os.path.join(ROOT, "data", "chunks", "chunks.jsonl")  # shared corpus
+WORKING_DIR = os.path.join(ROOT, "data", "lightrag_store")  # file-based graph + vector store
 EMBEDDING_MODEL = "text-embedding-3-large"                  # same as Qdrant -> 3072 dims
 EMBEDDING_DIM = 3072
 
@@ -93,18 +92,13 @@ def _make_rag(trace_llm: bool = False) -> LightRAG:
 # ---------------------------------------------------------------------------
 # INDEX BUILD  (run as a module:  python -m retrieval.graph)
 # ---------------------------------------------------------------------------
-def _load_chunks() -> list[dict]:
-    with open(CHUNKS_PATH, encoding="utf-8") as fh:
-        return [json.loads(line) for line in fh if line.strip()]
-
-
 async def _build_index() -> None:
     os.makedirs(WORKING_DIR, exist_ok=True)
     rag = _make_rag()
     await rag.initialize_storages()
     await initialize_pipeline_status()
 
-    chunks = _load_chunks()
+    chunks = load_chunks()
     # Each chunk is its own document (all < chunk_token_size, so each stays one LightRAG
     # chunk). Re-running resumes: processed docs are skipped and the LLM cache makes redo cheap.
     await rag.ainsert(
@@ -119,20 +113,6 @@ async def _build_index() -> None:
 # ---------------------------------------------------------------------------
 # RETRIEVAL  (imported by evaluation.py and by the graph node in main.py)
 # ---------------------------------------------------------------------------
-def _norm(text: str) -> str:
-    """Whitespace-collapsed key for matching LightRAG's returned content to our chunks."""
-    return " ".join((text or "").split())
-
-
-_chunk_lookup: dict | None = None
-def _get_chunk_lookup() -> dict:
-    """Map normalized chunk text -> our payload (with full metadata), built once."""
-    global _chunk_lookup
-    if _chunk_lookup is None:
-        _chunk_lookup = {_norm(c["text"]): c for c in _load_chunks()}
-    return _chunk_lookup
-
-
 # Persistent LightRAG instance + event loop so the eval run does not re-init per query.
 _loop = None
 _rag = None
@@ -173,42 +153,6 @@ def _shutdown() -> None:
         _loop, _rag = None, None
 
 
-def _map_to_payloads(chunks: list[dict]) -> list[dict]:
-    """Map LightRAG's selected chunks (by exact content) back to our payloads. Content is
-    inserted and returned verbatim, so an exact normalized match is expected; a prefix
-    fallback covers any edge truncation."""
-    lookup = _get_chunk_lookup()
-    prefix_index = None
-    out, seen = [], set()
-    for ch in chunks:
-        content = ch.get("content", "")
-        payload = lookup.get(_norm(content))
-        if payload is None:
-            # prefix fallback (build the prefix index lazily, only if needed)
-            if prefix_index is None:
-                prefix_index = {k[:120]: v for k, v in lookup.items()}
-            payload = prefix_index.get(_norm(content)[:120])
-        if payload is not None:
-            key = payload["chunk_id"]
-            if key not in seen:
-                seen.add(key)
-                out.append(payload)
-    return out
-
-
-def _merge_dedup(*lists) -> list:
-    """Concatenate payload lists, dedup by chunk_id (fallback text), preserving order
-    (earlier lists win — graph chunks first, then the hybrid complement)."""
-    out, seen = [], set()
-    for lst in lists:
-        for p in lst:
-            key = p.get("chunk_id") or p.get("text", "")
-            if key and key not in seen:
-                seen.add(key)
-                out.append(p)
-    return out
-
-
 def graph_traverse(query: str, chunk_top_k: int = 20) -> list:
     """LightRAG's ENTITY + RELATION traversal (mode='hybrid' = entity+relation, NOT vector
     hybrid; it drops LightRAG's naive dense chunk search so we plug in our own), mapping the
@@ -220,7 +164,7 @@ def graph_traverse(query: str, chunk_top_k: int = 20) -> list:
         param=QueryParam(mode="hybrid", chunk_top_k=chunk_top_k, enable_rerank=False),
     ))
     graph_chunks = (data.get("data") or {}).get("chunks") or []
-    return _map_to_payloads(graph_chunks)
+    return map_to_payloads(graph_chunks)
 
 
 def graph_extract_keywords(query: str, mode: str = "hybrid") -> dict:
@@ -249,14 +193,14 @@ def graph_select(query: str, hl_keywords: list, ll_keywords: list,
     data = loop.run_until_complete(rag.aquery_data(query, param=param))
     d = data.get("data") or {}
     return {
-        "payloads": _map_to_payloads(d.get("chunks") or []),
+        "payloads": map_to_payloads(d.get("chunks") or []),
         "entities": d.get("entities") or [],
         "relationships": d.get("relationships") or [],
     }
 
 
 def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: int = 10,
-                 hybrid_query: str | None = None) -> list:
+                 rewritten_query: str | None = None) -> list:
     """Track B retriever (collapsed single-call API, used by the eval and the combined graph).
     Two complementary chunk sources, merged (dedup by chunk_id) and reranked to top_k:
       1. GRAPH traversal (graph_traverse) — the multi-hop signal.
@@ -269,12 +213,12 @@ def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: in
         fut_graph = ex.submit(graph_traverse, query, chunk_top_k)
         # reuse the caller's rephrased query when available; else rephrase inside the thread
         fut_hybrid = ex.submit(
-            lambda: retrieve_hybrid(hybrid_query or rephrase(query),
+            lambda: retrieve_hybrid(rewritten_query or rephrase(query),
                                     top_k=hybrid_k, prefetch_limit=30))
         graph_payloads = fut_graph.result()
         hybrid_payloads = fut_hybrid.result()
 
-    merged = _merge_dedup(graph_payloads, hybrid_payloads)
+    merged = merge_dedup(graph_payloads, hybrid_payloads)
     if not merged:
         return []
     return rerank(query, merged, top_k=top_k)

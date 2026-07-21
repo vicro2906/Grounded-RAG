@@ -110,8 +110,8 @@ def node_graph_hybrid(state: GraphState) -> dict:
 
 def node_graph_merge(state: GraphState) -> dict:
     """Union the two chunk sources, deduped by chunk_id (graph chunks first)."""
-    from retrieval.graph import _merge_dedup
-    merged = _merge_dedup(state.get("graph_payloads") or [], state.get("hybrid_payloads") or [])
+    from retrieval._common import merge_dedup
+    merged = merge_dedup(state.get("graph_payloads") or [], state.get("hybrid_payloads") or [])
     return {"merged": merged}
 
 
