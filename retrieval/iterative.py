@@ -118,14 +118,14 @@ def _accumulate(pool: dict, payloads: list) -> None:
 
 
 def iterative_search(query: str, top_k: int = 8, max_hops: int = MAX_HOPS,
-                     per_hop: int = PER_HOP, search_query: str | None = None) -> list:
+                     per_hop: int = PER_HOP, rewritten_query: str | None = None) -> list:
     """Track A retriever for multi-hop questions: plan -> retrieve per sub-query ->
     reflect/retrieve follow-ups -> rerank the union against the ORIGINAL question.
-    Single-hop questions fall back to one baseline shot; pass `search_query` when the
-    caller already rephrased the question (the graph does) to skip a duplicate LLM call."""
+    Single-hop questions fall back to one baseline shot; pass `rewritten_query` when the
+    caller already rephrased the question (the pipeline does) to skip a duplicate LLM call."""
     plan = _plan(query)
     if not plan["is_multihop"]:
-        return retrieve_rerank(search_query or rephrase(query), top_k=top_k)
+        return retrieve_rerank(rewritten_query or rephrase(query), top_k=top_k)
 
     pool: dict = {}
     subs = plan["sub_queries"][:max_hops]

@@ -11,7 +11,7 @@ from langgraph.types import interrupt
 
 from rag import (refine, retrieve_hybrid, rerank, build_context, validate, assess,
                  SYS_PROMPT, build_user_prompt)
-from retrieval.iterative import iterative_search
+from retrieval.registry import MODES
 from evidence import format_answer
 
 from .config import (MAX_ITER, CLARIFY_MAX_ROUNDS, CLARIFY_QUESTIONS_PER_ROUND,
@@ -33,7 +33,7 @@ def node_rephrase(state: RAGState) -> dict:
             "clinical_facts": r.get("known_facts", {}),
             "candidate_modifiers": r.get("candidate_modifiers", []),
             "pending_clarifications": [], "clarify_rounds": 0, "assessment": {},
-            "asked_questions": []}
+            "asked_questions": [], "concept_map": ""}
 
 
 def node_out_of_domain(state: RAGState) -> dict:
@@ -55,13 +55,18 @@ def _resolve_mode(config) -> str:
     return mode if mode in VALID_MODES else RETRIEVAL_MODE
 
 
+def retrieval_entry(mode: str) -> str:
+    """Name of the node that runs `mode`'s retrieval in the combined graph. Baseline is the
+    one mode split into two nodes (retrieve -> rerank), so it names the first of them."""
+    return "retrieve" if mode == "baseline" else f"{mode}_retrieve"
+
+
 def route_domain(state: RAGState, config) -> str:
     """Combined graph: after rephrase, route out-of-domain to a message, in-domain to the
     selected retrieval strategy."""
     if not state.get("in_domain", True):
         return "out_of_domain"
-    return {"iterative": "iterative_retrieve",
-            "graph": "graph_retrieve"}.get(_resolve_mode(config), "retrieve")
+    return retrieval_entry(_resolve_mode(config))
 
 
 def make_route_in_domain(entries: list):
@@ -87,26 +92,38 @@ def node_rerank(state: RAGState) -> dict:
             "formatted_context": formatted_context}
 
 
-def node_iterative_retrieve(state: RAGState) -> dict:
-    """Track A: multi-hop retrieval (plan -> hop -> reflect). Uses the ORIGINAL question (it
-    does its own decomposition); yields the same numbered-context shape as the baseline. The
-    rephrased query is passed along so a single-hop fallback skips a duplicate rephrase call."""
-    contexts = iterative_search(state["question"], top_k=8,
-                                search_query=state.get("search_query"))
-    chunk_index, formatted_context = build_context(contexts)
-    return {"contexts": contexts, "chunk_index": chunk_index,
-            "formatted_context": formatted_context, "retrieval_mode": "iterative"}
+def _retrieve_with(mode: str, question: str, rewritten_query: str | None) -> tuple[list, str]:
+    """Run `mode`'s retrieval, returning (payloads, concept_map).
+
+    Every mode is called the same way — the ORIGINAL question plus the already-rephrased query
+    so it need not rephrase again — and the registry loads it lazily, so a baseline run never
+    imports LightRAG or a graph store. A mode that also produces a non-citable concept map
+    (PathRAG's relational paths) returns it here; the others return "" and the prompt is
+    unchanged."""
+    m = MODES[mode]
+    with_map = m.search_with_concept_map()
+    if with_map is not None:
+        return with_map(question, top_k=8, rewritten_query=rewritten_query)
+    return m.search()(question, top_k=8, rewritten_query=rewritten_query), ""
 
 
-def node_graph_retrieve(state: RAGState) -> dict:
-    """Track B: LightRAG graph retrieval, mapped back to our payloads (same context shape).
-    Imported lazily so baseline/iterative runs never load LightRAG. Reuses the rephrased query
-    for the hybrid complement (BM25 benefits from the normalized abbreviations)."""
-    from retrieval.graph import graph_search
-    contexts = graph_search(state["question"], top_k=8, hybrid_query=state.get("search_query"))
-    chunk_index, formatted_context = build_context(contexts)
-    return {"contexts": contexts, "chunk_index": chunk_index,
-            "formatted_context": formatted_context, "retrieval_mode": "graph"}
+def _make_retrieval_node(mode: str):
+    """Build the collapsed retrieval node for `mode` (combined graph). One factory instead of
+    one hand-written node per mode: they differ only in which retriever they call."""
+    def node(state: RAGState) -> dict:
+        contexts, concept_map = _retrieve_with(mode, state["question"],
+                                               state.get("search_query"))
+        chunk_index, formatted_context = build_context(contexts)
+        return {"contexts": contexts, "chunk_index": chunk_index,
+                "formatted_context": formatted_context, "concept_map": concept_map,
+                "retrieval_mode": mode}
+    node.__name__ = f"node_{mode}_retrieve"
+    return node
+
+
+# Collapsed node per non-baseline mode (baseline keeps its explicit retrieve -> rerank pair).
+RETRIEVAL_NODES = {mode: _make_retrieval_node(mode)
+                   for mode in VALID_MODES if mode != "baseline"}
 
 
 # --- Clarification gate (between retrieval and generate) --------------------
@@ -173,28 +190,26 @@ def node_re_retrieve(state: RAGState, config) -> dict:
     mode = state.get("retrieval_mode") or _resolve_mode(config)
     patient = f"Contexto del paciente: {facts}"
     enriched = f"{state.get('search_query') or state['question']}\n{patient}"
-    if mode == "iterative":
-        contexts = iterative_search(f"{state['question']}\n{patient}", top_k=8,
-                                    search_query=enriched)
-    elif mode == "graph":
-        from retrieval.graph import graph_search
-        contexts = graph_search(f"{state['question']}\n{patient}", top_k=8,
-                                hybrid_query=enriched)
-    else:  # baseline
+    if mode == "baseline":
         candidates = retrieve_hybrid(enriched, top_k=20, prefetch_limit=30)
-        contexts = rerank(enriched, candidates, top_k=5)
+        contexts, concept_map = rerank(enriched, candidates, top_k=5), ""
+    else:
+        contexts, concept_map = _retrieve_with(mode, f"{state['question']}\n{patient}", enriched)
     chunk_index, formatted_context = build_context(contexts)
     return {"contexts": contexts, "chunk_index": chunk_index,
-            "formatted_context": formatted_context}
+            "formatted_context": formatted_context, "concept_map": concept_map}
 
 
 # --- Tail: generate <-> validate -> evidence/fallback ----------------------
 def node_generate(state: RAGState) -> dict:
-    """context + question -> structured answer. The clarified patient data (clinical_facts) is
-    passed as a non-citable block that selects the applicable branch of the guides. On a
-    validator rejection, its feedback is injected so the retry can correct it."""
+    """context + question -> structured answer. Two non-citable blocks may accompany the
+    numbered context: the clarified patient data (clinical_facts), which selects the applicable
+    branch of the guides, and the retrieval mode's concept map, which shows how the concepts
+    connect. Neither can be cited — `validate` still requires every claim to be grounded in the
+    chunks. On a validator rejection, its feedback is injected so the retry can correct it."""
     user = build_user_prompt(state["question"], state["formatted_context"],
-                             clinical_facts=state.get("clinical_facts"))
+                             clinical_facts=state.get("clinical_facts"),
+                             concept_map=state.get("concept_map"))
     val = state.get("validation")
     if val and not val.get("is_valid", True):
         user += (

@@ -2,6 +2,8 @@
 import os
 from typing import Literal, TypedDict
 
+from retrieval.registry import VALID_MODES  # re-exported: the catalogue of retrieval modes
+
 # Validation loop: max generations (initial + retries).
 MAX_ITER = 2
 
@@ -10,21 +12,19 @@ MAX_ITER = 2
 CLARIFY_MAX_ROUNDS = 3
 CLARIFY_QUESTIONS_PER_ROUND = 1
 
-# Retrieval strategy (Phase 4). All three feed the SAME generate -> validate -> evidence,
-# so citations and the anti-hallucination validator are identical across strategies.
-#   "baseline"  -> hybrid + reranker (single-shot)
-#   "iterative" -> Track A: self-ask / reflect-retrieve loop for multi-hop
-#   "graph"     -> Track B: LightRAG entity-relation graph (default; wins the F4 A/B on
-#                  multi-hop recall at baseline latency). Needs the index built once:
-#                  python -m retrieval.graph
+# Retrieval strategy. Every mode feeds the SAME generate -> validate -> evidence, so
+# citations and the anti-hallucination validator are identical across strategies; the modes
+# themselves are declared in retrieval/registry.py (which also documents each one). The
+# graph modes need their index built once (python -m retrieval.graph / .hipporag).
 RETRIEVAL_MODE = os.environ.get("RETRIEVAL_MODE", "graph")
-VALID_MODES = ("baseline", "iterative", "graph")
 
 
 class ConfigSchema(TypedDict, total=False):
     """Rendered by LangGraph Studio as a `retrieval_mode` dropdown in the run config panel,
-    so the three architectures can be picked and traced live without touching the code."""
-    retrieval_mode: Literal["baseline", "iterative", "graph"]
+    so the architectures can be picked and traced live without touching the code. The values
+    must be spelled out: Studio builds the dropdown from the Literal at import time, so it
+    cannot be derived from VALID_MODES — keep both in sync when adding a mode."""
+    retrieval_mode: Literal["baseline", "iterative", "graph", "pathrag", "hipporag"]
 
 
 # --- User-facing messages (Spanish: shown to the doctor) ---

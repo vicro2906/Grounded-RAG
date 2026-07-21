@@ -354,14 +354,37 @@ def _format_clinical_facts(clinical_facts: dict | None) -> str:
     )
 
 
-def build_user_prompt(query: str, context: str, clinical_facts: dict | None = None) -> str:
+def _format_concept_map(concept_map: str | None) -> str:
+    """Render a retrieval mode's concept map (relational paths between the concepts the
+    question touches) as a NON-CITABLE block. Returns "" when the mode produced none, so the
+    prompt is unchanged for the modes that do not.
+
+    It is placed AFTER the context and just before the question on purpose: the paths are
+    ordered by ascending reliability, so the most reliable one lands next to the question,
+    where long-context models attend best."""
+    text = (concept_map or "").strip()
+    if not text:
+        return ""
+    return (
+        "\n    MAPA CONCEPTUAL (relaciones entre conceptos extraídas de las guías; NO citable):\n"
+        "    Úsalo SOLO para orientarte sobre cómo se conectan los conceptos y para encadenar "
+        "el razonamiento entre fragmentos. NO es una fuente: no lo cites, no lo incluyas en "
+        "\"fragmentos_usados\" ni en \"cita_textual\", y toda afirmación clínica debe estar "
+        "respaldada por los fragmentos numerados del contexto.\n"
+        f"{text}\n"
+    )
+
+
+def build_user_prompt(query: str, context: str, clinical_facts: dict | None = None,
+                      concept_map: str | None = None) -> str:
     """User prompt with the numbered context, the clinical question and (optionally) the
-    patient data the doctor supplied through the clarification step."""
+    patient data the doctor supplied through the clarification step and the retrieval mode's
+    non-citable concept map."""
     return f"""
     CONTEXTO (fragmentos de guías clínicas sobre VIH,numerados):
 
     {context}
-{_format_clinical_facts(clinical_facts)}
+{_format_clinical_facts(clinical_facts)}{_format_concept_map(concept_map)}
     PREGUNTA CLÍNICA:
     {query}
 

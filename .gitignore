@@ -17,8 +17,11 @@ wheels/
 # LangGraph dev server (caché local)
 .langgraph_api/
 
-# LightRAG knowledge-graph store (Track B, F4) — rebuilt with: python -m retrieval.graph
+# Generated graph indexes — rebuilt from the corpus, never committed:
+#   python -m retrieval.graph     (LightRAG store; PathRAG reads it too)
+#   python -m retrieval.hipporag  (HippoRAG 2 store)
 data/lightrag_store/
+data/hipporag_store/
 _probe_store/
 
 # PDFs originales de GeSIDA: se conservan en local pero NO se redistribuyen (© GeSIDA)

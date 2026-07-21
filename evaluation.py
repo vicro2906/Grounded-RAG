@@ -5,7 +5,7 @@ multihop / adversarial) so the full RAGAS suite can be sliced by question type. 
 A/B, pick a retriever with PIPELINE; only retrieval varies (generation is shared), which is
 what makes the comparison fair.
 
-    PIPELINE=graph python evaluation.py     # baseline | iterative | graph
+    PIPELINE=graph python evaluation.py     # any mode in retrieval/registry.py
     -> results/ragas_results_<pipeline>.csv (per-question detail) + per-tier means.
 """
 
@@ -28,33 +28,28 @@ warnings.filterwarnings(
 
 # --- Existing pipeline ---
 from rag import build_context, generate_answer, COLLECTION_HYBRID
-from retrieval.baseline import search
+from retrieval.registry import VALID_MODES, get_search
 
 # ===========================================================================
 # A/B CONFIG — which retrieval pipeline runs over the single EVAL_SET (generation is shared,
-# so only retrieval varies). Which Qdrant collection retrieval hits is set by QDRANT_COLLECTION
+# so only retrieval varies). The available modes and what each one does are declared in
+# retrieval/registry.py. Which Qdrant collection retrieval hits is set by QDRANT_COLLECTION
 # (rag.py reads it; DEFAULT the Contextual-Retrieval build), so you can A/B collections too.
-#   "baseline"  -> rephrase + hybrid + reranker
-#   "iterative" -> Track A: self-ask / reflect-retrieve loop
-#   "graph"     -> Track B: LightRAG graph retrieval
 # The run always uses the FULL RAGAS suite: gpt-4o generation (sequential, ~30k-TPM bound) +
-# a judge call per chunk for precision, so it is the expensive one — budget for it.
+# a judge call per chunk for precision, so it is the expensive one — budget for it. Probe
+# with EVAL_SAMPLE=3 (stratified, cents) before committing to a full run.
 # ===========================================================================
 PIPELINE = os.environ.get("PIPELINE", "baseline")
+if PIPELINE not in VALID_MODES:   # fail before building the dataset, not after
+    raise SystemExit(f"Unknown PIPELINE: {PIPELINE!r} (use {' | '.join(VALID_MODES)})")
 
 
 def get_pipeline(name: str):
-    """Return the retrieval function for the chosen pipeline. Track A/B retrievers are imported
-    lazily (so 'graph' does not require LightRAG unless you actually run it)."""
-    if name == "baseline":
-        return search
-    if name == "iterative":
-        from retrieval.iterative import iterative_search   # Track A
-        return iterative_search
-    if name == "graph":
-        from retrieval.graph import graph_search            # Track B (needs LightRAG)
-        return graph_search
-    raise SystemExit(f"Unknown PIPELINE: {name!r} (use baseline | iterative | graph)")
+    """Retrieval function for the chosen pipeline, from the mode catalogue. The registry
+    imports each mode lazily, so evaluating 'baseline' never loads LightRAG or a graph store.
+    Every mode is called the same way — retriever(question) — so the A/B compares the
+    SELECTION mechanism with generation and metrics held fixed."""
+    return get_search(name)
 
 # --- RAGAS ---
 from ragas import EvaluationDataset, evaluate

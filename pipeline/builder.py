@@ -14,7 +14,8 @@ factor head/tail into `_add_common` and let each mode plug its own retrieval nod
 Two assemblies:
   - build_graph(mode): a DEDICATED graph with only that mode's retrieval path, EXPANDED into
     its real steps (cleanest to visualize in Studio). Exposed as app_baseline/_iterative/_graph.
-  - build_combined_graph(): all three paths in one graph, each COLLAPSED to a single node; the
+    Only the modes with an expanded breakdown have one; the rest are reached through `app`.
+  - build_combined_graph(): every path in one graph, each COLLAPSED to a single node; the
     active one is chosen at runtime via the `retrieval_mode` context field. Exposed as `app`.
 """
 from langgraph.graph import StateGraph, START, END
@@ -64,12 +65,16 @@ def _add_retrieval_collapsed(builder: StateGraph, mode: str) -> None:
         builder.add_node("rerank", N.node_rerank)
         builder.add_edge("retrieve", "rerank")
         builder.add_edge("rerank", "assess_context")
-    elif mode == "iterative":
-        builder.add_node("iterative_retrieve", N.node_iterative_retrieve)
-        builder.add_edge("iterative_retrieve", "assess_context")
-    else:
-        builder.add_node("graph_retrieve", N.node_graph_retrieve)
-        builder.add_edge("graph_retrieve", "assess_context")
+        return
+    entry = N.retrieval_entry(mode)
+    builder.add_node(entry, N.RETRIEVAL_NODES[mode])
+    builder.add_edge(entry, "assess_context")
+
+
+# Modes with a hand-built "teaching" breakdown for Studio. A mode is added here once it has
+# earned the extra surface (graph did, after winning the Phase-4 A/B); until then it is
+# reachable through the combined graph, collapsed to one node.
+EXPANDED_MODES = ("baseline", "iterative", "graph")
 
 
 def _add_retrieval_expanded(builder: StateGraph, mode: str):
@@ -116,7 +121,12 @@ _STATE_SCHEMA = {"iterative": IterativeState, "graph": GraphState}
 
 def build_graph(mode: str = "graph"):
     """Dedicated single-architecture graph: head + only `mode`'s retrieval path (expanded
-    into its real steps) + tail."""
+    into its real steps) + tail. Restricted to the modes with an expanded breakdown."""
+    if mode not in EXPANDED_MODES:
+        raise ValueError(
+            f"{mode!r} has no expanded graph (available: {', '.join(EXPANDED_MODES)}). "
+            f"Run it through the combined graph with retrieval_mode={mode!r}."
+        )
     builder = StateGraph(_STATE_SCHEMA.get(mode, RAGState), input_schema=InputState)
     _add_common(builder)
     entry = _add_retrieval_expanded(builder, mode)
@@ -127,16 +137,15 @@ def build_graph(mode: str = "graph"):
 
 
 def build_combined_graph():
-    """All three retrieval paths in one graph (each collapsed to a single node); route_domain
-    picks the active one at runtime from the `retrieval_mode` context field / config /
-    RETRIEVAL_MODE. This is the graph the CLI uses."""
+    """EVERY retrieval path in one graph (each collapsed to a single node); route_domain picks
+    the active one at runtime from the `retrieval_mode` context field / config /
+    RETRIEVAL_MODE. This is the graph the CLI uses. Both the nodes and the routing targets
+    come from the mode catalogue, so registering a mode is enough to make it selectable."""
     builder = StateGraph(RAGState, input_schema=InputState, context_schema=ConfigSchema)
     _add_common(builder)
     for m in VALID_MODES:
         _add_retrieval_collapsed(builder, m)
+    targets = {N.retrieval_entry(m): N.retrieval_entry(m) for m in VALID_MODES}
     builder.add_conditional_edges("rephrase", N.route_domain,
-                                  {"retrieve": "retrieve",
-                                   "iterative_retrieve": "iterative_retrieve",
-                                   "graph_retrieve": "graph_retrieve",
-                                   "out_of_domain": "out_of_domain"})
+                                  {**targets, "out_of_domain": "out_of_domain"})
     return builder.compile()

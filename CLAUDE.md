@@ -30,14 +30,20 @@ question ─▶ rephrase ─┬─ out of domain ─▶ out_of_domain ─▶ END
                       └─ in domain ─▶ [RETRIEVAL_MODE] ─▶ assess_context ⇄ clarify (interrupt)
                              ├─ baseline : retrieve (hybrid) ─▶ rerank (20→5)        │ (on exit)
                              ├─ iterative: iterative_retrieve (plan→hop→reflect, →8)   ▼
-                             └─ graph    : graph_retrieve (LightRAG + own hybrid, →8) ◀ DEFAULT
+                             ├─ graph    : graph_retrieve (LightRAG + own hybrid, →8) ◀ DEFAULT
+                             ├─ pathrag  : pathrag_retrieve (flow-pruned paths, →8)
+                             └─ hipporag : hipporag_retrieve (triples→PPR, →8)
                                               re_retrieve (1×) ─▶ generate ⇄ validate ─▶ evidence ─▶ output
                                                               (not valid+exhausted ─▶ fallback)
 ```
 
 The head (rephrase + domain guardrail) and the tail (assess_context→generate→validate→evidence)
-are IDENTICAL across the three modes; only the retrieval node changes, chosen by
-`RETRIEVAL_MODE` in `pipeline/config.py` (default `"graph"` after the Phase-4 A/B).
+are IDENTICAL across the five modes; only the retrieval node changes, chosen by
+`RETRIEVAL_MODE` in `pipeline/config.py` (default `"graph"` after the Phase-4 A/B; the new
+modes are pending their own A/B). The modes are declared ONCE in `retrieval/registry.py`
+(name → lazily-imported search function) and everything else — routing, the Studio dropdown,
+`re_retrieve`, the eval's `PIPELINE` — is derived from that catalogue, so adding a mode is a
+module plus one registry line.
 
 - **rephrase** (`rag.refine`, gpt-4o-mini): a single call that (a) classifies whether the
   question belongs to the HIV domain (`in_domain`); (b) rewrites the query WITHOUT adding
@@ -90,19 +96,44 @@ are IDENTICAL across the three modes; only the retrieval node changes, chosen by
   `generate` as a NON-citable **"DATOS APORTADOS POR EL MÉDICO"** block (they select the
   guide's branch; the literal citations still come from the chunks). Requires a checkpointer:
   provided by `langgraph dev`/Studio (no own one is compiled in the graphs).
-- **Retrieval — 3 selectable modes (`RETRIEVAL_MODE`), all ending in the same generate:**
+- **Retrieval — 5 selectable modes (`RETRIEVAL_MODE`), all ending in the same generate.**
+  Every mode is a function `f(query, top_k=…, rewritten_query=…) -> list[chunk payload]`
+  (the `rewritten_query` kwarg is how the pipeline hands over its already-rephrased query so
+  no mode rephrases twice). The four graph/multi-hop modes end in the SAME
+  `_common.house_tail` (merge with the dense+BM25 complement → rerank → top 8), so an A/B
+  measures the SELECTION mechanism and nothing else:
   - **baseline** = `node_retrieve` (`rag.retrieve_hybrid`: dense text-embedding-3-large 3072d +
     sparse BM25 `Qdrant/bm25`, RRF fusion, 20 candidates) → `node_rerank` (`rag.rerank`,
     local cross-encoder, 20→5).
-  - **iterative** (Track A) = `node_iterative_retrieve` → `retrieval.iterative.iterative_search`
+  - **iterative** (Track A) = `retrieval.iterative.iterative_search`
     (plan→hop→reflect, top 8). Plans over the ORIGINAL question; the single-hop fallback reuses
-    the caller's rewritten query (`search_query` param) instead of re-rephrasing (saves one LLM
-    call per single-hop run; without the param, e.g. from the eval, it rephrases itself).
-  - **graph** (Track B, DEFAULT) = `node_graph_retrieve` → `retrieval.graph.graph_search`
+    the caller's rewritten query instead of re-rephrasing.
+  - **graph** (Track B, DEFAULT) = `retrieval.graph.graph_search`
     (entity+relation graph `mode="hybrid"` + `retrieve_hybrid` dense+BM25 complement →
     dedup fusion → rerank → top 8).
+  - **pathrag** = `retrieval.pathrag.pathrag_search` (arXiv 2502.14902). Reads the EXISTING
+    LightRAG store (no new index): LLM keywords → cosine vs entity embeddings → top-40
+    distinct CONCEPTS → flow-based pruning (resource 1.0 decayed by α=0.7/degree, early stop
+    θ=0.01, ≤4 hops, best path per node pair) → top-15 paths → their nodes'/edges' `source_id`
+    → ≤20 chunks → house_tail. It ALSO returns the paths as a **non-citable concept map**
+    (see below).
+  - **hipporag** = `retrieval.hipporag.hipporag_search` (arXiv 2502.14802, HippoRAG 2).
+    Native reimplementation (the `hipporag` PyPI package pins openai==1.91/tiktoken==0.7/vllm
+    and does not install on Windows). Query→triple cosine (top-5) → **recognition memory**
+    (gpt-4o-mini drops the merely-similar triples) → reset vector = phrase nodes of the
+    surviving triples (∝ score) + ALL passage nodes (∝ query-passage cosine × 0.05) →
+    `networkx.pagerank` → top-20 passages → house_tail. No triple survives → dense fallback.
 - **rerank** (`rag.rerank`): local cross-encoder `jinaai/jina-reranker-v2-base-multilingual`
   (fastembed/ONNX, multilingual, GDPR-ok). Used by the three modes to refine to the final top.
+- **concept_map (non-citable, optional part of the retrieval contract):** a mode MAY expose
+  the graph structure behind its selection as text (`RAGState.concept_map`; today only
+  `pathrag`, via `pathrag_search_with_paths`). It reaches `generate` as a block labelled
+  «MAPA CONCEPTUAL … NO citable» placed right before the question (paths ordered by ASCENDING
+  reliability, so the most reliable sits closest to the question — the paper's answer to
+  "lost in the middle"). It may guide multi-hop reasoning but is NEVER a source: `validate`
+  still requires every claim to be grounded in the numbered chunks, and `evidence` still
+  fuzzy-matches literal quotes. This is the Phase-4 "open idea" from the graph section,
+  implemented — pending its own A/B (faithfulness + recall with and without it).
 - **generate** (`pipeline.generation.structured_llm`, gpt-4o): structured output with
   `ChatOpenAI.with_structured_output` (Pydantic `ClinicalAnswer`, strict json_schema).
   Returns dict: sufficient_information, answer, sources_used[{ref,quote}], follow_up_questions.
@@ -164,12 +195,16 @@ keeping strict grounding + validate.
   dumps `results/ragas_results_<PIPELINE>.csv`. The references were drafted by the model
   from the guidelines → **pending clinical review**.
 - `abbreviations.py` — ABBREVIATION→name dictionary from the guides (values in Spanish).
-- **`retrieval/`** — the three interchangeable architectures, one module per `RETRIEVAL_MODE`
-  value, all honouring the same contract (question in → chunk payloads out) and composing
-  `rag.py`'s primitives: `baseline.py` (`search`: rephrase → hybrid → rerank; the building
-  block the other two reuse), `iterative.py` (Track A, `iterative_search`: plan/hop/reflect)
-  and `graph.py` (Track B, `graph_search`: LightRAG index build + traversal; corpus from
-  `data/chunks/`, store in `data/lightrag_store/`).
+- **`retrieval/`** — the interchangeable architectures, one module per `RETRIEVAL_MODE` value,
+  all honouring the same contract (question in → chunk payloads out) and composing `rag.py`'s
+  primitives: `registry.py` (**the catalogue**: mode name → lazily-imported search function;
+  the single source of truth the pipeline/eval derive from), `_common.py` (**shared helpers**:
+  chunk↔payload mapping by text or id, `merge_dedup`, `house_tail`, `expand_abbrevs` and
+  `canonical_key`), `baseline.py` (`search`: rephrase → hybrid → rerank; the building block
+  the others reuse), `iterative.py` (Track A, plan/hop/reflect), `graph.py` (Track B, LightRAG
+  index build + traversal; store in `data/lightrag_store/`), `pathrag.py` (flow-pruned paths
+  over that same store — no index of its own) and `hipporag.py` (HippoRAG 2; own store in
+  `data/hipporag_store/`, built with `python -m retrieval.hipporag`).
 - `ingestion/` — corpus→index scripts (run once per corpus change): `chunk_guidelines.py`
   (structural chunking), `contextualize.py` (Contextual Retrieval), `upload_to_qdrant.py`
   (dense) and `upload_to_qdrant_hybrid.py` (dense+BM25).
@@ -227,14 +262,20 @@ keeping strict grounding + validate.
     Each node reuses the SAME primitives as `iterative_search`/`graph_search` (no behaviour
     change) and the intermediate states are visible in Studio (`IterativeState`/`GraphState`
     extend `RAGState`). Selection: Studio's graph dropdown.
-  - **Combined graph** `app` (build_combined_graph): the three routes in one graph; it exposes
+    Only the modes in `builder.EXPANDED_MODES` have a dedicated graph (a mode earns one after
+    winning its A/B); `build_graph` on any other mode raises a ValueError pointing at the
+    combined graph. **pathrag/hipporag are collapsed-only for now.**
+  - **Combined graph** `app` (build_combined_graph): ALL five routes in one graph; it exposes
     a `context_schema` (`ConfigSchema`) with the **`retrieval_mode`** field as a **dropdown**
-    in the run config panel (live choice). Also used by the CLI.
+    in the run config panel (live choice). Also used by the CLI. Nodes and routing targets are
+    generated from `VALID_MODES`, so registering a mode makes it selectable automatically.
   - **Shared head/tail** are factored into `_add_common` (in `pipeline/builder.py`); the
     retrieval section into `_add_retrieval_collapsed/_expanded(mode)`. This is what makes the
     pipeline RETRIEVAL-AGNOSTIC: each retrieval
-    node honours the SAME state contract (fills `contexts`/`chunk_index`/`formatted_context`)
-    and the tail only reads that contract, never anything mode-specific.
+    node honours the SAME state contract (fills `contexts`/`chunk_index`/`formatted_context`,
+    optionally `concept_map`) and the tail only reads that contract, never anything
+    mode-specific. The collapsed nodes are BUILT by a factory (`nodes._make_retrieval_node`)
+    from the registry, so there is no hand-written node per mode.
   - **Via env / CLI:** `RETRIEVAL_MODE` (env var, default `"graph"`) is the combined graph's
     default mode; or `python main.py iterative` to force one in a run.
   - **Mode resolution (combined), in `_resolve_mode`:** context (Studio) → `configurable`
@@ -243,12 +284,25 @@ keeping strict grounding + validate.
     as a tag `mode:<x>` and metadata → filterable in LangSmith. LightRAG's internal keyword
     LLM call IS traced now (wrapped with `traceable` in `_make_rag(trace_llm=True)`, only at
     query time, not at index build).
-- **Build the LightRAG graph (once):** `.venv\Scripts\python.exe -m retrieval.graph`
-  (entity extraction over the 517 chunks; resumable, uses the LLM cache).
-- RAGAS evaluation / A/B: set `PIPELINE` and `DATASET` in `evaluation.py` and run
-  `.venv\Scripts\python.exe evaluation.py`.
+- **Build the graph indexes (once each, both resumable and gitignored):**
+  - `.venv\Scripts\python.exe -m retrieval.graph` — LightRAG entity graph over the 517 chunks
+    (~1.5 h, uses the LLM cache). **Also required by pathrag**, which reads the same store.
+  - `.venv\Scripts\python.exe -m retrieval.hipporag` — HippoRAG 2 store (~10 min, ~$0.25).
+    Resumes at the `openie.jsonl` line level; add `--smoke` instead to inspect a demo query
+    (triples retrieved, what recognition memory kept, top passages) without Qdrant.
+  - `.venv\Scripts\python.exe -m retrieval.pathrag` — no index to build; prints store stats and
+    walks a demo query (keywords → nodes → paths → chunks → concept map).
+- RAGAS evaluation / A/B: `PIPELINE=<mode> .venv\Scripts\python.exe evaluation.py`. **Probe
+  first with `EVAL_SAMPLE=3`** (stratified, 3 per tier = 12 questions, cents) to check wiring
+  and latency before spending on the full 151.
 - **Dependencies: ALWAYS `uv add` (never pip).** `uv` is not on PATH:
   `& "$env:USERPROFILE\.local\bin\uv.exe" add <package>`.
+  **WARNING (bitten 2026-07-21):** any `uv add` re-resolves the lock and reinstalls the CPU
+  `onnxruntime` (a fastembed dependency), which SHADOWS the manually installed
+  `onnxruntime-gpu` and silently drops the reranker back to CPU. After any `uv add`, check
+  `ort.get_available_providers()` contains `CUDAExecutionProvider`; if not, restore with
+  `uv pip install --reinstall "onnxruntime-gpu==1.22.0"` (do NOT `uv pip uninstall
+  onnxruntime` first — it deletes files the GPU build shares and breaks the import).
 
 ## Phased roadmap
 
@@ -302,13 +356,19 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
     knowledge modifiers" path in `assess` (flagged and always followed by re-retrieval +
     validate) as a safety net against retrieval failures.
 
-## Pending / next steps (as of 2026-06-29)
+## Pending / next steps (as of 2026-07-21)
 
-0. **`EVAL_SET` (151 questions, 4 tiers) DONE** and prepared in `evaluation.py` (see bullet).
-   Replaces the Phase-4 A/B instrument (the multihop pool saturated graph recall at 0.979 and
-   had no simple questions). PENDING: launch it (full RAGAS, ~$15 with the mini judge for the 3
-   pipelines, ~$15 more with the gpt-4o judge for the final number) and clinical review of the
-   references. Before launching, probe with a subset (~10) to measure real cost in the dashboard.
+0. **THE A/B IS NOW THE BLOCKER.** Five retrieval modes are implemented and wired
+   (baseline / iterative / graph / pathrag / hipporag) but only `graph` has ever been measured,
+   on the OLD 16-question multihop pool. `EVAL_SET` (151 questions, 4 tiers) is ready in
+   `evaluation.py`. PENDING: run it per pipeline (full RAGAS; ~$15 with the mini judge for
+   three pipelines, ~$15 more with a gpt-4o judge for the final number) and the clinical
+   review of the references. **Blocked 2026-07-21: the OpenAI account ran out of credit**
+   mid-probe (`insufficient_quota`), so the `EVAL_SAMPLE=3 PIPELINE=hipporag` probe produced
+   only `context_recall=0.833` on the single_hop tier (3 questions) before the judge died —
+   NOT a usable number. What the probe DID prove: the wiring works end to end and hipporag's
+   latency is **12.9 s/query mean (median 12.6, max 18.6)**, in the graph mode's range.
+   Re-run the probe for hipporag AND pathrag once there is credit, then the full A/B.
 1. **Contextual Retrieval (enrich chunks with context) — DONE (index built).**
    `ingestion/contextualize.py`: per chunk, gpt-4o-mini generates ONE dense context sentence
    (entities/abbreviations/recommendation grade; situating it in its guide via
@@ -325,12 +385,35 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
    with pure pipelines and read whether the graph degrades on the `simple`/`single_hop` tiers.
    If there is no gap → the router adds no quality (only latency). Do NOT add before measuring
    (it dirties the test: the simple tier would then measure baseline, not the chosen pipeline).
-3. **(Idea) Relation descriptions as a non-citable "concept map"** in the graph's generation
-   prompt, to help multi-hop reasoning without breaking grounding. Prototype behind a flag and
-   A/B against the current version (faithfulness + recall).
-4. **(Idea) HippoRAG 2 as a replacement for LightRAG:** better evidence on multi-hop, fewer
-   tokens, and —key— does NOT degrade simple questions (unlike LightRAG/GraphRAG). Prior spike:
-   verify backends swappable to Azure/EU (GDPR) and the license. A/B after EVAL_SET.
+3. **Non-citable "concept map" — IMPLEMENTED (pathrag), pending its A/B.** The paths reach
+   generation as a non-citable block (see the concept_map bullet in Architecture). PENDING:
+   A/B it on/off (faithfulness + recall) — and note the quality caveat below before trusting it.
+   **CAVEAT found while testing: LightRAG's entity/relation descriptions are in ENGLISH**
+   (its extraction prompt is English, over Spanish source text), and the ones that surface are
+   often only loosely related to the question. So the map may be adding tokens and noise
+   rather than signal; if the A/B says so, the cheap fix is to build the map from the
+   `keywords`/`source_id` structure instead of the English descriptions, or to re-extract.
+4. **HippoRAG 2 — IMPLEMENTED (`retrieval/hipporag.py`), pending its A/B.** Native
+   reimplementation, NOT the PyPI package (`hipporag` pins openai==1.91 / tiktoken==0.7 /
+   vllm==0.6.6.post1: incompatible with our stack and vllm does not install on Windows).
+   Index: **517 passages, 7792 phrases, 5609 triples, 8309 nodes / 16481 edges**, built in
+   ~10 min for ~$0.25 (vs LightRAG's ~1.5 h) with ZERO extraction failures. Manual smoke on
+   the HBV question: the top triple is literally the answer («…se debe iniciar precozmente un
+   TAR que incluya TDF o TAF y FTC o 3TC»), recognition memory kept 2/5, and the top passage
+   is `TAR_2022 §7.4.4 HEPATOPATÍAS (VHC, VHB, CIRROSIS)`. On the simple question (AZT
+   intraparto) it returns the right chunk at rank 1, like baseline — the "does not degrade
+   simple QA" property, though n=3 proves nothing yet.
+4 bis. **PathRAG — IMPLEMENTED (`retrieval/pathrag.py`), pending its A/B.** Implemented from
+   the paper (the BUPT-GAMMA repo is a LightRAG derivative of unclear provenance and was not
+   used). NO new index: it reads `data/lightrag_store/` directly (graphml + `vdb_entities`
+   base64 float32 matrix + `kv_store_text_chunks`), all format knowledge isolated in
+   `_PathStore` — the ONE point coupled to the lightrag-hku layout, validated on load.
+   **Key finding while testing:** the LightRAG graph holds up to SEVEN spellings of the same
+   concept («TAR», «Tratamiento Antirretroviral», «TAR=Tratamiento Antirretroviral»…; 163 of
+   3382 nodes are such duplicates). Without collapsing them the top-40 node budget filled with
+   TAR variants and the paths were trivial → `_common.canonical_key` (accent/case/punctuation
+   folding + name→abbreviation contraction + repeated-token drop) collapses them, and the
+   selection became relevant. Same helper is used for HippoRAG's phrase nodes.
 5. **Phase 5 — UX.** Interactive clarification + enriched re-retrieval DONE (validate in
    Studio); continue with streaming, web (Streamlit/Chainlit), multi-turn memory and concept
    navigation. Increment 2 pending: "implicit knowledge modifiers" path in `assess` (flagged
@@ -338,7 +421,9 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
 
 Evaluation artifacts versioned in `results/`: `ragas_results.csv` (Phase-0 baseline) and
 `ragas_results_{baseline,iterative,graph}_retrieval.csv` (Phase-4 A/B, context_recall). The
-new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS).
+new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS). Nothing is
+versioned yet for pathrag/hipporag: the 2026-07-21 probe died on quota and its CSV (all NaN)
+was discarded rather than committed.
 
 ## Important findings (do not lose)
 

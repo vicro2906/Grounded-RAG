@@ -38,6 +38,10 @@ class RAGState(TypedDict):
     contexts: list           # final payloads after the reranker
     chunk_index: dict        # {n: chunk} for source citation (build_context)
     formatted_context: str   # numbered context [1]/[2]… for the LLM
+    # Optional part of the retrieval contract: a mode MAY expose the graph structure behind
+    # its selection (PathRAG's relational paths) as text. It reaches generation as a
+    # NON-CITABLE block — reasoning aid only, never a source. "" for the modes without one.
+    concept_map: str
     # --- Clarification (slot-filling): patient data steers generation, never cited ---
     # These carry NO reducer: they are RESET per question in node_rephrase (Studio threads
     # persist state across questions, so an accumulating reducer would leak the previous
