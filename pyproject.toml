@@ -21,3 +21,11 @@ dependencies = [
     "rapidfuzz>=3.14.5",
     "tiktoken>=0.13.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

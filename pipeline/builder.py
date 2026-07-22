@@ -17,6 +17,11 @@ Two assemblies:
     Only the modes with an expanded breakdown have one; the rest are reached through `app`.
   - build_combined_graph(): every path in one graph, each COLLAPSED to a single node; the
     active one is chosen at runtime via the `retrieval_mode` context field. Exposed as `app`.
+
+Both take an optional `checkpointer`, which is what makes `clarify`'s `interrupt()` RESUMABLE.
+The LangGraph platform (Studio / `langgraph dev`) injects its own, so the graphs it imports are
+compiled without one; any plain embedding — the CLI, a future web app — MUST pass a checkpointer
+or the run pauses with no way to resume it (invoke returns `__interrupt__` and no `output`).
 """
 from langgraph.graph import StateGraph, START, END
 
@@ -119,7 +124,7 @@ def _add_retrieval_expanded(builder: StateGraph, mode: str):
 _STATE_SCHEMA = {"iterative": IterativeState, "graph": GraphState}
 
 
-def build_graph(mode: str = "graph"):
+def build_graph(mode: str = "graph", checkpointer=None):
     """Dedicated single-architecture graph: head + only `mode`'s retrieval path (expanded
     into its real steps) + tail. Restricted to the modes with an expanded breakdown."""
     if mode not in EXPANDED_MODES:
@@ -133,10 +138,10 @@ def build_graph(mode: str = "graph"):
     entries = entry if isinstance(entry, list) else [entry]
     builder.add_conditional_edges("rephrase", N.make_route_in_domain(entries),
                                   entries + ["out_of_domain"])
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)
 
 
-def build_combined_graph():
+def build_combined_graph(checkpointer=None):
     """EVERY retrieval path in one graph (each collapsed to a single node); route_domain picks
     the active one at runtime from the `retrieval_mode` context field / config /
     RETRIEVAL_MODE. This is the graph the CLI uses. Both the nodes and the routing targets
@@ -148,4 +153,4 @@ def build_combined_graph():
     targets = {N.retrieval_entry(m): N.retrieval_entry(m) for m in VALID_MODES}
     builder.add_conditional_edges("rephrase", N.route_domain,
                                   {**targets, "out_of_domain": "out_of_domain"})
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

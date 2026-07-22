@@ -94,8 +94,14 @@ module plus one registry line.
   re-retrieval between rounds (the intermediate re_retrieves were redundant). Tested: with
   "HBV coinfection" the HBV-specific chunks enter the top-5. The `clinical_facts` ALSO enter
   `generate` as a NON-citable **"DATOS APORTADOS POR EL MÉDICO"** block (they select the
-  guide's branch; the literal citations still come from the chunks). Requires a checkpointer:
-  provided by `langgraph dev`/Studio (no own one is compiled in the graphs).
+  guide's branch; the literal citations still come from the chunks). **Requires a checkpointer**
+  — `interrupt()` persists the paused run and needs somewhere to persist it. `build_graph` /
+  `build_combined_graph` take one as an optional argument: the graphs registered in
+  `langgraph.json` are compiled WITHOUT one (the platform injects its own), and every plain
+  embedding must supply it. The CLI compiles its own instance with `InMemorySaver`
+  (**fixed 2026-07-22**: it did not, so `invoke` returned `__interrupt__` with no `output` and
+  `main.py` died with `KeyError: 'output'` on any question that triggered clarification —
+  i.e. most clinical ones). Covered by `tests/test_pipeline_flow.py`.
 - **Retrieval — 5 selectable modes (`RETRIEVAL_MODE`), all ending in the same generate.**
   Every mode is a function `f(query, top_k=…, rewritten_query=…) -> list[chunk payload]`
   (the `rewritten_query` kwarg is how the pipeline hands over its already-rephrased query so
@@ -142,6 +148,16 @@ module plus one registry line.
   not valid and exhausted → `fallback`; technical error of the judge → `fallback` (no "failing open").
 - **evidence** (`evidence.format_answer`): formats the answer + sources panel with
   literal citations (fuzzy match) + follow-up questions + clinical disclaimer. Text without ANSI.
+  It is the LAST barrier before the doctor, so `attribute()` resolves every doubt to `miss`
+  (section shown, no quote) rather than certifying. **Hardened 2026-07-22** after two holes
+  found by inspection: (a) no minimum quote length — «se recomienda» (13 chars) matched
+  literally in almost any chunk, was certified as an exact citation and INHERITED the item's
+  evidence grades; now a quote must clear `MIN_QUOTE_CHARS` (40) or name something clinical
+  (`_is_substantive`); (b) a fuzzy match SUBSTITUTES the guideline sentence for the model's
+  quote, so a quote saying «ABC» was displayed backed by a real sentence saying «TDF o TAF» —
+  now `_clinical_tokens` (drugs in EITHER spelling + figures) must not diverge, or it is a
+  `miss`. Also fixed the grade over-attribution (a partial quote came back tagged with every
+  grade in the item). All of it pinned in `tests/test_evidence.py`.
 
 `retrieval.baseline.search()` = rephrase → hybrid → rerank (used by the evaluation).
 
@@ -182,7 +198,14 @@ keeping strict grounding + validate.
 - `rag.py` — retrieval/generation primitives ONLY (no architecture lives here): clients,
   embeddings, retrieve/retrieve_hybrid, rerank, refine, validate, assess, generate_answer
   (raw version), SYS_PROMPT, build_user_prompt, model constants.
-- `evidence.py` — answer and sources formatting.
+- `evidence.py` — answer and sources formatting + citation integrity.
+- **`tests/`** — pytest suite, **no API calls and no network** (`.venv\Scripts\python.exe -m
+  pytest`, ~0.4 s). `conftest.py` stubs only the boundaries (refine / assess / validate /
+  generation / retrieval) so `test_pipeline_flow.py` exercises the REAL graph: routing, the
+  interrupt/resume contract the CLI depends on, the clarification cap and the per-question
+  state reset (both leaks are pinned as regressions). `test_evidence.py` covers citation
+  integrity, `test_retrieval_common.py` the concept-collapsing helpers and
+  `test_pipeline_routing.py` the branches that decide whether an unvalidated answer is shown.
 - `evaluation.py` — RAGAS evaluation. **A SINGLE set `EVAL_SET` (151 questions)** with a
   `tier` field per question (**simple / single_hop / multihop / adversarial**) → measures
   performance BY QUESTION TYPE. It is built by folding the old pools (golden + multihop, now
@@ -234,7 +257,11 @@ keeping strict grounding + validate.
 
 ## How to run
 
-- App (interactive CLI): `.venv\Scripts\python.exe main.py`
+- App (interactive CLI): `.venv\Scripts\python.exe main.py`. It compiles its OWN graph instance
+  with an `InMemorySaver`, so when `assess` decides to ask, the run pauses, the question is
+  printed and the answer resumes it with `Command(resume=…)` (empty answer = skip that
+  dimension; the question still counts as asked, so `assess` moves on instead of insisting).
+- Tests: `.venv\Scripts\python.exe -m pytest` (~0.4 s, no API calls). Run them before committing.
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → opens Studio (EU). See steps in the
   **Trace View** tab (not Turn View).
 - **Choosing the retrieval strategy (Phase 4):** `main.py` compiles FOUR graphs (via
@@ -360,7 +387,54 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
     knowledge modifiers" path in `assess` (flagged and always followed by re-retrieval +
     validate) as a safety net against retrieval failures.
 
-## Pending / next steps (as of 2026-07-21)
+## Pending / next steps (as of 2026-07-22)
+
+**Critical review of 2026-07-22 — backlog in priority order.** A full read of the system
+surfaced the items below. The first block is DONE (same session); the rest is open work,
+ordered by value/cost. Everything here is deliberate design debt, not discovery: read it as
+the plan, not as a bug list to rediscover.
+
+- **DONE — CLI resumable** (`interrupt()` had no checkpointer → `KeyError: 'output'`),
+  **per-question state reset** (`attempts`/`validation` leaked into the next question through a
+  persistent thread), **citation integrity hardened** (filler quotes certified as literal +
+  fuzzy silently swapping the clinical content), **pytest suite** (43 tests, offline).
+- **OPEN A — the validation loop cannot fix what it detects.** On a grounding rejection,
+  `route_validation` returns to `generate` with the SAME context, so if the cause is bad
+  retrieval the retry is theatre and it ends in `fallback`. `validate` already returns
+  `unsupported_claims`, which is thrown away as prose. Turning those claims into a re-retrieval
+  query is the single change that makes the pipeline genuinely self-correcting.
+- **OPEN B — inverted risk allocation.** `assess` (which questions to ask — visible, reversible,
+  bounded) runs on **gpt-4o up to 3×/question**; `validate` (the anti-hallucination guarantee,
+  priority #1 — invisible when it fails) runs once on **gpt-4o-mini**. Also `assess` runs even
+  when `refine` already returned an empty `candidate_modifiers`, a screen computed for free.
+- **OPEN C — clarification blocks instead of assisting.** Up to 3 sequential pauses before a
+  single word of answer. Better: answer with the branches the context covers and offer the
+  question as an OPTIONAL refinement; or at minimum ask every pending dimension in ONE pause.
+- **OPEN D — no multi-turn memory.** The system emits 3 follow-up questions it cannot itself
+  answer in context, and the `clinical_facts` that cost 3 interrupts evaporate on the next
+  question. The fix is SCOPING, not resetting: session-level `patient_facts` (visible and
+  clearable) vs per-question state.
+- **OPEN E — the evaluation does not measure the shipped system.** `build_dataset` calls
+  retriever + `generate_answer` directly, skipping `refine`, `assess`/`clarify`, `re_retrieve`,
+  the `validate` loop and `evidence`. So no number covers the riskiest component: the FALSE
+  REJECTION rate of `validate` (a correct answer silently replaced by `MSG_NOT_VALIDATED`).
+  There is also no ABSTENTION metric, though the `adversarial` tier exists to measure it.
+- **OPEN F — the A/B is confounded and more expensive than it needs to be.** `house_tail` mixes
+  every graph mode's selection with the same dense+BM25 complement, so the four modes share a
+  good part of their final context and the measured deltas are compressed; an ablation WITHOUT
+  the complement is what isolates the selection mechanism. And since only retrieval varies,
+  restoring a retrieval-only path (recall/precision, no gpt-4o generation) would run all five
+  modes over the 151 questions for a fraction of the current cost.
+- **OPEN G — rich metadata unused.** `topic` / `year` / `section_number` / `evidence_grades` are
+  in every payload and filter nothing in Qdrant. With guidelines from 2020 and 2022 coexisting,
+  `SYS_PROMPT` rule 5 ("state both versions") is unhelpful when one is simply older.
+- **OPEN H — GDPR claim stronger than reality.** Generation, embeddings, judge, `assess` and the
+  LightRAG extraction all run on **OpenAI US**, and `clinical_facts` (Art. 9 health data) travel
+  in the prompt and into the LangSmith trace. Qdrant/LangSmith are EU; OpenAI is the gap. Two
+  concrete steps: Azure OpenAI EU (the code is already structured for the swap) and masking
+  `clinical_facts` in traces.
+- **OPEN I — minor.** `rapidfuzz` is a declared dependency and is used nowhere (`evidence.py`
+  matches with `difflib`); either use it there or drop it.
 
 0. **THE FULL A/B IS THE BLOCKER.** Five modes are implemented and wired
    (baseline / iterative / graph / pathrag / hipporag). A **stratified probe

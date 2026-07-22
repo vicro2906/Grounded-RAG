@@ -28,6 +28,10 @@ class ConfigSchema(TypedDict, total=False):
 
 
 # --- User-facing messages (Spanish: shown to the doctor) ---
+MSG_CLARIFY_INTRO = (
+    "Para ajustar la respuesta a este paciente necesito un dato "
+    "(pulsa Enter para omitirlo y responder en términos generales):"
+)
 MSG_NOT_VALIDATED = (
     "No he podido elaborar una respuesta suficientemente fundamentada en las guías "
     "para esta consulta. Te sugiero reformular la pregunta o revisar directamente las "

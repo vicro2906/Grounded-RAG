@@ -5,7 +5,22 @@ import re
 import textwrap
 import difflib
 
+from abbreviations import ABBREVIATIONS
+
 WIDTH = 72
+
+# --- Citation-integrity thresholds ---------------------------------------
+# This module is the LAST barrier between a fabricated quote and the doctor, so the two knobs
+# that decide whether a quote is certified are named and justified here rather than inlined.
+#
+# A quote must IDENTIFY a recommendation, not echo the guides' boilerplate: "se recomienda"
+# appears verbatim in most chunks, so without a floor it would be certified as a literal
+# citation AND inherit the item's evidence grades while supporting nothing. A quote clears the
+# floor by being long enough to be specific, or by naming something clinical (drug or figure).
+MIN_QUOTE_CHARS = 40
+# Fuzzy acceptance: enough to absorb punctuation/wording drift, never enough to accept a
+# different statement (which is additionally guarded by the clinical-token check below).
+FUZZY_THRESHOLD = 0.72
 
 # The formatted answer is DATA consumed by several frontends (Studio, a future web app, the
 # API), not just the terminal — so no ANSI codes are embedded. Color is a print-time concern.
@@ -58,6 +73,36 @@ def split_items(chunk: dict) -> list:
         return [{"text": body, "grades": _grades_in(body)}] if body else []
     return [{"text": p, "grades": _grades_in(p)} for p in pieces]
 
+# ─────────────────────────────────── clinical tokens (drugs and figures)
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+# One pattern per drug/term, matching EITHER spelling — the guides (and the model) mix «TAF»
+# and «tenofovir alafenamida» freely, so keying on the abbreviation alone would read a quote
+# written in full names as committing to nothing. Built over _norm'd text on both sides, so
+# «EVG/c» and «VIH-1» survive the punctuation stripping; word-bounded so «3TC» does not fire
+# inside a longer token.
+_ABBREV_RE = {
+    abbr: re.compile(rf"\b({re.escape(_norm(abbr))}|{re.escape(_norm(name))})\b")
+    for abbr, name in ABBREVIATIONS.items() if _norm(abbr)
+}
+
+
+def _clinical_tokens(text: str) -> set:
+    """The drug abbreviations and figures a piece of text commits to.
+
+    These are the tokens whose divergence changes the clinical meaning: fuzzy matching may
+    absorb a comma or a rewording, but «TDF» vs «ABC» or «200» vs «500» is a different
+    recommendation, not the same one written differently."""
+    normalized = _norm(text)
+    tokens = set(_NUMBER.findall(normalized))
+    tokens |= {abbr for abbr, rx in _ABBREV_RE.items() if rx.search(normalized)}
+    return tokens
+
+
+def _is_substantive(quote: str) -> bool:
+    """Does the quote carry enough content to identify a recommendation? See MIN_QUOTE_CHARS."""
+    return len(_norm(quote)) >= MIN_QUOTE_CHARS or bool(_clinical_tokens(quote))
+
+
 # ─────────────────────────────────────────── grades scoped to the quote
 def _grades_for_quote(item_text: str, quote: str) -> list:
     """Within the item, keep only the grades whose clause is actually covered by the
@@ -81,22 +126,39 @@ def _grades_for_quote(item_text: str, quote: str) -> list:
         blk = sm.find_longest_match(0, len(ns), 0, len(nq))
         if blk.size / max(len(ns), 1) >= 0.5 and g not in kept:
             kept.append(g)
-    return kept or _grades_in(item_text)
+    if kept:
+        return kept
+    # No clause matched the quote. Falling back to EVERY grade in the item over-credits a
+    # quote that only covers a slice of it (a partial quote of a two-recommendation item would
+    # come back tagged [A-I, B-II]), so the fallback only applies when the quote covers the
+    # item substantially.
+    covered = len(_norm(quote)) / max(len(_norm(item_text)), 1)
+    return _grades_in(item_text) if covered >= 0.6 else []
 
 # ─────────────────────────────────────────── quote -> recommendation
 def attribute(quote: str, chunk: dict):
     """
     Return (status, sentence_to_show, grades):
       'exact' – the quote appears literally (after normalizing) inside an item
-      'fuzzy' – the quote matches by containment (>= .72); the guideline sentence is
-                shown instead of the model's
-      'miss'  – no item matches; the panel adds a discreet note
+      'fuzzy' – the quote matches by containment (>= FUZZY_THRESHOLD) AND commits to the same
+                drugs/figures; the guideline sentence is shown instead of the model's
+      'miss'  – nothing certifiable; the panel shows the section with a discreet note
+
+    'miss' is the SAFE outcome, so every doubt resolves to it: the doctor then sees the section
+    that was consulted without a quote, instead of a citation the guides do not back. Two
+    rejections matter beyond "no match found":
+      - a quote too thin to identify a recommendation (see MIN_QUOTE_CHARS), which would
+        otherwise certify as literal and inherit the item's evidence grades;
+      - a fuzzy match that names DIFFERENT drugs or figures than the sentence it matched.
+        That is the dangerous case: fuzzy replaces the model's quote with the guideline
+        sentence, so an answer that said «ABC» would be displayed backed by a real sentence
+        saying «TDF o TAF». Fuzzy may fix wording, never swap the clinical content.
     """
     items = split_items(chunk)
     if not items:
         return "miss", "", []
     nq = _norm(quote)
-    if not nq:
+    if not nq or not _is_substantive(quote):
         return "miss", "", []
 
     for it in items:
@@ -112,7 +174,9 @@ def attribute(quote: str, chunk: dict):
         score = max(sm.ratio(), containment)
         if score > best_score:
             best, best_score = it, score
-    if best is not None and best_score >= 0.72:
+    if best is not None and best_score >= FUZZY_THRESHOLD:
+        if _clinical_tokens(quote) - _clinical_tokens(best["text"]):
+            return "miss", "", []      # names drugs/figures the matched sentence does not
         return "fuzzy", best["text"], _grades_for_quote(best["text"], quote)
 
     return "miss", "", []

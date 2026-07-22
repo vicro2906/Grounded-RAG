@@ -10,6 +10,11 @@ Choosing the retrieval mode:
     - Studio: the combined graph exposes a `retrieval_mode` dropdown in the run config panel,
               so all three architectures can be picked and traced live.
 
+Persistence: the graphs registered in langgraph.json are compiled WITHOUT a checkpointer
+because the LangGraph platform injects its own. The CLI is a plain embedding, so it compiles
+its own instance with an in-memory checkpointer — without one, `clarify`'s `interrupt()` pauses
+the run and there is no way to resume it (invoke returns `__interrupt__` and no answer).
+
 Tracing (LangSmith): enabled automatically ONLY if LANGSMITH_API_KEY is set; each run and each
 OpenAI call then shows up in the LANGSMITH_PROJECT project, with the retrieval mode recorded as
 a run tag and metadata so the architectures are filterable.
@@ -21,6 +26,7 @@ Usage:
 import os
 import sys
 import threading
+import uuid
 
 # The Windows console defaults to cp1252 and breaks accents/boxes. Force UTF-8.
 try:
@@ -47,7 +53,11 @@ if os.environ.get("LANGSMITH_API_KEY"):
     except Exception:
         pass
 
-from pipeline import build_graph, build_combined_graph, RETRIEVAL_MODE, VALID_MODES
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
+
+from pipeline import (build_graph, build_combined_graph, RETRIEVAL_MODE, VALID_MODES,
+                      MSG_CLARIFY_INTRO)
 
 # Compiled graphs (registered in langgraph.json). The three dedicated ones are the expanded
 # "teaching" views; `app` is the combined graph with the live retrieval_mode dropdown.
@@ -62,14 +72,36 @@ app = build_combined_graph()
 threading.Thread(target=rag.warmup, daemon=True).start()
 
 
+def _collect_clarifications(interrupts) -> dict | str:
+    """Ask the doctor the questions the graph paused on and shape the answer the way
+    node_clarify expects: plain text for a single question, {question: answer} for several.
+    An empty answer is a deliberate skip — node_clarify still records the question as asked, so
+    assess moves on to the next dimension instead of insisting on this one."""
+    questions = [q for i in interrupts for q in (i.value or {}).get("questions", [])]
+    print(f"\n{MSG_CLARIFY_INTRO}")
+    answers = {q: input(f"  · {q} ").strip() for q in questions}
+    if len(answers) == 1:
+        return next(iter(answers.values()))
+    return {q: a for q, a in answers.items() if a}
+
+
 def main_cli():
     mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in VALID_MODES else RETRIEVAL_MODE
-    question = input("¿Cuál es tu pregunta?: ")
-    result = app.invoke(
-        {"question": question},
-        context={"retrieval_mode": mode},                       # selects the mode
-        config={"tags": [f"mode:{mode}"], "metadata": {"retrieval_mode": mode}},  # LangSmith
-    )
+    # Own instance WITH persistence: the graphs above are for the platform (which injects its
+    # own checkpointer), this one is a plain embedding and must carry its own to resume the
+    # clarification interrupt. Compiled here so importing main.py for Studio never pays for it.
+    app_cli = build_combined_graph(checkpointer=InMemorySaver())
+    # One thread per run: the checkpointer keys the paused state by thread_id, and resuming
+    # the clarification interrupt means invoking again on that same thread.
+    config = {"configurable": {"thread_id": uuid.uuid4().hex},
+              "tags": [f"mode:{mode}"], "metadata": {"retrieval_mode": mode}}  # LangSmith
+    payload = {"question": input("¿Cuál es tu pregunta?: ")}
+    while True:
+        result = app_cli.invoke(payload, context={"retrieval_mode": mode}, config=config)
+        interrupts = result.get("__interrupt__")
+        if not interrupts:                       # no pending question -> the answer is ready
+            break
+        payload = Command(resume=_collect_clarifications(interrupts))
     print(result["output"])
 
 

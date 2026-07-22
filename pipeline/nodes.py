@@ -25,15 +25,21 @@ from .generation import ClinicalAnswer, structured_llm
 def node_rephrase(state: RAGState) -> dict:
     """question -> rewritten/normalized query + domain classification (single LLM call), plus
     the cheap half of the clarification step (seeds clinical_facts / candidate_modifiers).
-    Runs on EVERY question, so it also RESETS the clarification cycle — Studio threads persist
-    state across questions and without this reset the previous round budget / patient data
-    would leak in."""
+
+    Runs on EVERY question, so it is also the RESET point for every per-question field. A
+    thread outlives the question (Studio, and now the CLI, keep one across turns), so anything
+    not reset here leaks into the NEXT question. Two loops depend on this: the clarification
+    one (clarify_rounds / asked_questions / clinical_facts — a spent budget or the previous
+    patient's data) and the validation one (attempts / validation — a carried-over `attempts`
+    silently costs the next question its retry, and a carried-over rejected `validation` makes
+    node_generate open with "your previous answer was REJECTED" on a first attempt)."""
     r = refine(state["question"])
     return {"search_query": r["query"], "in_domain": r["in_domain"],
             "clinical_facts": r.get("known_facts", {}),
             "candidate_modifiers": r.get("candidate_modifiers", []),
             "pending_clarifications": [], "clarify_rounds": 0, "assessment": {},
-            "asked_questions": [], "concept_map": ""}
+            "asked_questions": [], "concept_map": "",
+            "attempts": 0, "validation": {}}
 
 
 def node_out_of_domain(state: RAGState) -> dict:
