@@ -9,10 +9,10 @@ changes HOW we query the store Qdrant already holds. Shared primitives come from
 from typing import cast
 from concurrent.futures import ThreadPoolExecutor
 
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
-from rag import rerank, rephrase, REPHRASE_MODEL, _ABBREV_LIST, _get_reranker, _get_bm25
+from rag import (rerank, rephrase, chat_model, REPHRASE_MODEL, _ABBREV_LIST, _get_reranker,
+                 _get_bm25)
 
 from .baseline import retrieve_rerank
 
@@ -58,7 +58,7 @@ _plan_llm = None
 def _get_plan_llm():
     global _plan_llm
     if _plan_llm is None:
-        _plan_llm = ChatOpenAI(model=REPHRASE_MODEL, temperature=0).with_structured_output(
+        _plan_llm = chat_model(REPHRASE_MODEL, temperature=0).with_structured_output(
             _Plan, method="json_schema", strict=True
         )
     return _plan_llm
@@ -68,7 +68,7 @@ _reflect_llm = None
 def _get_reflect_llm():
     global _reflect_llm
     if _reflect_llm is None:
-        _reflect_llm = ChatOpenAI(model=REPHRASE_MODEL, temperature=0).with_structured_output(
+        _reflect_llm = chat_model(REPHRASE_MODEL, temperature=0).with_structured_output(
             _Reflect, method="json_schema", strict=True
         )
     return _reflect_llm

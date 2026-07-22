@@ -27,7 +27,7 @@ warnings.filterwarnings(
 )
 
 # --- Existing pipeline ---
-from rag import build_context, generate_answer, COLLECTION_HYBRID
+from rag import build_context, generate_answer, chat_model, embeddings_model, COLLECTION_HYBRID
 from retrieval.registry import VALID_MODES, get_search
 
 # ===========================================================================
@@ -578,10 +578,8 @@ def main():
     dataset, latencies = build_dataset(DATASET, retriever)
 
     print(f"Evaluating with judge: {JUDGE_MODEL}\n")
-    evaluator_llm = LangchainLLMWrapper(ChatOpenAI(model=JUDGE_MODEL))
-    evaluator_embeddings = LangchainEmbeddingsWrapper(
-        OpenAIEmbeddings(model="text-embedding-3-large")
-    )
+    evaluator_llm = LangchainLLMWrapper(chat_model(JUDGE_MODEL))
+    evaluator_embeddings = LangchainEmbeddingsWrapper(embeddings_model())
 
     # answer_relevancy is omitted on purpose — misleading on Spanish answers (Phase 0 artifact).
     metrics = [Faithfulness(), LLMContextPrecisionWithReference(), LLMContextRecall()]

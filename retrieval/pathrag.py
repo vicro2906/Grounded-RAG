@@ -33,14 +33,13 @@ from dataclasses import dataclass, field
 from typing import cast
 
 import numpy as np
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from rag import REPHRASE_MODEL, _ABBREV_LIST, client, get_embedding, rephrase
+from rag import REPHRASE_MODEL, _ABBREV_LIST, chat_model, client, get_embedding, rephrase
 
 from ._common import canonical_key, expand_abbrevs, house_tail, map_chunk_ids_to_payloads
 
@@ -94,7 +93,7 @@ _kw_llm = None
 def _get_keywords_llm():
     global _kw_llm
     if _kw_llm is None:
-        _kw_llm = ChatOpenAI(model=REPHRASE_MODEL, temperature=0).with_structured_output(
+        _kw_llm = chat_model(REPHRASE_MODEL, temperature=0).with_structured_output(
             _Keywords, method="json_schema", strict=True
         )
     return _kw_llm

@@ -43,6 +43,10 @@ load_dotenv(find_dotenv(usecwd=True))
 QDRANT_URL     = os.environ.get("QDRANT_URL")        # https://....cloud.qdrant.io:6333
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+# Same knob as the app (rag.OPENAI_BASE_URL): ONE .env value repoints every OpenAI call
+# in the project, ingestion included. Read rather than imported so this script stays
+# standalone (it must not drag in the retrieval stack).
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or None
 
 COLLECTION = "guias_vih"
 
@@ -153,7 +157,7 @@ def main():
         print(f"Missing environment variables: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
 
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    openai_client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
     qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     ensure_collection(qdrant, args.recreate)
 
@@ -179,7 +183,7 @@ def main():
 # ---------------------------------------------------------------------------
 def example_search():
     """Semantic search restricted to grade-A recommendations."""
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    openai_client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
     qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
     query = "cuando iniciar el tratamiento antirretroviral en un paciente con tuberculosis?"

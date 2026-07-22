@@ -25,7 +25,16 @@ QDRANT_URL     = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-client = OpenAI(api_key = OPENAI_API_KEY)
+# --- OpenAI endpoint (the single knob for data residency) ------------------
+# EVERY OpenAI call in the project goes through the client or the factories below, so the
+# endpoint is one line of .env away: OPENAI_BASE_URL repoints generation, embeddings, the
+# judge, the clarification assessment, the LightRAG extraction and the ingestion scripts at
+# once. Empty = OpenAI's default (US) endpoint, which is where the prototype runs today.
+# PENDING (see CLAUDE.md): move to an EU-resident project — OpenAI configures residency PER
+# PROJECT and only AT CREATION, so it needs a new project and its key, not just this variable.
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or None
+
+client = OpenAI(api_key = OPENAI_API_KEY, base_url = OPENAI_BASE_URL)
 # Default to 443 (not the client's default 6333): restrictive networks often block outbound
 # 6333 while 443 is universally open (symptom: ConnectTimeout on every query). Override with
 # QDRANT_PORT for e.g. a self-hosted instance on 6333.
@@ -94,6 +103,9 @@ GENERATION_MODEL = "gpt-4o"
 REPHRASE_MODEL   = "gpt-4o-mini"
 VALIDATION_MODEL = GENERATION_MODEL
 ASSESS_MODEL     = GENERATION_MODEL
+# 3072 dims. Every index (Qdrant collections, the LightRAG vdb, HippoRAG's passage matrix) was
+# built with this model, so changing it invalidates all of them — hence one constant.
+EMBEDDING_MODEL  = "text-embedding-3-large"
 
 # A lock guards the lazy model loads: retrieval runs sub-queries / branches in parallel, so two
 # threads could hit a cold model at once. Double-checked locking keeps the fast path lock-free.
@@ -112,7 +124,7 @@ def _get_bm25() -> SparseTextEmbedding:
 
 def get_embedding(text: str):
     """Embed the query to compare it against the vector database."""
-    response = client.embeddings.create(model = "text-embedding-3-large", input = text)
+    response = client.embeddings.create(model = EMBEDDING_MODEL, input = text)
     return response.data[0].embedding
 
 def retrieve(query: str, top_k: int = 5):
@@ -216,9 +228,30 @@ def rerank(query: str, payloads: list, top_k: int = 5) -> list:
 # the cheap half of the clarification step (known_facts / candidate_modifiers).
 # ---------------------------------------------------------------------------
 from typing import cast
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel
 from abbreviations import ABBREVIATIONS
+
+
+def chat_model(model: str, **kwargs) -> ChatOpenAI:
+    """Build a LangChain chat model bound to the project's OpenAI endpoint.
+
+    The ONLY place a ChatOpenAI is constructed. It used to be instantiated ad hoc in seven
+    modules (rephrase/validate/assess here, generation, the iterative planner and reflector,
+    PathRAG's keyword extractor, HippoRAG's recognition memory), which made the claim that
+    "every LLM call is encapsulated so it can be swapped for a private EU model" aspirational
+    rather than true: swapping meant finding seven call sites. Now it is one variable.
+
+    It sets ONLY the endpoint and forwards everything else, so each caller keeps owning its own
+    sampling (temperature, structured output): centralizing the connection must not quietly
+    change how any of these models behaves."""
+    return ChatOpenAI(model=model, base_url=OPENAI_BASE_URL, **kwargs)
+
+
+def embeddings_model(model: str = EMBEDDING_MODEL, **kwargs) -> OpenAIEmbeddings:
+    """Same contract for embeddings (RAGAS builds its own embedder for the eval)."""
+    return OpenAIEmbeddings(model=model, base_url=OPENAI_BASE_URL, **kwargs)
+
 
 _ABBREV_LIST = "\n".join(f"{abbr} = {name}" for abbr, name in ABBREVIATIONS.items())
 
@@ -255,7 +288,7 @@ def _get_refine_llm():
     """Lazy-load the refine LLM (rephrase + domain classification)."""
     global _refine_llm
     if _refine_llm is None:
-        _refine_llm = ChatOpenAI(model=REPHRASE_MODEL, temperature=0).with_structured_output(
+        _refine_llm = chat_model(REPHRASE_MODEL, temperature=0).with_structured_output(
             _Refined, method="json_schema", strict=True
         )
     return _refine_llm
@@ -497,7 +530,7 @@ def _get_validate_llm():
     """Lazy-load the judge LLM (structured output)."""
     global _validate_llm
     if _validate_llm is None:
-        _validate_llm = ChatOpenAI(model=VALIDATION_MODEL, temperature=0).with_structured_output(
+        _validate_llm = chat_model(VALIDATION_MODEL, temperature=0).with_structured_output(
             _Validation, method="json_schema", strict=True
         )
     return _validate_llm
@@ -569,7 +602,7 @@ def _get_assess_llm():
     """Lazy-load the clarification-assessment LLM (structured output)."""
     global _assess_llm
     if _assess_llm is None:
-        _assess_llm = ChatOpenAI(model=ASSESS_MODEL, temperature=0).with_structured_output(
+        _assess_llm = chat_model(ASSESS_MODEL, temperature=0).with_structured_output(
             _Assessment, method="json_schema", strict=True
         )
     return _assess_llm

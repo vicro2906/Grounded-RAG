@@ -33,7 +33,6 @@ from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,7 +47,8 @@ except (AttributeError, ValueError):
 from dotenv import load_dotenv
 load_dotenv(os.path.join(ROOT, ".env"))
 
-from rag import REPHRASE_MODEL, _ABBREV_LIST, client, get_embedding
+from rag import (EMBEDDING_MODEL, REPHRASE_MODEL, _ABBREV_LIST, chat_model, client,
+                 get_embedding)
 
 from ._common import canonical_key, house_tail, load_chunks, map_chunk_ids_to_payloads
 
@@ -64,8 +64,7 @@ PASSAGES_PATH = os.path.join(STORE_DIR, "passages.json")
 PASSAGE_EMB_PATH = os.path.join(STORE_DIR, "passage_emb.npy")
 MANIFEST_PATH = os.path.join(STORE_DIR, "manifest.json")
 
-EMBEDDING_MODEL = "text-embedding-3-large"   # same space as Qdrant and the LightRAG index
-EMBEDDING_DIM = 3072
+EMBEDDING_DIM = 3072                         # EMBEDDING_MODEL (rag.py): same space as Qdrant
 EMBED_BATCH = 256                            # texts per embeddings request during the build
 OPENIE_CONCURRENCY = 8                       # parallel extraction calls (build only)
 
@@ -370,7 +369,7 @@ _filter_llm = None
 def _get_filter_llm():
     global _filter_llm
     if _filter_llm is None:
-        _filter_llm = ChatOpenAI(model=REPHRASE_MODEL, temperature=0).with_structured_output(
+        _filter_llm = chat_model(REPHRASE_MODEL, temperature=0).with_structured_output(
             _Filter, method="json_schema", strict=True
         )
     return _filter_llm

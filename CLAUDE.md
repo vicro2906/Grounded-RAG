@@ -17,7 +17,11 @@ yet). Priorities, in order: (1) **reduce hallucinations**, (2) **connect abstrac
 to navigate the guidelines, (3) **Claude-style UX**.
 
 Compliance: under GDPR, every model/service must be private or local and, where possible, in
-an EU region. The doctor's data may include health information (GDPR Art. 9).
+an EU region. The doctor's data may include health information (GDPR Art. 9). **State of that
+goal, honestly:** Qdrant and LangSmith are EU; OpenAI is not yet, and while this is a prototype
+with no real users that is accepted. The code no longer stands in the way — the endpoint is one
+`.env` variable (`OPENAI_BASE_URL`) wired through a single factory — but the switch also needs
+a new EU-region OpenAI project, which cannot be done from here. See OPEN H in the backlog.
 
 ## Current architecture (LangGraph)
 
@@ -230,7 +234,8 @@ keeping strict grounding + validate.
   `nodes.py` (combined-pipeline nodes + routing), `nodes_expanded.py` (one-node-per-step
   retrieval for the dedicated Studio graphs), `builder.py` (head/tail assembly +
   `build_graph`/`build_combined_graph`), `generation.py` (structured `ClinicalAnswer` LLM).
-- `rag.py` — retrieval/generation primitives ONLY (no architecture lives here): clients,
+- `rag.py` — retrieval/generation primitives ONLY (no architecture lives here): clients and the
+  `chat_model`/`embeddings_model` factories (the single endpoint binding, `OPENAI_BASE_URL`),
   embeddings, retrieve/retrieve_hybrid, rerank, refine, validate, assess, generate_answer
   (raw version), SYS_PROMPT, build_user_prompt, model constants.
 - `evidence.py` — answer and sources formatting + citation integrity.
@@ -240,7 +245,9 @@ keeping strict grounding + validate.
   interrupt/resume contract the CLI depends on, the clarification cap and the per-question
   state reset (both leaks are pinned as regressions). `test_evidence.py` covers citation
   integrity, `test_retrieval_common.py` the concept-collapsing helpers and
-  `test_pipeline_routing.py` the branches that decide whether an unvalidated answer is shown.
+  `test_pipeline_routing.py` the branches that decide whether an unvalidated answer is shown,
+  and `test_llm_client.py` is an ARCHITECTURAL guard: it greps the tree and fails if any module
+  builds its own OpenAI client instead of going through the factory.
 - `evaluation.py` — RAGAS evaluation. **A SINGLE set `EVAL_SET` (151 questions)** with a
   `tier` field per question (**simple / single_hop / multihop / adversarial**) → measures
   performance BY QUESTION TYPE. It is built by folding the old pools (golden + multihop, now
@@ -466,11 +473,21 @@ the plan, not as a bug list to rediscover.
 - **OPEN G — rich metadata unused.** `topic` / `year` / `section_number` / `evidence_grades` are
   in every payload and filter nothing in Qdrant. With guidelines from 2020 and 2022 coexisting,
   `SYS_PROMPT` rule 5 ("state both versions") is unhelpful when one is simply older.
-- **OPEN H — GDPR claim stronger than reality.** Generation, embeddings, judge, `assess` and the
-  LightRAG extraction all run on **OpenAI US**, and `clinical_facts` (Art. 9 health data) travel
-  in the prompt and into the LangSmith trace. Qdrant/LangSmith are EU; OpenAI is the gap. Two
-  concrete steps: Azure OpenAI EU (the code is already structured for the swap) and masking
-  `clinical_facts` in traces.
+- **OPEN H — GDPR: the code is ready, the account is not (decided 2026-07-22).** It is a
+  PROTOTYPE with no real users, so running on OpenAI US is accepted **for now**; the move to
+  Europe is wanted in the near future. What was done: `OPENAI_BASE_URL` (in `rag.py`, mirrored
+  by the standalone ingestion scripts) is now the single endpoint knob, and `rag.chat_model()` /
+  `rag.embeddings_model()` are the only places a client is built — pinned by
+  `tests/test_llm_client.py`, which fails if any module constructs its own (the drift is
+  otherwise invisible: a stray `ChatOpenAI(...)` works perfectly until residency matters).
+  LightRAG builds its own client, so `retrieval/graph.py` hands it the endpoint explicitly.
+  **What is left, and it is NOT code:** OpenAI configures residency **per project and only at
+  creation** — an existing project cannot be migrated. So it needs a NEW project with region
+  Europe (eligibility is limited to certain account types: check whether the region selector
+  appears when creating it), its own API key, and then `OPENAI_BASE_URL=https://eu.api.openai.com/v1`
+  in `.env`. Those projects run with zero data retention. Qdrant and LangSmith are already EU.
+  Still pending regardless of region: **masking `clinical_facts` in the LangSmith traces**
+  (Art. 9 health data currently travels in the prompt and into the trace).
 - **OPEN I — minor.** `rapidfuzz` is a declared dependency and is used nowhere (`evidence.py`
   matches with `difflib`); either use it there or drop it.
 
@@ -702,8 +719,12 @@ the full A/B — read them as such (n=3 per tier).
   - The user (Victor) is addressed in **Spanish** in chat, even though the files are in English.
   - When adding new code/docs, follow this policy from the start (do not leave new Spanish
     comments/docstrings).
-- Every LLM call is encapsulated so it can be switched to Azure OpenAI (private GPT-4) without
-  friction the day compliance requires it.
+- **Every LLM client is built in ONE place: `rag.chat_model()` / `rag.embeddings_model()`**,
+  which bind `OPENAI_BASE_URL`. Never instantiate `ChatOpenAI`/`OpenAI`/`OpenAIEmbeddings` in a
+  module — `tests/test_llm_client.py` fails the build if you do. This is what makes changing
+  region (or provider, the day compliance requires Azure) a `.env` line instead of a hunt
+  through seven modules. The standalone ingestion scripts read the same variable directly, on
+  purpose: they must not import the retrieval stack.
 - Direct commits to `main` (single-dev flow). Messages in Spanish. **Do NOT add the
   `Co-Authored-By: Claude…` trailer** to commits: the repo is public (portfolio) and the
   attribution to Claude Code goes in the README and the description, not as a git co-author

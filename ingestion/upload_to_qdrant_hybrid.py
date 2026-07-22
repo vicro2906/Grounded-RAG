@@ -41,6 +41,10 @@ load_dotenv(find_dotenv(usecwd=True))
 QDRANT_URL     = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+# Same knob as the app (rag.OPENAI_BASE_URL): ONE .env value repoints every OpenAI call
+# in the project, ingestion included. Read rather than imported so this script stays
+# standalone (it must not drag in the retrieval stack).
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or None
 
 COLLECTION = "guias_vih_hibrida"     # NEW collection; the original stays intact
 
@@ -148,7 +152,7 @@ def main():
         print(f"Missing environment variables: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
 
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    openai_client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
     qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     bm25 = SparseTextEmbedding(BM25_MODEL)        # downloads the model the 1st time
     ensure_collection(qdrant, args.recreate, args.collection)

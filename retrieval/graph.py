@@ -38,18 +38,23 @@ from lightrag.llm.openai import openai_embed, gpt_4o_mini_complete
 
 from concurrent.futures import ThreadPoolExecutor
 
-from rag import rerank, retrieve_hybrid, rephrase, _get_reranker, _get_bm25
+from rag import (rerank, retrieve_hybrid, rephrase, EMBEDDING_MODEL, OPENAI_BASE_URL,
+                 _get_reranker, _get_bm25)
 
 from ._common import load_chunks, map_to_payloads, merge_dedup
 
 # --- Config ---------------------------------------------------------------
 WORKING_DIR = os.path.join(ROOT, "data", "lightrag_store")  # file-based graph + vector store
-EMBEDDING_MODEL = "text-embedding-3-large"                  # same as Qdrant -> 3072 dims
-EMBEDDING_DIM = 3072
+EMBEDDING_DIM = 3072                                        # text-embedding-3-large (rag.py)
 
-# LLM for entity/relation extraction (indexing) and keyword extraction (query). gpt-4o-mini
-# is enough and cheap for a small, stable corpus. Swap for azure_openai_* when GDPR requires it.
-LLM_COMPLETE = gpt_4o_mini_complete
+
+# LLM for entity/relation extraction (indexing) and keyword extraction (query). gpt-4o-mini is
+# enough and cheap for a small, stable corpus. LightRAG builds its OWN OpenAI client, so the
+# endpoint has to be handed to it explicitly — otherwise this would be the one component that
+# ignored OPENAI_BASE_URL and kept talking to the default region. Swap for azure_openai_* the
+# day the provider changes rather than just the region.
+async def LLM_COMPLETE(prompt, **kwargs):
+    return await gpt_4o_mini_complete(prompt, base_url=OPENAI_BASE_URL, **kwargs)
 
 # Build-time concurrency (one-time index): the defaults (2 / 4) make the build crawl. These
 # do not affect query latency.
@@ -59,7 +64,7 @@ EMBED_MAX_ASYNC = 16
 
 
 async def _embed(texts):
-    return await openai_embed(texts, model=EMBEDDING_MODEL)
+    return await openai_embed(texts, model=EMBEDDING_MODEL, base_url=OPENAI_BASE_URL)
 
 
 def _traceable_llm(func):

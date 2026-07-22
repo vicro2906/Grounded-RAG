@@ -31,6 +31,10 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(usecwd=True))
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+# Same knob as the app (rag.OPENAI_BASE_URL). The ingestion scripts stay standalone — they must
+# not drag in the retrieval stack — so they read the variable rather than import it; the point
+# is that ONE .env value repoints every OpenAI call in the project, ingestion included.
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or None
 
 DEFAULT_IN  = "data/chunks/chunks.jsonl"
 DEFAULT_OUT = "data/chunks/chunks_contextual.jsonl"
@@ -170,7 +174,7 @@ def main():
 
     # High max_retries: the SDK retries 429s (TPM) with exponential backoff honouring
     # Retry-After, so the job self-regulates to the tokens/min cap instead of skipping chunks.
-    client = OpenAI(api_key=OPENAI_API_KEY, max_retries=10)
+    client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL, max_retries=10)
     write_lock = threading.Lock()
     f_out = out_path.open("a", encoding="utf-8")   # append: incremental + resumable
 
