@@ -11,6 +11,7 @@ from langgraph.types import interrupt
 
 from rag import (refine, retrieve_hybrid, rerank, build_context, validate, assess,
                  SYS_PROMPT, build_user_prompt)
+from retrieval import merge_dedup
 from retrieval.registry import MODES
 from evidence import format_answer
 
@@ -39,7 +40,7 @@ def node_rephrase(state: RAGState) -> dict:
             "candidate_modifiers": r.get("candidate_modifiers", []),
             "pending_clarifications": [], "clarify_rounds": 0, "assessment": {},
             "asked_questions": [], "concept_map": "",
-            "attempts": 0, "validation": {}}
+            "attempts": 0, "validation": {}, "refocus_query": ""}
 
 
 def node_out_of_domain(state: RAGState) -> dict:
@@ -178,6 +179,17 @@ def route_assess(state: RAGState) -> str:
     return "generate"
 
 
+def _retrieve_for_mode(mode: str, question: str, query: str) -> tuple[list, str]:
+    """Run `mode`'s retrieval over an already-enriched query, returning (payloads, concept_map).
+
+    The single place that knows baseline is the mode without one search function (the graph
+    splits it into retrieve -> rerank), so every node that re-runs retrieval dispatches through
+    here instead of repeating the special case."""
+    if mode == "baseline":
+        return rerank(query, retrieve_hybrid(query, top_k=20, prefetch_limit=30), top_k=5), ""
+    return _retrieve_with(mode, question, query)
+
+
 def _facts_phrase(clinical_facts: dict | None) -> str:
     """Compact inline rendering of the patient data, to enrich the retrieval query."""
     facts = {k: v for k, v in (clinical_facts or {}).items() if k}
@@ -196,11 +208,7 @@ def node_re_retrieve(state: RAGState, config) -> dict:
     mode = state.get("retrieval_mode") or _resolve_mode(config)
     patient = f"Contexto del paciente: {facts}"
     enriched = f"{state.get('search_query') or state['question']}\n{patient}"
-    if mode == "baseline":
-        candidates = retrieve_hybrid(enriched, top_k=20, prefetch_limit=30)
-        contexts, concept_map = rerank(enriched, candidates, top_k=5), ""
-    else:
-        contexts, concept_map = _retrieve_with(mode, f"{state['question']}\n{patient}", enriched)
+    contexts, concept_map = _retrieve_for_mode(mode, f"{state['question']}\n{patient}", enriched)
     chunk_index, formatted_context = build_context(contexts)
     return {"contexts": contexts, "chunk_index": chunk_index,
             "formatted_context": formatted_context, "concept_map": concept_map}
@@ -218,11 +226,16 @@ def node_generate(state: RAGState) -> dict:
                              concept_map=state.get("concept_map"))
     val = state.get("validation")
     if val and not val.get("is_valid", True):
+        claims = "".join(f"\n      - {c}" for c in val.get("unsupported_claims") or [])
         user += (
             f"\n\n    REINTENTO: tu respuesta anterior fue RECHAZADA por el validador. "
-            f"Motivo: {val.get('reason', '')}. Corrige la respuesta para que cada afirmación "
-            f"esté respaldada por el contexto y aborde la pregunta. Si el contexto no respalda "
-            f"la respuesta, marca informacion_suficiente=false."
+            f"Motivo: {val.get('reason', '')}."
+            + (f" Afirmaciones sin respaldo:{claims}" if claims else "")
+            + f"\n    Se ha vuelto a buscar evidencia sobre esos puntos, así que el CONTEXTO "
+              f"de arriba puede haber cambiado: reléelo antes de responder. Corrige la "
+              f"respuesta para que cada afirmación esté respaldada por el contexto y aborde la "
+              f"pregunta. Si el contexto sigue sin respaldarla, marca "
+              f"informacion_suficiente=false."
         )
     messages = [("system", SYS_PROMPT), ("human", user)]
     answer = cast(ClinicalAnswer, structured_llm.invoke(messages))
@@ -233,6 +246,36 @@ def node_validate(state: RAGState) -> dict:
     """Relevance + grounding judge over the answer. Marks valid / not valid."""
     verdict = validate(state["question"], state["answer"], state["formatted_context"])
     return {"validation": verdict}
+
+
+def node_refocus_retrieve(state: RAGState, config) -> dict:
+    """The answer was rejected for lack of grounding: go back for EVIDENCE, not for a rewording.
+
+    The usual cause of a grounding rejection is a retrieval miss, and regenerating over the
+    same chunks cannot fix that — the retry would only rephrase an unsupported claim until the
+    budget runs out and the doctor gets `MSG_NOT_VALIDATED`. So the validator's
+    `unsupported_claims`, which until now were only injected as prose feedback, become the
+    retrieval query: the pipeline chases exactly what it could not back.
+
+    The new pass is MERGED with the context already in hand rather than replacing it, so the
+    claims that WERE grounded keep their support, and reranked back to the same size. With no
+    claims to chase this is a no-op and generate simply retries as before."""
+    claims = [c.strip() for c in (state.get("validation") or {}).get("unsupported_claims") or []
+              if isinstance(c, str) and c.strip()]
+    if not claims:
+        return {}
+    mode = state.get("retrieval_mode") or _resolve_mode(config)
+    focus = " ".join(claims)
+    previous = state.get("contexts") or []
+    found, concept_map = _retrieve_for_mode(
+        mode, f"{state['question']}\n{focus}",
+        f"{state.get('search_query') or state['question']}\n{focus}")
+    contexts = rerank(state["question"], merge_dedup(found, previous),
+                      top_k=len(previous) or 8)
+    chunk_index, formatted_context = build_context(contexts)
+    return {"contexts": contexts, "chunk_index": chunk_index,
+            "formatted_context": formatted_context, "refocus_query": focus,
+            "concept_map": concept_map or state.get("concept_map", "")}
 
 
 def node_evidence(state: RAGState) -> dict:
@@ -248,8 +291,8 @@ def node_fallback(state: RAGState) -> dict:
 
 
 def route_validation(state: RAGState) -> str:
-    """valid -> evidence; not valid with attempts left -> regenerate; exhausted or technical
-    validator error -> fallback (never 'fail open')."""
+    """valid -> evidence; not valid with attempts left -> chase the missing evidence, then
+    regenerate; exhausted or technical validator error -> fallback (never 'fail open')."""
     v = state["validation"]
     if v.get("error", False):
         return "fallback"
@@ -257,4 +300,4 @@ def route_validation(state: RAGState) -> str:
         return "evidence"
     if state.get("attempts", 0) >= MAX_ITER:
         return "fallback"
-    return "generate"
+    return "refocus_retrieve"

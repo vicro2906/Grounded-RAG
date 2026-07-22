@@ -24,6 +24,12 @@ CHUNK = {
 
 ANSWER_QUOTE = "iniciar precozmente un TAR que incluya TDF o TAF y FTC o 3TC"
 
+# Returned by every retrieval AFTER the first one, so a test can tell a re-retrieval apart
+# from the initial pass and check what was carried over.
+CHUNK_NEW = dict(CHUNK, chunk_id="c2", section_number="7.4.5",
+                 text="7. SITUACIONES ESPECIALES > 7.4.5. VIGILANCIA\n\n"
+                      "Se recomienda vigilancia estrecha de la función hepática (B-II).")
+
 
 def _answer(sufficient: bool = True) -> ClinicalAnswer:
     return ClinicalAnswer(
@@ -65,6 +71,8 @@ def graph_env(monkeypatch):
         valid = True
         llm = StubLLM()
         assess_calls = 0
+        retrieval_queries: list[str] = []      # every query retrieval was asked to run
+        rerank_calls: list[tuple] = []         # (query, candidates, top_k) per rerank
 
     env = Env()
 
@@ -82,10 +90,20 @@ def graph_env(monkeypatch):
         return {"is_valid": env.valid, "error": False, "reason": "stub",
                 "unsupported_claims": [] if env.valid else ["afirmación sin respaldo"]}
 
+    def fake_retrieve_hybrid(query, *args, **kwargs):
+        env.retrieval_queries.append(query)
+        # First pass returns the chunk the answer is built on; any later pass (re_retrieve,
+        # refocus_retrieve) returns a different one, so a test can see what a re-run brought in.
+        return [CHUNK] if len(env.retrieval_queries) == 1 else [CHUNK_NEW]
+
+    def fake_rerank(query, payloads, top_k=5):
+        env.rerank_calls.append((query, list(payloads), top_k))
+        return list(payloads)[:top_k]
+
     monkeypatch.setattr(nodes, "refine", fake_refine)
     monkeypatch.setattr(nodes, "assess", fake_assess)
     monkeypatch.setattr(nodes, "validate", fake_validate)
     monkeypatch.setattr(nodes, "structured_llm", env.llm)
-    monkeypatch.setattr(nodes, "retrieve_hybrid", lambda *a, **k: [CHUNK])
-    monkeypatch.setattr(nodes, "rerank", lambda *a, **k: [CHUNK])
+    monkeypatch.setattr(nodes, "retrieve_hybrid", fake_retrieve_hybrid)
+    monkeypatch.setattr(nodes, "rerank", fake_rerank)
     return env

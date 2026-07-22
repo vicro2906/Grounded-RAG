@@ -8,7 +8,7 @@ factor head/tail into `_add_common` and let each mode plug its own retrieval nod
                        └─ in domain -> [retrieval] -> assess_context ─┬─ clarify (interrupt) ↺
                                                                       └─ re_retrieve -> generate
                                        generate -> validate ─┬─ evidence -> END
-                                                             ├─ generate (retry)
+                                                             ├─ refocus_retrieve -> generate ↺
                                                              └─ fallback -> END
 
 Two assemblies:
@@ -41,6 +41,7 @@ def _add_common(builder: StateGraph) -> None:
     builder.add_node("re_retrieve", N.node_re_retrieve)
     builder.add_node("generate", N.node_generate)
     builder.add_node("validate", N.node_validate)
+    builder.add_node("refocus_retrieve", N.node_refocus_retrieve)
     builder.add_node("evidence", N.node_evidence)
     builder.add_node("fallback", N.node_fallback)
 
@@ -55,9 +56,13 @@ def _add_common(builder: StateGraph) -> None:
     builder.add_edge("clarify", "assess_context")
     builder.add_edge("re_retrieve", "generate")
     builder.add_edge("generate", "validate")
+    # A grounding rejection is usually a RETRIEVAL miss, so the retry does not loop straight
+    # back to generate: refocus_retrieve first chases the validator's unsupported claims, and
+    # only then is the answer regenerated over evidence that may actually support it.
     builder.add_conditional_edges("validate", N.route_validation,
-                                  {"evidence": "evidence", "generate": "generate",
-                                   "fallback": "fallback"})
+                                  {"evidence": "evidence", "fallback": "fallback",
+                                   "refocus_retrieve": "refocus_retrieve"})
+    builder.add_edge("refocus_retrieve", "generate")
     builder.add_edge("evidence", END)
     builder.add_edge("fallback", END)
 

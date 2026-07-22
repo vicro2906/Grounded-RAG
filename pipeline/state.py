@@ -56,6 +56,7 @@ class RAGState(TypedDict):
     answer: dict                  # structured answer from the LLM (node_generate)
     attempts: int                 # generations done so far (validation loop)
     validation: dict              # validator verdict {is_valid, reason, ...}
+    refocus_query: str            # claims the validator rejected, re-retrieved before retrying
     output: str                   # final formatted text with sources (format_answer)
 
 

@@ -21,8 +21,14 @@ def test_technical_judge_error_never_shows_the_answer():
     assert route_validation(state) == "fallback"
 
 
-def test_invalid_answer_retries_until_the_budget_is_spent():
-    assert route_validation({"validation": {"is_valid": False}, "attempts": 1}) == "generate"
+def test_invalid_answer_chases_the_missing_evidence_before_retrying():
+    """The retry must go through retrieval, not straight back to generate: regenerating over
+    the same context cannot fix a retrieval miss, the usual cause of a rejection."""
+    assert route_validation({"validation": {"is_valid": False},
+                             "attempts": 1}) == "refocus_retrieve"
+
+
+def test_retry_budget_is_capped():
     assert route_validation({"validation": {"is_valid": False},
                              "attempts": MAX_ITER}) == "fallback"
 

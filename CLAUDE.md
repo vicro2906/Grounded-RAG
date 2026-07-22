@@ -33,7 +33,10 @@ question ─▶ rephrase ─┬─ out of domain ─▶ out_of_domain ─▶ END
                              ├─ graph    : graph_retrieve (LightRAG + own hybrid, →8) ◀ DEFAULT
                              ├─ pathrag  : pathrag_retrieve (flow-pruned paths, →8)
                              └─ hipporag : hipporag_retrieve (triples→PPR, →8)
-                                              re_retrieve (1×) ─▶ generate ⇄ validate ─▶ evidence ─▶ output
+                                              re_retrieve (1×) ─▶ generate ─▶ validate ─▶ evidence ─▶ output
+                                                                     ▲            │
+                                          refocus_retrieve ◀─────────┴────────────┘ (not valid,
+                                          (chases the rejected claims)   retries left)
                                                               (not valid+exhausted ─▶ fallback)
 ```
 
@@ -146,6 +149,17 @@ module plus one registry line.
 - **validate** (`rag.validate`, gpt-4o-mini): relevance + semantic grounding judge.
   Loop with `generate` (injects feedback on retry), `MAX_ITER=2`. valid → evidence;
   not valid and exhausted → `fallback`; technical error of the judge → `fallback` (no "failing open").
+- **refocus_retrieve** (node in `pipeline/nodes.py`, added 2026-07-22): the retry path of the
+  validation loop. **The rejection used to loop straight back to `generate` with the SAME
+  context**, which cannot fix the usual cause of a grounding failure (the retriever missed the
+  passage) — so the retry just reworded an unsupported claim until the budget ran out and the
+  doctor got `MSG_NOT_VALIDATED`. Now the validator's `unsupported_claims` — previously thrown
+  away as prose feedback — become the retrieval query: it re-runs the SAME mode over
+  «question + rejected claims», **merges** the result with the context already in hand (so the
+  claims that WERE grounded keep their support) and reranks back to the same size. `generate`
+  is then told the context may have changed. No claims to chase (a relevance-only rejection) →
+  no-op, no retrieval paid for. This is the pipeline's ONLY path to recover from a bad
+  selection; `refocus_query` records what it chased, for the trace.
 - **evidence** (`evidence.format_answer`): formats the answer + sources panel with
   literal citations (fuzzy match) + follow-up questions + clinical disclaimer. Text without ANSI.
   It is the LAST barrier before the doctor, so `attribute()` resolves every doubt to `miss`
@@ -397,12 +411,11 @@ the plan, not as a bug list to rediscover.
 - **DONE — CLI resumable** (`interrupt()` had no checkpointer → `KeyError: 'output'`),
   **per-question state reset** (`attempts`/`validation` leaked into the next question through a
   persistent thread), **citation integrity hardened** (filler quotes certified as literal +
-  fuzzy silently swapping the clinical content), **pytest suite** (43 tests, offline).
-- **OPEN A — the validation loop cannot fix what it detects.** On a grounding rejection,
-  `route_validation` returns to `generate` with the SAME context, so if the cause is bad
-  retrieval the retry is theatre and it ends in `fallback`. `validate` already returns
-  `unsupported_claims`, which is thrown away as prose. Turning those claims into a re-retrieval
-  query is the single change that makes the pipeline genuinely self-correcting.
+  fuzzy silently swapping the clinical content), **pytest suite** (47 tests, offline), and
+  **the self-correcting retry** (`refocus_retrieve`: a grounding rejection now re-retrieves the
+  rejected claims instead of regenerating over the same context — see Architecture).
+  **PENDING for it:** measure whether it actually rescues answers (rejection → valid rate) and
+  what it adds in latency on the bad path. It is reasoned, not measured.
 - **OPEN B — inverted risk allocation.** `assess` (which questions to ask — visible, reversible,
   bounded) runs on **gpt-4o up to 3×/question**; `validate` (the anti-hallucination guarantee,
   priority #1 — invisible when it fails) runs once on **gpt-4o-mini**. Also `assess` runs even

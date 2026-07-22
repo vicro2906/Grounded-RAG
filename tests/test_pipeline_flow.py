@@ -84,6 +84,41 @@ def test_invalid_answer_is_not_shown(app, graph_env):
     assert "REINTENTO" in graph_env.llm.last_user_prompt
 
 
+def test_rejection_re_retrieves_the_unsupported_claims_before_retrying(app, graph_env):
+    """The retry must chase EVIDENCE, not just reword: regenerating over the same chunks
+    cannot fix a retrieval miss, which is the usual cause of a grounding rejection."""
+    graph_env.valid = False
+    app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+
+    assert len(graph_env.retrieval_queries) == 2, "the rejection must trigger a new retrieval"
+    assert "afirmación sin respaldo" in graph_env.retrieval_queries[1]
+    # The prompt of the retry must name what was unsupported and warn that the context moved.
+    retry_prompt = graph_env.llm.last_user_prompt
+    assert "afirmación sin respaldo" in retry_prompt
+    assert "puede haber cambiado" in retry_prompt
+
+
+def test_refocus_keeps_the_already_grounded_context_as_a_candidate(app, graph_env):
+    """Merging rather than replacing: the claims that WERE grounded must not lose their
+    support just because another claim sent us back to the index."""
+    graph_env.valid = False
+    app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+
+    _, candidates, _ = graph_env.rerank_calls[-1]
+    assert {c["chunk_id"] for c in candidates} == {"c1", "c2"}
+
+
+def test_no_unsupported_claims_means_no_extra_retrieval(app, graph_env, monkeypatch):
+    """A rejection for RELEVANCE (nothing specific to chase) must not pay for a retrieval."""
+    from pipeline import nodes
+    monkeypatch.setattr(nodes, "validate", lambda *a, **k: {
+        "is_valid": False, "error": False, "reason": "no aborda la pregunta",
+        "unsupported_claims": []})
+
+    app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+    assert len(graph_env.retrieval_queries) == 1
+
+
 def test_validation_state_does_not_leak_into_the_next_question(app, graph_env):
     """Regression: `attempts` and `validation` are per-question. A thread outlives the question
     (Studio, and the CLI), so without resetting them the next question opened with "your
