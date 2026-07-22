@@ -362,17 +362,27 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
 
 ## Pending / next steps (as of 2026-07-21)
 
-0. **THE A/B IS NOW THE BLOCKER.** Five retrieval modes are implemented and wired
-   (baseline / iterative / graph / pathrag / hipporag) but only `graph` has ever been measured,
-   on the OLD 16-question multihop pool. `EVAL_SET` (151 questions, 4 tiers) is ready in
-   `evaluation.py`. PENDING: run it per pipeline (full RAGAS; ~$15 with the mini judge for
-   three pipelines, ~$15 more with a gpt-4o judge for the final number) and the clinical
-   review of the references. **Blocked 2026-07-21: the OpenAI account ran out of credit**
-   mid-probe (`insufficient_quota`), so the `EVAL_SAMPLE=3 PIPELINE=hipporag` probe produced
-   only `context_recall=0.833` on the single_hop tier (3 questions) before the judge died —
-   NOT a usable number. What the probe DID prove: the wiring works end to end and hipporag's
-   latency is **12.9 s/query mean (median 12.6, max 18.6)**, in the graph mode's range.
-   Re-run the probe for hipporag AND pathrag once there is credit, then the full A/B.
+0. **THE FULL A/B IS THE BLOCKER.** Five modes are implemented and wired
+   (baseline / iterative / graph / pathrag / hipporag). A **stratified probe
+   (`EVAL_SAMPLE=3` = 12 questions, gpt-4o-mini judge, 0 NaN) ran on 2026-07-22** over the
+   three graph modes (~$1.05):
+
+   | | graph | pathrag | hipporag |
+   |---|---|---|---|
+   | faithfulness | **0.887** | 0.877 | 0.765 |
+   | context_precision | **0.946** | 0.920 | 0.930 |
+   | context_recall | 0.910 | **0.979** | 0.972 |
+   | latency s/query | 12.0 | **11.0** | 13.0 |
+
+   context_recall per tier — the two new modes beat graph exactly where graph is weakest:
+   `simple` 0.833 → **1.000** (both) and `single_hop` 0.889 → **1.000** (pathrag); hipporag
+   takes `multihop` (1.000 vs 0.917). That is the property they were adopted for: more recall
+   WITHOUT degrading easy questions. Against it, hipporag's faithfulness drops on `single_hop`
+   (0.583). **With n=3 per tier none of this decides anything** — one bad answer moves a whole
+   cell; it says where to look in the full run, not which mode wins.
+   PENDING: the full `EVAL_SET` (151 questions) per pipeline — ~$4-5 each with the mini judge,
+   so ~$22 for the five; the account had ~$4.45 left after the probe. And the clinical review
+   of the references, still the deepest caveat on every number here.
 1. **Contextual Retrieval (enrich chunks with context) — DONE (index built).**
    `ingestion/contextualize.py`: per chunk, gpt-4o-mini generates ONE dense context sentence
    (entities/abbreviations/recommendation grade; situating it in its guide via
@@ -451,9 +461,10 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
 
 Evaluation artifacts versioned in `results/`: `ragas_results.csv` (Phase-0 baseline) and
 `ragas_results_{baseline,iterative,graph}_retrieval.csv` (Phase-4 A/B, context_recall). The
-new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS). Nothing is
-versioned yet for pathrag/hipporag: the 2026-07-21 probe died on quota and its CSV (all NaN)
-was discarded rather than committed.
+new A/B over `EVAL_SET` dumps `results/ragas_results_<PIPELINE>.csv` (full RAGAS, now with a
+`tier` column so a run can be re-sliced by question type afterwards).
+`ragas_results_{graph,pathrag,hipporag}.csv` are the **12-question probe** of 2026-07-22, NOT
+the full A/B — read them as such (n=3 per tier).
 
 ## Important findings (do not lose)
 
