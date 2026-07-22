@@ -5,11 +5,12 @@ fallback) are identical for every architecture; only the retrieval section chang
 factor head/tail into `_add_common` and let each mode plug its own retrieval node(s).
 
     START -> rephrase ─┬─ out of domain -> out_of_domain -> END
-                       └─ in domain -> [retrieval] -> assess_context ─┬─ clarify (interrupt) ↺
-                                                                      └─ re_retrieve -> generate
-                                       generate -> validate ─┬─ evidence -> END
+                       └─ in domain -> [retrieval] -> assess_context -> re_retrieve -> generate
+                                       generate -> validate ─┬─ evidence -> refine_offer
                                                              ├─ refocus_retrieve -> generate ↺
                                                              └─ fallback -> END
+                       refine_offer (interrupt, OPTIONAL) ─┬─ declined -> END
+                                                           └─ answered -> re_retrieve ↺
 
 Two assemblies:
   - build_graph(mode): a DEDICATED graph with only that mode's retrieval path, EXPANDED into
@@ -37,7 +38,7 @@ def _add_common(builder: StateGraph) -> None:
     builder.add_node("rephrase", N.node_rephrase)
     builder.add_node("out_of_domain", N.node_out_of_domain)
     builder.add_node("assess_context", N.node_assess_context)
-    builder.add_node("clarify", N.node_clarify)
+    builder.add_node("refine_offer", N.node_refine_offer)
     builder.add_node("re_retrieve", N.node_re_retrieve)
     builder.add_node("generate", N.node_generate)
     builder.add_node("validate", N.node_validate)
@@ -47,13 +48,13 @@ def _add_common(builder: StateGraph) -> None:
 
     builder.add_edge(START, "rephrase")
     builder.add_edge("out_of_domain", END)
-    # Clarification gate: assess the retrieved evidence and, if it branches on missing patient
-    # data, pause to ask (the assess ⇄ clarify loop stays on the initial context). re_retrieve
-    # runs ONCE on exit, folding the gathered facts into the query so generate has the
-    # conditional passages to cite (no-ops if there are no facts).
-    builder.add_conditional_edges("assess_context", N.route_assess,
-                                  {"clarify": "clarify", "generate": "re_retrieve"})
-    builder.add_edge("clarify", "assess_context")
+    # Clarification, ANSWER-FIRST: assess only labels the dimensions the doctor has not pinned
+    # down (they reach generate as an explicit "unknown" block, so the answer presents the
+    # branches instead of assuming one) and the run goes straight on to answer. The refinement
+    # is offered AFTER `evidence`, with the answer already on screen; only if the doctor takes
+    # it up does the run loop back through re_retrieve (which folds the new facts into the
+    # query, so the conditional passages are there to cite) and generate again.
+    builder.add_edge("assess_context", "re_retrieve")
     builder.add_edge("re_retrieve", "generate")
     builder.add_edge("generate", "validate")
     # A grounding rejection is usually a RETRIEVAL miss, so the retry does not loop straight
@@ -63,7 +64,9 @@ def _add_common(builder: StateGraph) -> None:
                                   {"evidence": "evidence", "fallback": "fallback",
                                    "refocus_retrieve": "refocus_retrieve"})
     builder.add_edge("refocus_retrieve", "generate")
-    builder.add_edge("evidence", END)
+    builder.add_edge("evidence", "refine_offer")
+    builder.add_conditional_edges("refine_offer", N.route_refinement,
+                                  {"re_retrieve": "re_retrieve", "end": END})
     builder.add_edge("fallback", END)
 
 

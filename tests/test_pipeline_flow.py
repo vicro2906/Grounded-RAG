@@ -40,38 +40,70 @@ def test_out_of_domain_short_circuits(app, graph_env):
     assert not graph_env.llm.calls, "an out-of-domain question must never reach generation"
 
 
-def test_clarification_pauses_and_resumes(app, graph_env):
-    """The CLI contract: invoke returns __interrupt__ with the pending questions, and resuming
-    with Command produces the final answer. Without a checkpointer this run could not resume —
-    which is exactly the bug this guards."""
+def test_answer_comes_before_the_refinement_offer(app, graph_env):
+    """Answer-first: the pause must arrive WITH the answer already produced, never instead of
+    it. The clarification used to gate generation, so the doctor faced up to three sequential
+    pauses before reading a single word."""
+    graph_env.assess_questions = [["¿Hay coinfección por VHB?"]]
+    paused = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+
+    assert "RESPUESTA" in paused["output"], "the answer must exist before anything is asked"
+    assert paused["__interrupt__"][0].value["questions"] == ["¿Hay coinfección por VHB?"]
+    assert paused["__interrupt__"][0].value["optional"] is True
+
+
+def test_unknown_dimensions_reach_generation_as_explicit_unknowns(app, graph_env):
+    """What makes the non-blocking flow safe: unresolved dimensions are NAMED in the prompt, so
+    the answer lays out the branches instead of quietly picking one."""
+    graph_env.assess_questions = [["¿Hay coinfección por VHB?"]]
+    app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+
+    prompt = graph_env.llm.last_user_prompt
+    assert "DATOS DEL PACIENTE NO APORTADOS" in prompt
+    assert "¿Hay coinfección por VHB?" in prompt
+
+
+def test_declining_the_refinement_ends_with_the_answer_already_given(app, graph_env):
+    graph_env.assess_questions = [["¿Hay coinfección por VHB?"]]
+    cfg = thread()
+    paused = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=cfg)
+    generations = len(graph_env.llm.calls)
+
+    done = app.invoke(Command(resume=""), context=BASELINE, config=cfg)
+    assert "__interrupt__" not in done
+    assert done["output"] == paused["output"]
+    assert len(graph_env.llm.calls) == generations, "declining must not cost another answer"
+
+
+def test_accepting_the_refinement_re_answers_with_the_datum(app, graph_env):
     graph_env.assess_questions = [["¿Hay coinfección por VHB?"], []]
     cfg = thread()
-
-    paused = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=cfg)
-    assert "output" not in paused
-    interrupts = paused["__interrupt__"]
-    assert interrupts[0].value["questions"] == ["¿Hay coinfección por VHB?"]
+    app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=cfg)
 
     done = app.invoke(Command(resume="sí, VHB positivo"), context=BASELINE, config=cfg)
+    assert "__interrupt__" not in done
     assert "RESPUESTA" in done["output"]
-    # The doctor's answer must reach generation as non-citable context, not as a source.
-    assert "DATOS APORTADOS POR EL MÉDICO" in graph_env.llm.last_user_prompt
-    assert "VHB positivo" in graph_env.llm.last_user_prompt
+    # The datum must reach generation as non-citable context, and must have re-run retrieval so
+    # the conditional passages are there to cite.
+    prompt = graph_env.llm.last_user_prompt
+    assert "DATOS APORTADOS POR EL MÉDICO" in prompt
+    assert "VHB positivo" in prompt
+    assert any("VHB positivo" in q for q in graph_env.retrieval_queries)
 
 
-def test_clarification_budget_is_capped(app, graph_env):
-    """assess keeps asking, but CLARIFY_MAX_ROUNDS must stop the loop and answer anyway."""
+def test_only_one_refinement_offer_per_question(app, graph_env):
+    """assess would keep proposing dimensions; CLARIFY_MAX_ROUNDS must stop the loop so the
+    refinement cannot turn back into an interrogation."""
     from pipeline.config import CLARIFY_MAX_ROUNDS
 
     graph_env.assess_questions = [[f"¿Dato {i}?"] for i in range(CLARIFY_MAX_ROUNDS + 3)]
     cfg = thread()
-
     result = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=cfg)
     rounds = 0
     while "__interrupt__" in result:
         rounds += 1
-        assert rounds <= CLARIFY_MAX_ROUNDS, "the clarification loop is not capped"
-        result = app.invoke(Command(resume="no lo sé"), context=BASELINE, config=cfg)
+        assert rounds <= CLARIFY_MAX_ROUNDS, "the refinement loop is not capped"
+        result = app.invoke(Command(resume="un dato"), context=BASELINE, config=cfg)
     assert rounds == CLARIFY_MAX_ROUNDS
     assert "RESPUESTA" in result["output"]
 
@@ -138,18 +170,18 @@ def test_validation_state_does_not_leak_into_the_next_question(app, graph_env):
 
 def test_clarification_state_does_not_leak_into_the_next_question(app, graph_env):
     """Same guarantee for the clarification side: a spent round budget must not silently skip
-    the gate on the following question."""
+    the refinement on the following question, nor carry the previous patient's data into it."""
     cfg = thread()
     graph_env.assess_questions = [["¿Hay coinfección por VHB?"], []]
     app.invoke({"question": "primera pregunta"}, context=BASELINE, config=cfg)
-    app.invoke(Command(resume="sí"), context=BASELINE, config=cfg)
+    app.invoke(Command(resume="sí, VHB positivo"), context=BASELINE, config=cfg)
 
     graph_env.assess_calls = 0
     graph_env.assess_questions = [["¿Función renal?"], []]
     paused = app.invoke({"question": "segunda pregunta"}, context=BASELINE, config=cfg)
     assert paused["__interrupt__"][0].value["questions"] == ["¿Función renal?"]
 
-    done = app.invoke(Command(resume="aclaramiento 30 ml/min"), context=BASELINE, config=cfg)
+    app.invoke(Command(resume="aclaramiento 30 ml/min"), context=BASELINE, config=cfg)
     prompt = graph_env.llm.last_user_prompt
     assert "aclaramiento 30 ml/min" in prompt
-    assert "¿Hay coinfección por VHB?" not in prompt, "previous patient's data leaked in"
+    assert "VHB positivo" not in prompt, "previous patient's data leaked in"

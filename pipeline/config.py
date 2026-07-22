@@ -7,10 +7,13 @@ from retrieval.registry import VALID_MODES  # re-exported: the catalogue of retr
 # Validation loop: max generations (initial + retries).
 MAX_ITER = 2
 
-# Clarification loop budget. With ROUNDS=3 and PER_ROUND=1 the doctor is asked ONE
-# question at a time, at most 3 times; already-answered data is never re-asked.
-CLARIFY_MAX_ROUNDS = 3
-CLARIFY_QUESTIONS_PER_ROUND = 1
+# Clarification budget. The step is a REFINEMENT offered after answering, not a gate before
+# it, which flips both numbers: asking one question at a time made sense while each pause was
+# the price of getting any answer at all, and it cost up to 3 sequential pauses (and 3 assess
+# calls) before the doctor saw a single word. Now the answer is already on screen, so all the
+# pending dimensions are offered in ONE optional pause the doctor can ignore with Enter.
+CLARIFY_MAX_ROUNDS = 1          # refinement offers per question
+CLARIFY_QUESTIONS_PER_ROUND = 3 # dimensions offered in that single pause (assess caps at 3)
 
 # Retrieval strategy. Every mode feeds the SAME generate -> validate -> evidence, so
 # citations and the anti-hallucination validator are identical across strategies; the modes
@@ -28,9 +31,9 @@ class ConfigSchema(TypedDict, total=False):
 
 
 # --- User-facing messages (Spanish: shown to the doctor) ---
-MSG_CLARIFY_INTRO = (
-    "Para ajustar la respuesta a este paciente necesito un dato "
-    "(pulsa Enter para omitirlo y responder en términos generales):"
+MSG_REFINE_OFFER = (
+    "Puedo concretar más la respuesta para este paciente si me facilitas alguno de estos "
+    "datos (pulsa Enter para dejarlo así):"
 )
 MSG_NOT_VALIDATED = (
     "No he podido elaborar una respuesta suficientemente fundamentada en las guías "

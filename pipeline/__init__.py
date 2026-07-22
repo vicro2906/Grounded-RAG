@@ -8,7 +8,7 @@ Assembled from the shared retrieval/generation primitives in `rag.py`:
   - builder   — head/tail assembly + build_graph (dedicated) / build_combined_graph.
 """
 from .builder import build_graph, build_combined_graph
-from .config import RETRIEVAL_MODE, VALID_MODES, MSG_CLARIFY_INTRO
+from .config import RETRIEVAL_MODE, VALID_MODES, MSG_REFINE_OFFER
 
 __all__ = ["build_graph", "build_combined_graph", "RETRIEVAL_MODE", "VALID_MODES",
-           "MSG_CLARIFY_INTRO"]
+           "MSG_REFINE_OFFER"]

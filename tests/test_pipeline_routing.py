@@ -6,7 +6,8 @@ answer reaches the doctor, so they are worth pinning down on their own.
 import pytest
 
 from pipeline.config import MAX_ITER, VALID_MODES
-from pipeline.nodes import _resolve_mode, retrieval_entry, route_assess, route_validation
+from pipeline.nodes import (_fold_answers, _resolve_mode, retrieval_entry, route_refinement,
+                            route_validation)
 from rag import _facts_to_dict
 
 
@@ -33,19 +34,49 @@ def test_retry_budget_is_capped():
                              "attempts": MAX_ITER}) == "fallback"
 
 
-# --- route_assess: clarify only with a live budget --------------------------
-def test_pending_questions_route_to_clarify():
-    assert route_assess({"pending_clarifications": ["¿VHB?"], "clarify_rounds": 0}) == "clarify"
+# --- route_refinement: only re-answer if a datum actually arrived -----------
+def test_supplied_datum_re_answers():
+    assert route_refinement({"refining": True}) == "re_retrieve"
 
 
-def test_no_pending_questions_routes_to_generate():
-    assert route_assess({"pending_clarifications": [], "clarify_rounds": 0}) == "generate"
+def test_declined_refinement_ends_the_run():
+    assert route_refinement({"refining": False}) == "end"
+    assert route_refinement({}) == "end"
 
 
-def test_spent_budget_answers_instead_of_asking_forever():
-    from pipeline.config import CLARIFY_MAX_ROUNDS
-    state = {"pending_clarifications": ["¿VHB?"], "clarify_rounds": CLARIFY_MAX_ROUNDS}
-    assert route_assess(state) == "generate"
+# --- folding the doctor's answers into the patient facts --------------------
+def test_single_answer_is_keyed_by_the_question_it_answers():
+    folded = _fold_answers({}, ["¿Hay coinfección por VHB?"], "sí")
+    assert folded["clinical_facts"] == {"¿Hay coinfección por VHB?": "sí"}
+    assert folded["refining"] is True
+
+
+def test_blank_answer_declines_without_losing_the_question():
+    """An unanswered question must still count as asked, or assess would offer it again."""
+    folded = _fold_answers({}, ["¿Función renal?"], "")
+    assert folded["clinical_facts"] == {}
+    assert folded["refining"] is False
+    assert folded["asked_questions"] == ["¿Función renal?"]
+
+
+def test_structured_answers_merge_and_drop_the_blank_ones():
+    folded = _fold_answers({"clinical_facts": {"CD4": "200"}},
+                           ["¿VHB?", "¿Función renal?"],
+                           {"¿VHB?": "sí", "¿Función renal?": "  "})
+    assert folded["clinical_facts"] == {"CD4": "200", "¿VHB?": "sí"}
+
+
+def test_unanswered_dimensions_stay_flagged_as_unknown():
+    """Answering one of the offered questions must not make the others disappear: they still
+    have to reach the refined answer as UNKNOWN so it keeps presenting their branches."""
+    folded = _fold_answers({}, ["¿VHB?", "¿Función renal?"],
+                           {"¿VHB?": "sí", "¿Función renal?": ""})
+    assert folded["pending_clarifications"] == ["¿Función renal?"]
+
+
+def test_previous_facts_are_preserved():
+    folded = _fold_answers({"clinical_facts": {"embarazo": "sí"}}, ["¿VHB?"], "no")
+    assert folded["clinical_facts"] == {"embarazo": "sí", "¿VHB?": "no"}
 
 
 # --- mode resolution: unknown input must not crash a run --------------------

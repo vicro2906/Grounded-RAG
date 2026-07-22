@@ -50,9 +50,11 @@ class RAGState(TypedDict):
     clinical_facts: dict          # patient data {attr: value}: seeded in rephrase, merged in clarify
     candidate_modifiers: list     # cheap screen (refine): modifiers the question might need
     assessment: dict              # assess reasoning {branches_on, clinically_relevant, already_covered}
-    pending_clarifications: list  # questions assess wants the doctor to answer (interrupt)
+    pending_clarifications: list  # dimensions still unknown: unknown-block in the prompt, then
+                                  # offered as the optional refinement once the answer is out
     asked_questions: list         # every clarifying question already asked (assess never repeats)
-    clarify_rounds: int           # clarification rounds done THIS question
+    clarify_rounds: int           # refinement rounds done THIS question
+    refining: bool                # the doctor supplied a datum -> re-retrieve and answer again
     answer: dict                  # structured answer from the LLM (node_generate)
     attempts: int                 # generations done so far (validation loop)
     validation: dict              # validator verdict {is_valid, reason, ...}

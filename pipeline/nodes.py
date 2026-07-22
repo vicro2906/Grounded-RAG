@@ -40,7 +40,7 @@ def node_rephrase(state: RAGState) -> dict:
             "candidate_modifiers": r.get("candidate_modifiers", []),
             "pending_clarifications": [], "clarify_rounds": 0, "assessment": {},
             "asked_questions": [], "concept_map": "",
-            "attempts": 0, "validation": {}, "refocus_query": ""}
+            "attempts": 0, "validation": {}, "refocus_query": "", "refining": False}
 
 
 def node_out_of_domain(state: RAGState) -> dict:
@@ -133,12 +133,16 @@ RETRIEVAL_NODES = {mode: _make_retrieval_node(mode)
                    for mode in VALID_MODES if mode != "baseline"}
 
 
-# --- Clarification gate (between retrieval and generate) --------------------
+# --- Clarification: assess before answering, OFFER the refinement after -----
 def node_assess_context(state: RAGState) -> dict:
-    """Evidence-grounded half of the clarification: decide whether the answer hinges on a
-    clinical modifier the guides branch on (gestation, renal function, coinfection…) that the
-    doctor has not provided, and if so propose questions. Once the budget is spent it stops
-    asking. The datum is never cited — it only steers the branch and re-triggers retrieval."""
+    """Decide which clinical modifiers the answer hinges on (gestation, renal function,
+    coinfection…) and that the doctor has not provided.
+
+    This no longer GATES the answer. It runs before `generate` because its output is what makes
+    a non-blocking flow safe: the pending dimensions go into the prompt as explicitly UNKNOWN,
+    so the answer lays out the branches instead of silently picking one. The same list is then
+    offered as an optional refinement once the answer is on screen. Once the budget is spent it
+    stops proposing anything."""
     if state.get("clarify_rounds", 0) >= CLARIFY_MAX_ROUNDS:
         return {"pending_clarifications": []}   # budget spent: do not ask again
     a = assess(state["question"], state["formatted_context"],
@@ -151,32 +155,57 @@ def node_assess_context(state: RAGState) -> dict:
                            ("clinically_relevant", "branches_on", "already_covered")}}
 
 
-def node_clarify(state: RAGState) -> dict:
-    """Pause the run (interrupt) and ask the doctor the pending questions. On resume, fold the
-    answers into clinical_facts and bump the round counter (by hand — these fields carry no
-    reducer), then return to assess_context. Retrieval is not re-run here; the loop stays on
-    the initial context and the single re_retrieve happens on exit."""
-    pending = state.get("pending_clarifications", [])
-    answers = interrupt({"questions": pending})
+def _fold_answers(state: RAGState, pending: list, answers) -> dict:
+    """Merge the doctor's answers into clinical_facts and close the round.
+
+    Plain text is keyed by the QUESTION it answers (not by a fixed key) so several answers do
+    not overwrite each other, and every question asked is recorded even when left blank — a
+    skipped question must not come back. clinical_facts / clarify_rounds carry no reducer (they
+    are reset per question), so the merge is done by hand here."""
     if isinstance(answers, dict):
-        new_facts = answers                        # structured answer: merge as-is
+        new_facts = {k: v for k, v in answers.items() if k and str(v).strip()}
     else:
-        text = str(answers).strip()
-        # Key a plain answer by the QUESTION asked (not a fixed key), else each round would
-        # overwrite the previous one and assess would re-ask.
-        new_facts = ({pending[0]: text} if (len(pending) == 1 and text)
-                     else ({"respuesta_medico": text} if text else {}))
-    merged = {**(state.get("clinical_facts") or {}), **new_facts}
-    asked = list(state.get("asked_questions") or []) + list(pending)
-    return {"clinical_facts": merged, "clarify_rounds": state.get("clarify_rounds", 0) + 1,
-            "pending_clarifications": [], "asked_questions": asked}
+        text = str(answers or "").strip()
+        new_facts = {pending[0]: text} if (len(pending) == 1 and text) else {}
+        if text and len(pending) != 1:
+            new_facts = {"respuesta_medico": text}
+    # Whatever was NOT answered stays pending: it still feeds the "unknown data" block of the
+    # prompt, so the refined answer keeps laying out the branches for the dimensions the doctor
+    # skipped instead of silently assuming them. (It will not be offered again — the round
+    # budget is spent.) Free text answering several questions at once cannot be attributed to
+    # any of them, so they all stay open.
+    return {"clinical_facts": {**(state.get("clinical_facts") or {}), **new_facts},
+            "clarify_rounds": state.get("clarify_rounds", 0) + 1,
+            "pending_clarifications": [q for q in pending if q not in new_facts],
+            "asked_questions": list(state.get("asked_questions") or []) + list(pending),
+            "refining": bool(new_facts)}
 
 
-def route_assess(state: RAGState) -> str:
-    """Ask for clarification only if assess flagged missing data AND the budget is not spent."""
-    if state.get("pending_clarifications") and state.get("clarify_rounds", 0) < CLARIFY_MAX_ROUNDS:
-        return "clarify"
-    return "generate"
+def node_refine_offer(state: RAGState) -> dict:
+    """Answer first, refine after: the run pauses here with the ANSWER ALREADY PRODUCED.
+
+    The clarification used to sit before `generate`, so a doctor asking a normal clinical
+    question faced up to three sequential pauses before reading a single word — at the point of
+    care that is worse than a slightly generic answer. Now `evidence` has already written
+    `output`, and this pause only OFFERS to narrow it down; ignoring it (an empty answer) ends
+    the run with the answer the doctor already has.
+
+    If they do supply something, the facts are folded in and the run loops back through
+    re_retrieve -> generate, so the datum PULLS the conditional passages and the refined answer
+    cites them. `attempts`/`validation` are reset because that regeneration is a NEW answer over
+    a NEW context, not a retry of the rejected one."""
+    pending = state.get("pending_clarifications") or []
+    if not pending or state.get("clarify_rounds", 0) >= CLARIFY_MAX_ROUNDS:
+        return {"refining": False}
+    folded = _fold_answers(state, pending, interrupt({"questions": pending, "optional": True}))
+    if not folded["refining"]:
+        return folded
+    return {**folded, "attempts": 0, "validation": {}}
+
+
+def route_refinement(state: RAGState) -> str:
+    """Loop back to re-retrieve + regenerate only if the doctor actually supplied a datum."""
+    return "re_retrieve" if state.get("refining") else "end"
 
 
 def _retrieve_for_mode(mode: str, question: str, query: str) -> tuple[list, str]:
@@ -216,14 +245,17 @@ def node_re_retrieve(state: RAGState, config) -> dict:
 
 # --- Tail: generate <-> validate -> evidence/fallback ----------------------
 def node_generate(state: RAGState) -> dict:
-    """context + question -> structured answer. Two non-citable blocks may accompany the
+    """context + question -> structured answer. Three non-citable blocks may accompany the
     numbered context: the clarified patient data (clinical_facts), which selects the applicable
-    branch of the guides, and the retrieval mode's concept map, which shows how the concepts
-    connect. Neither can be cited — `validate` still requires every claim to be grounded in the
-    chunks. On a validator rejection, its feedback is injected so the retry can correct it."""
+    branch of the guides; the dimensions still UNKNOWN (pending_clarifications), so the answer
+    lays out the branches rather than assuming one; and the retrieval mode's concept map, which
+    shows how the concepts connect. None can be cited — `validate` still requires every claim to
+    be grounded in the chunks. On a validator rejection, its feedback is injected so the retry
+    can correct it."""
     user = build_user_prompt(state["question"], state["formatted_context"],
                              clinical_facts=state.get("clinical_facts"),
-                             concept_map=state.get("concept_map"))
+                             concept_map=state.get("concept_map"),
+                             open_questions=state.get("pending_clarifications"))
     val = state.get("validation")
     if val and not val.get("is_valid", True):
         claims = "".join(f"\n      - {c}" for c in val.get("unsupported_claims") or [])

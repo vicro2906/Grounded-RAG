@@ -27,16 +27,19 @@ wires runtime concerns (UTF-8, LangSmith, warm-up) and the CLI. Graph nodes:
 
 ```
 question ─▶ rephrase ─┬─ out of domain ─▶ out_of_domain ─▶ END
-                      └─ in domain ─▶ [RETRIEVAL_MODE] ─▶ assess_context ⇄ clarify (interrupt)
-                             ├─ baseline : retrieve (hybrid) ─▶ rerank (20→5)        │ (on exit)
-                             ├─ iterative: iterative_retrieve (plan→hop→reflect, →8)   ▼
+                      └─ in domain ─▶ [RETRIEVAL_MODE] ─▶ assess_context
+                             ├─ baseline : retrieve (hybrid) ─▶ rerank (20→5)          │
+                             ├─ iterative: iterative_retrieve (plan→hop→reflect, →8)   │
                              ├─ graph    : graph_retrieve (LightRAG + own hybrid, →8) ◀ DEFAULT
-                             ├─ pathrag  : pathrag_retrieve (flow-pruned paths, →8)
-                             └─ hipporag : hipporag_retrieve (triples→PPR, →8)
-                                              re_retrieve (1×) ─▶ generate ─▶ validate ─▶ evidence ─▶ output
-                                                                     ▲            │
-                                          refocus_retrieve ◀─────────┴────────────┘ (not valid,
-                                          (chases the rejected claims)   retries left)
+                             ├─ pathrag  : pathrag_retrieve (flow-pruned paths, →8)   │
+                             └─ hipporag : hipporag_retrieve (triples→PPR, →8)        ▼
+                                              re_retrieve ─▶ generate ─▶ validate ─▶ evidence
+                                                   ▲            ▲            │            │
+                                                   │            │            │            ▼
+                                                   │  refocus_retrieve ◀─────┘   refine_offer
+                                                   │  (chases the rejected      (interrupt, OPTIONAL)
+                                                   │   claims; not valid,        ├─ declined ─▶ output
+                                                   └───┴─ retries left)          └─ answered ─▶ ↺
                                                               (not valid+exhausted ─▶ fallback)
 ```
 
@@ -73,28 +76,39 @@ module plus one registry line.
   more relevant detail. The reasoning is exposed in the state (`assessment`) for the trace. It
   is safe because the datum is NOT cited: it only steers the branch AND re-triggers retrieval
   (`re_retrieve`), so the conditional evidence is retrieved before generating and `validate`
-  still requires grounding. If there are questions → `clarify` **pauses** the graph with
-  `interrupt()` and asks the doctor; on resume, `clarify` folds the answer into
-  `clinical_facts` (manual merge) and adds 1 to `clarify_rounds`. Two caps: `CLARIFY_MAX_ROUNDS`
-  (=3, number of pauses) and `CLARIFY_QUESTIONS_PER_ROUND` (=1, questions per pause) → by
-  default it asks ONE thing at a time, at most 3 times. `assess` orders the pending ones by
-  **clinical impact** and the first `max_questions` are taken.
+  still requires grounding.
+  **ANSWER-FIRST (redesigned 2026-07-22 — this is the important part).** `assess` no longer
+  GATES the answer. It used to `interrupt()` before `generate`, so a doctor asking a normal
+  clinical question faced **up to 3 sequential pauses (and 3 gpt-4o assess calls) before
+  reading a single word** — at the point of care that is worse than a slightly generic answer.
+  Now its output is used TWICE and blocks nothing:
+    1. the pending dimensions go into the generation prompt as an explicit **"DATOS DEL PACIENTE
+       NO APORTADOS"** block (`rag._format_open_questions`), which is what makes not asking
+       SAFE: told the datum is unknown, the model lays out the branches («si …; en cambio,
+       si …») instead of quietly picking one and stating it as THE recommendation;
+    2. the same list is then offered by **`refine_offer`**, AFTER `evidence` has written the
+       answer, as an OPTIONAL pause: ignoring it (empty reply) ends the run with the answer
+       already on screen; answering loops back through `re_retrieve` → `generate` so the datum
+       pulls the conditional passages and the refined answer CITES them.
+  Caps flipped accordingly: `CLARIFY_MAX_ROUNDS`=1 (one refinement offer) and
+  `CLARIFY_QUESTIONS_PER_ROUND`=3 (all pending dimensions in that single pause) — one question
+  at a time only made sense while each pause was the price of getting any answer at all.
+  Questions left unanswered STAY in `pending_clarifications`, so the refined answer keeps
+  presenting their branches (they are simply not offered again — the budget is spent).
   **`clinical_facts`/`clarify_rounds` carry NO reducer**: they are RESET per question in
-  `node_rephrase` (Studio persists the thread state; with accumulating reducers the previous
-  patient's data and the spent round budget leaked into the next question and `assess_context`
-  was skipped). Within ONE question the merge/increment is done by `clarify` by hand (reading
-  the state), enough because they are written sequentially.
-- **re_retrieve** (node in `pipeline/nodes.py`): runs **ONCE, on EXIT from the clarification loop**
-  (right before `generate`), not on every round. **Re-retrieves with ALL the `clinical_facts`
-  injected into the query** (dispatches on `retrieval_mode`, reuses the collapsed
-  baseline/iterative/graph functions) and OVERWRITES `contexts` → so the doctor's datum PULLS
-  the conditional passages (the HBV branch, the first-trimester one…) so `generate` CITES
-  them, not just steers generation. No-op unless clarification ADDED facts (`clarify_rounds`
-  > 0): facts that came in the question itself were already in the initial retrieval query, so
-  re-retrieving with them would be a redundant full pass (latency fix). **Total: 1 initial retrieve + 1 final
-  re_retrieve** (previously it was 1 + N per round). The `assess_context ⇄ clarify` loop runs
-  entirely on the **initial context**: since `assess` is knowledge-primary, it does not need
-  re-retrieval between rounds (the intermediate re_retrieves were redundant). Tested: with
+  `node_rephrase` (Studio and the CLI persist thread state; with accumulating reducers the
+  previous patient's data and the spent round budget leaked into the next question). Within ONE
+  question the merge/increment is done by `_fold_answers` by hand (reading the state), enough
+  because they are written sequentially.
+- **re_retrieve** (node in `pipeline/nodes.py`): sits on the path to `generate`, and is a
+  **no-op on the first pass** — it only does work when a refinement ADDED facts
+  (`clarify_rounds` > 0). Facts that came in the question itself were already in the initial
+  retrieval query, so re-retrieving with them would be a redundant full pass (latency fix).
+  When the doctor does supply a datum it **re-retrieves with ALL the `clinical_facts` injected
+  into the query** (dispatches on `retrieval_mode` through `_retrieve_for_mode`) and OVERWRITES
+  `contexts` → so the datum PULLS the conditional passages (the HBV branch, the
+  first-trimester one…) and `generate` CITES them, not just steers generation. **Total: 1
+  initial retrieve, plus 1 more only if the refinement was taken up.** Tested: with
   "HBV coinfection" the HBV-specific chunks enter the top-5. The `clinical_facts` ALSO enter
   `generate` as a NON-citable **"DATOS APORTADOS POR EL MÉDICO"** block (they select the
   guide's branch; the literal citations still come from the chunks). **Requires a checkpointer**
@@ -146,9 +160,16 @@ module plus one registry line.
 - **generate** (`pipeline.generation.structured_llm`, gpt-4o): structured output with
   `ChatOpenAI.with_structured_output` (Pydantic `ClinicalAnswer`, strict json_schema).
   Returns dict: sufficient_information, answer, sources_used[{ref,quote}], follow_up_questions.
-- **validate** (`rag.validate`, gpt-4o-mini): relevance + semantic grounding judge.
-  Loop with `generate` (injects feedback on retry), `MAX_ITER=2`. valid → evidence;
-  not valid and exhausted → `fallback`; technical error of the judge → `fallback` (no "failing open").
+- **validate** (`rag.validate`, **gpt-4o** since 2026-07-22): relevance + semantic grounding
+  judge. Loop with `generate` (injects feedback on retry), `MAX_ITER=2`. valid → evidence;
+  not valid and exhausted → `fallback`; technical error of the judge → `fallback` (no "failing
+  open"). **Why the strong model:** this is the anti-hallucination guarantee (priority #1) and
+  BOTH of its failure modes are invisible — a wrong «valid» ships a hallucination, a wrong
+  «invalid» silently swallows a correct answer and shows `MSG_NOT_VALIDATED`. It ran on
+  gpt-4o-mini while `assess` (deciding which QUESTION to ask — visible, reversible, bounded)
+  ran on gpt-4o: the reversible decision had the better model and the irreversible one the
+  worse. Costs more per question, but `assess` now runs once instead of up to 3×, so the net
+  change is roughly flat.
 - **refocus_retrieve** (node in `pipeline/nodes.py`, added 2026-07-22): the retry path of the
   validation loop. **The rejection used to loop straight back to `generate` with the SAME
   context**, which cannot fix the usual cause of a grounding failure (the retriever missed the
@@ -258,8 +279,9 @@ keeping strict grounding + validate.
 
 ## Models and services
 
-- Generation: **gpt-4o** (`GENERATION_MODEL`). Rephrase/validation: **gpt-4o-mini**
-  (`REPHRASE_MODEL` / `VALIDATION_MODEL`).
+- Generation, **validation** and clarification-assessment: **gpt-4o** (`GENERATION_MODEL` /
+  `VALIDATION_MODEL` / `ASSESS_MODEL`) — everything that can put an unsupported claim in front
+  of a doctor. Rephrase: **gpt-4o-mini** (`REPHRASE_MODEL`), the only mechanical step left.
 - Embeddings: `text-embedding-3-large` (3072d). Reranker: jina-reranker-v2-base-multilingual.
 - Qdrant Cloud (**eu-west** region). Collections: `guias_vih` (dense only, backup),
   `guias_vih_hibrida` (dense + sparse BM25, no context) and **`guias_vih_hibrida_ctx`**
@@ -272,9 +294,10 @@ keeping strict grounding + validate.
 ## How to run
 
 - App (interactive CLI): `.venv\Scripts\python.exe main.py`. It compiles its OWN graph instance
-  with an `InMemorySaver`, so when `assess` decides to ask, the run pauses, the question is
-  printed and the answer resumes it with `Command(resume=…)` (empty answer = skip that
-  dimension; the question still counts as asked, so `assess` moves on instead of insisting).
+  with an `InMemorySaver` (the platform is not there to inject one). The answer prints as soon
+  as it exists; if there are still-unknown patient data the run then pauses to OFFER a
+  refinement, and `Command(resume=…)` carries the reply — Enter declines and ends the run with
+  the answer already shown (the CLI only reprints when the text actually changed).
 - Tests: `.venv\Scripts\python.exe -m pytest` (~0.4 s, no API calls). Run them before committing.
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → opens Studio (EU). See steps in the
   **Trace View** tab (not Turn View).
@@ -386,14 +409,16 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
     concurrency); n=16, model-drafted references. The graph's high recall might come with
     slightly less precision (retrieves broader), mitigated by reranker→top8 + validate.
 - **Phase 5 — Claude-style UX:** Streamlit/web, streaming, citations, multi-turn memory.
-  - **IN PROGRESS — clarification questions (slot-filling): DONE (validated in Studio).**
-    `assess_context`/`clarify` gate between retrieval and generate (see Architecture). **Hybrid**
-    scheme: screening in `refine` (`known_facts`/`candidate_modifiers`) + evidence-grounded
-    confirmation in `rag.assess` (structured reasoning `branches_on`/`already_covered`/`questions`,
-    gpt-4o-mini). Pauses with `interrupt()`, folds answers into `clinical_facts` (non-citable,
-    steers generation), cap `CLARIFY_MAX_ROUNDS=1`. Tested end-to-end (baseline + MemorySaver)
-    and unit cases of `assess` (conditional / datum already known in any unit / non-conditional).
-    Final validation: LangGraph Studio (`langgraph dev`, persistence provided by the platform).
+  - **Clarification questions (slot-filling): DONE, and REDESIGNED to answer-first
+    (2026-07-22).** **Hybrid** scheme: screening in `refine`
+    (`known_facts`/`candidate_modifiers`) + reasoning in `rag.assess` (structured
+    `clinically_relevant`/`branches_on`/`already_covered`/`questions`, gpt-4o). The pause is now
+    a REFINEMENT offered after the answer (`refine_offer`), not a gate before it, and what the
+    doctor did not provide reaches generation as an explicit UNKNOWN block so the answer
+    presents the branches — see Architecture. Covered end-to-end offline in
+    `tests/test_pipeline_flow.py`. **Still to validate live in Studio** (`langgraph dev`), and
+    with a clinician: whether a branch-laden answer reads better than the old interrogation is
+    a judgement no test makes.
   - **Enriched re-retrieval: DONE** (node `re_retrieve`, increment 1). After clarifying, the
     `clinical_facts` are injected into the query and re-trigger retrieval → the doctor's datum
     pulls the conditional passages before generating (tested: HBV changes the top-5).
@@ -416,13 +441,13 @@ the plan, not as a bug list to rediscover.
   rejected claims instead of regenerating over the same context — see Architecture).
   **PENDING for it:** measure whether it actually rescues answers (rejection → valid rate) and
   what it adds in latency on the bad path. It is reasoned, not measured.
-- **OPEN B — inverted risk allocation.** `assess` (which questions to ask — visible, reversible,
-  bounded) runs on **gpt-4o up to 3×/question**; `validate` (the anti-hallucination guarantee,
-  priority #1 — invisible when it fails) runs once on **gpt-4o-mini**. Also `assess` runs even
-  when `refine` already returned an empty `candidate_modifiers`, a screen computed for free.
-- **OPEN C — clarification blocks instead of assisting.** Up to 3 sequential pauses before a
-  single word of answer. Better: answer with the branches the context covers and offer the
-  question as an OPTIONAL refinement; or at minimum ask every pending dimension in ONE pause.
+- **DONE (2026-07-22) — risk allocation and the clarification flow.** `validate` moved to
+  gpt-4o (it is the invisible failure); `assess` now runs ONCE per question instead of up to 3×,
+  so the net cost is roughly flat. The clarification became ANSWER-FIRST (see Architecture).
+  **PENDING for both:** measure the false-rejection rate that motivated the model swap, and
+  whether the conditional "branch" answers actually read better to a clinician than the old
+  interrogation did. Still open from the original finding: `assess` runs even when `refine`
+  returned an empty `candidate_modifiers`, a screen already computed for free.
 - **OPEN D — no multi-turn memory.** The system emits 3 follow-up questions it cannot itself
   answer in context, and the `clinical_facts` that cost 3 interrupts evaporate on the next
   question. The fix is SCOPING, not resetting: session-level `patient_facts` (visible and

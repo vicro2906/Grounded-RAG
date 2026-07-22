@@ -57,7 +57,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from pipeline import (build_graph, build_combined_graph, RETRIEVAL_MODE, VALID_MODES,
-                      MSG_CLARIFY_INTRO)
+                      MSG_REFINE_OFFER)
 
 # Compiled graphs (registered in langgraph.json). The three dedicated ones are the expanded
 # "teaching" views; `app` is the combined graph with the live retrieval_mode dropdown.
@@ -73,12 +73,13 @@ threading.Thread(target=rag.warmup, daemon=True).start()
 
 
 def _collect_clarifications(interrupts) -> dict | str:
-    """Ask the doctor the questions the graph paused on and shape the answer the way
-    node_clarify expects: plain text for a single question, {question: answer} for several.
-    An empty answer is a deliberate skip — node_clarify still records the question as asked, so
-    assess moves on to the next dimension instead of insisting on this one."""
+    """Offer the refinement the graph paused on and shape the reply the way node_refine_offer
+    expects: plain text for a single question, {question: answer} for several.
+
+    The answer is ALREADY printed by the time this runs, so every question here is optional:
+    an empty reply (Enter) declines it and the run ends with the answer the doctor has."""
     questions = [q for i in interrupts for q in (i.value or {}).get("questions", [])]
-    print(f"\n{MSG_CLARIFY_INTRO}")
+    print(f"\n{MSG_REFINE_OFFER}")
     answers = {q: input(f"  · {q} ").strip() for q in questions}
     if len(answers) == 1:
         return next(iter(answers.values()))
@@ -96,13 +97,20 @@ def main_cli():
     config = {"configurable": {"thread_id": uuid.uuid4().hex},
               "tags": [f"mode:{mode}"], "metadata": {"retrieval_mode": mode}}  # LangSmith
     payload = {"question": input("¿Cuál es tu pregunta?: ")}
+    shown = None
     while True:
         result = app_cli.invoke(payload, context={"retrieval_mode": mode}, config=config)
+        # Print as soon as there is something to print — the refinement pause happens WITH the
+        # answer already produced — and only when it changed, so declining the offer does not
+        # reprint the same text.
+        output = result.get("output")
+        if output and output != shown:
+            print(output)
+            shown = output
         interrupts = result.get("__interrupt__")
-        if not interrupts:                       # no pending question -> the answer is ready
+        if not interrupts:
             break
         payload = Command(resume=_collect_clarifications(interrupts))
-    print(result["output"])
 
 
 if __name__ == "__main__":

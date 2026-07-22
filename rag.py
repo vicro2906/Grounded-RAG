@@ -79,12 +79,20 @@ COLLECTION_DENSE  = "guias_vih"            # original collection (dense only, ba
 # repoints them all. Override via QDRANT_COLLECTION to A/B against the non-contextual build.
 COLLECTION_HYBRID = os.environ.get("QDRANT_COLLECTION", "guias_vih_hibrida_ctx")
 
-# Centralized LLM models. The clinical answer uses a strong model (quality is critical);
-# rephrasing/validation run on a cheap one. Clarification-assessment also uses the strong
-# model: it leans on clinical knowledge, where gpt-4o-mini was inconsistent at the reasoning.
+# Centralized LLM models. Query rephrasing is the only step left on the cheap model: it is
+# mechanical (rewrite + normalize + screen) and its mistakes are visible downstream.
+# Everything that can put an unsupported claim in front of a doctor runs on the strong model:
+#   - generation, because quality is critical (gpt-4o-mini answered BADLY on nuance/abbreviations
+#     even when it had the evidence);
+#   - validation, because it is the anti-hallucination guarantee (priority #1) and its failures
+#     are the INVISIBLE ones — a wrong 'valid' ships a hallucination, a wrong 'invalid' silently
+#     swallows a correct answer. It used to run on the cheap model while the assessment of which
+#     QUESTION to ask ran on the strong one: the reversible, visible decision got the better
+#     model and the irreversible, invisible one got the worse. Corrected 2026-07-22;
+#   - clarification assessment, which leans on clinical knowledge (gpt-4o-mini skipped the CoT).
 GENERATION_MODEL = "gpt-4o"
 REPHRASE_MODEL   = "gpt-4o-mini"
-VALIDATION_MODEL = "gpt-4o-mini"
+VALIDATION_MODEL = GENERATION_MODEL
 ASSESS_MODEL     = GENERATION_MODEL
 
 # A lock guards the lazy model loads: retrieval runs sub-queries / branches in parallel, so two
@@ -375,16 +383,39 @@ def _format_concept_map(concept_map: str | None) -> str:
     )
 
 
+def _format_open_questions(questions: list | None) -> str:
+    """Render the patient data the doctor has NOT supplied as an explicit UNKNOWN block.
+
+    The clarification step no longer blocks the answer (it is offered as a refinement AFTER
+    answering), so these dimensions reach generation unresolved. Naming them is what makes that
+    safe: left unsaid, the model quietly picks one branch of the guideline and states it as THE
+    recommendation; named, it either lays out the branches or ignores them when the
+    recommendation does not actually depend on the datum."""
+    qs = [q.strip() for q in (questions or []) if isinstance(q, str) and q.strip()]
+    if not qs:
+        return ""
+    lines = "\n".join(f"    - {q}" for q in qs)
+    return (
+        "\n    DATOS DEL PACIENTE NO APORTADOS (el médico NO los ha facilitado; no los supongas "
+        "ni elijas una rama por tu cuenta):\n"
+        f"{lines}\n"
+        "    Si la recomendación del CONTEXTO depende de alguno de ellos, expón explícitamente "
+        "las ramas que apliquen («si …; en cambio, si …») e indica qué dato las decide. Si no "
+        "depende de ellos, ignóralos y no los menciones.\n"
+    )
+
+
 def build_user_prompt(query: str, context: str, clinical_facts: dict | None = None,
-                      concept_map: str | None = None) -> str:
+                      concept_map: str | None = None,
+                      open_questions: list | None = None) -> str:
     """User prompt with the numbered context, the clinical question and (optionally) the
-    patient data the doctor supplied through the clarification step and the retrieval mode's
-    non-citable concept map."""
+    patient data the doctor supplied through the clarification step, the patient data still
+    MISSING, and the retrieval mode's non-citable concept map."""
     return f"""
     CONTEXTO (fragmentos de guías clínicas sobre VIH,numerados):
 
     {context}
-{_format_clinical_facts(clinical_facts)}{_format_concept_map(concept_map)}
+{_format_clinical_facts(clinical_facts)}{_format_open_questions(open_questions)}{_format_concept_map(concept_map)}
     PREGUNTA CLÍNICA:
     {query}
 
