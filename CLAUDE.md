@@ -292,6 +292,10 @@ keeping strict grounding + validate.
     (triples retrieved, what recognition memory kept, top passages) without Qdrant.
   - `.venv\Scripts\python.exe -m retrieval.pathrag` — no index to build; prints store stats and
     walks a demo query (keywords → nodes → paths → chunks → concept map).
+  - `.venv\Scripts\python.exe -m retrieval.pathrag --describe-es` — regenerates the concept
+    map's descriptions in Spanish into `descriptions_es.jsonl` (~5 min, ~$0.30, resumable per
+    chunk). Needed only for `pathrag`; without it the map falls back to LightRAG's English
+    descriptions. See finding #3 below.
 - RAGAS evaluation / A/B: `PIPELINE=<mode> .venv\Scripts\python.exe evaluation.py`. **Probe
   first with `EVAL_SAMPLE=3`** (stratified, 3 per tier = 12 questions, cents) to check wiring
   and latency before spending on the full 151.
@@ -387,12 +391,19 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
    (it dirties the test: the simple tier would then measure baseline, not the chosen pipeline).
 3. **Non-citable "concept map" — IMPLEMENTED (pathrag), pending its A/B.** The paths reach
    generation as a non-citable block (see the concept_map bullet in Architecture). PENDING:
-   A/B it on/off (faithfulness + recall) — and note the quality caveat below before trusting it.
-   **CAVEAT found while testing: LightRAG's entity/relation descriptions are in ENGLISH**
-   (its extraction prompt is English, over Spanish source text), and the ones that surface are
-   often only loosely related to the question. So the map may be adding tokens and noise
-   rather than signal; if the A/B says so, the cheap fix is to build the map from the
-   `keywords`/`source_id` structure instead of the English descriptions, or to re-extract.
+   A/B it on/off (faithfulness + recall).
+   **Finding (fixed 2026-07-21): LightRAG's descriptions were in ENGLISH** — its extraction
+   prompt is English, so it described a Spanish corpus in English (84% of nodes, 70% of
+   edges), and that text was going into a prompt answered in Spanish over Spanish guidelines.
+   Fixed by regenerating ONLY the descriptions from their source chunk
+   (`--describe-es` → `descriptions_es.jsonl`, 9493/9537 items, ~$0.30), which also makes them
+   clinically specific instead of a translation. Re-extracting the whole graph in Spanish
+   (LightRAG accepts `{language}`) was rejected: ~1.5 h AND it would invalidate the index the
+   graph mode was measured on. **Still open:** the map's usefulness is unproven, and the
+   noise upstream is real — for the HBV question the keyword extractor invented «VIH-2»,
+   «mutaciones de resistencia» and «tratamiento optimizado», none of which are in the
+   question, and they drag in irrelevant nodes. Tighten `_KEYWORDS_SYS` only if the A/B says
+   the map hurts.
 4. **HippoRAG 2 — IMPLEMENTED (`retrieval/hipporag.py`), pending its A/B.** Native
    reimplementation, NOT the PyPI package (`hipporag` pins openai==1.91 / tiktoken==0.7 /
    vllm==0.6.6.post1: incompatible with our stack and vllm does not install on Windows).
@@ -425,9 +436,14 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
    every retrieved node is already relevant, leaving flow to judge only connection strength.
    **Fix: rank by `flow × relevance`**, relevance being the endpoints' cosine to the question,
    which `retrieve_nodes` already computed and was throwing away. After it, FTC→TAF and
-   TAF→VHB rank top and Pre-TAR Era drops to 5th. The scores are NOT printed in the prompt (a
-   bare «1.70» invites being read as clinical confidence); `path_scores` exposes them and
-   `_trace_paths` records them in LangSmith.
+   TAF→VHB rank top and Pre-TAR Era drops to 5th. The relevance is **min-max rescaled over the
+   retrieved nodes** (`_rescale`): raw cosines sit in a narrow 0.60-0.68 band against a
+   1.00-1.70 flow range, so unscaled they barely reordered anything. The scores are NOT
+   printed in the prompt (a bare «1.70» invites being read as clinical confidence);
+   `path_scores` exposes them and `_trace_paths` records them in LangSmith.
+   **Caveat: all three PathRAG corrections (canonical_key, flow×relevance, rescaling) were
+   justified by manual inspection of ONE question, not measured.** They are reasoned, not
+   validated — the A/B is what decides whether PathRAG earns its place at all.
 5. **Phase 5 — UX.** Interactive clarification + enriched re-retrieval DONE (validate in
    Studio); continue with streaming, web (Streamlit/Chainlit), multi-turn memory and concept
    navigation. Increment 2 pending: "implicit knowledge modifiers" path in `assess` (flagged

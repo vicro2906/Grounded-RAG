@@ -602,6 +602,12 @@ def main():
     print(result)
 
     df = result.to_pandas()
+    # Carry the tier into the dump: without it the CSV cannot be re-sliced by question type
+    # afterwards, which is the whole point of this set (and comparing runs is what the A/B is).
+    tier_by_q = {c["question"].strip(): c.get("tier") for c in DATASET if c.get("tier")}
+    if tier_by_q and "user_input" in df.columns:
+        df["tier"] = df["user_input"].map(tier_by_q)
+
     os.makedirs("results", exist_ok=True)
     out_csv = os.path.join("results", f"ragas_results_{PIPELINE}.csv")  # per-pipeline file
     df.to_csv(out_csv, index=False)
@@ -611,16 +617,12 @@ def main():
     print("\n=== Means per metric ===")
     print(df.select_dtypes("number").mean())
 
-    # Per-tier slice: join the tier back onto the scored rows to read whether a pipeline
-    # degrades on some question types — the whole point of this set.
-    tier_by_q = {c["question"].strip(): c.get("tier") for c in DATASET if c.get("tier")}
-    if tier_by_q and "user_input" in df.columns:
-        df_t = df.copy()
-        df_t["tier"] = df_t["user_input"].map(tier_by_q)
-        num_cols = df_t.select_dtypes("number").columns
+    # Per-tier slice: does the pipeline degrade on some question types? — the whole point.
+    if "tier" in df.columns:
+        num_cols = df.select_dtypes("number").columns
         print("\n=== Means per tier (n per tier) ===")
-        print(df_t.groupby("tier")[num_cols].mean())
-        print(df_t["tier"].value_counts().rename("n"))
+        print(df.groupby("tier")[num_cols].mean())
+        print(df["tier"].value_counts().rename("n"))
 
     # Velocity axis of the A/B: latency per query (retrieval + generation).
     if latencies:

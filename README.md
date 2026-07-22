@@ -42,13 +42,17 @@ question ─▶ rephrase ─┬─ out of domain ─▶ out_of_domain ─▶ END
                       └─ in domain ─▶ [RETRIEVAL] ─▶ assess_context ⇄ clarify (interrupt)
                              ├─ baseline : hybrid (dense + BM25) + rerank
                              ├─ iterative: plan → sub-queries → reflect
-                             └─ graph    : entity-relation graph (LightRAG) + hybrid  ◀ default
+                             ├─ graph    : entity-relation graph (LightRAG) + hybrid  ◀ default
+                             ├─ pathrag  : flow-pruned relational paths over that graph
+                             └─ hipporag : open KG + Personalized PageRank (HippoRAG 2)
                                               re_retrieve (1×) ─▶ generate ⇄ validate ─▶ evidence
 ```
 
-- **Shared head and tail, interchangeable retrieval.** The three retrieval modes honour the
+- **Shared head and tail, interchangeable retrieval.** The five retrieval modes honour the
   same state contract; generation, validation and citation are identical. This makes the
-  pipeline **retriever-agnostic** and cheap to experiment with.
+  pipeline **retriever-agnostic** and cheap to experiment with: a mode is one module plus one
+  line in `retrieval/registry.py`, from which routing, the Studio dropdown and the evaluation
+  A/B are all derived.
 - **Hybrid retrieval** dense (`text-embedding-3-large`) + sparse **BM25**, RRF fusion, and a
   local multilingual **reranker** (cross-encoder, GPU-optional).
 - **Contextual Retrieval.** Each chunk is enriched with an LLM-generated context sentence
