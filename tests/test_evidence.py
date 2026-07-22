@@ -7,6 +7,8 @@ import pytest
 
 from evidence import attribute, format_answer, section_label, split_items
 
+ANSWER_QUOTE = "iniciar precozmente un TAR que incluya TDF o TAF y FTC o 3TC"
+
 
 CHUNK = {
     "chunk_id": "c1",
@@ -87,6 +89,36 @@ def test_rejected_quote_degrades_to_section_without_inventing_a_citation():
     out = format_answer(answer, {1: CHUNK})
     assert "sección consultada" in out
     assert "TDF o TAF" not in out, "a rejected quote must not pull the real sentence into view"
+
+
+def test_a_reference_the_model_invented_is_ignored_not_crashed():
+    """The model is asked for the numbers it used, and it can return [7] when only 5 chunks were
+    given. That must drop silently: an IndexError here would take down an answer that is
+    otherwise fine, at the very last step."""
+    answer = {"sufficient_information": True, "answer": "Texto.",
+              "sources_used": [{"ref": 7, "quote": ANSWER_QUOTE}], "follow_up_questions": []}
+    out = format_answer(answer, {1: CHUNK})
+    assert "FUENTES" not in out
+    assert "Texto." in out, "the answer itself must survive a bad reference"
+
+
+def test_two_quotes_from_the_same_section_are_one_source():
+    """Grouping is by section, not by quote: the doctor should see one reference with two
+    supporting sentences, not the same section listed twice."""
+    answer = {"sufficient_information": True, "answer": "Texto.",
+              "sources_used": [{"ref": 1, "quote": ANSWER_QUOTE},
+                               {"ref": 2, "quote": "No debe suspenderse el tratamiento frente "
+                                                   "al VHB sin vigilancia estrecha"}],
+              "follow_up_questions": []}
+    out = format_answer(answer, {1: CHUNK, 2: CHUNK})
+    assert "FUENTES (1)" in out
+    assert out.count("§7.4.4") == 1
+
+
+def test_the_disclaimer_rides_with_every_visible_answer():
+    answer = {"sufficient_information": True, "answer": "Texto.",
+              "sources_used": [{"ref": 1, "quote": ANSWER_QUOTE}], "follow_up_questions": []}
+    assert "no sustituye" in format_answer(answer, {1: CHUNK})
 
 
 def test_insufficient_information_shows_no_sources_or_followups():

@@ -6,8 +6,8 @@ answer reaches the doctor, so they are worth pinning down on their own.
 import pytest
 
 from pipeline.config import MAX_ITER, VALID_MODES
-from pipeline.nodes import (_fold_answers, _resolve_mode, retrieval_entry, route_refinement,
-                            route_validation)
+from pipeline.nodes import (_facts_phrase, _fold_answers, _resolve_mode, node_re_retrieve,
+                            retrieval_entry, route_refinement, route_validation)
 from rag import _facts_to_dict
 
 
@@ -104,3 +104,26 @@ def test_value_containing_a_colon_is_preserved():
 
 def test_malformed_facts_are_dropped_not_crashed():
     assert _facts_to_dict(["", "   ", None, "sin_valor"]) == {"sin_valor": ""}
+
+
+# --- re-retrieval only when a refinement actually added something ----------
+# This is a latency guarantee, and the kind that erodes silently: re-running retrieval "just in
+# case" costs a full extra pass (in graph mode, another LLM call too) and nothing breaks, so
+# nobody would notice it came back.
+def test_no_refinement_means_no_second_retrieval():
+    """Facts that arrived inside the question were already in the first retrieval query."""
+    state = {"question": "¿Pauta?", "search_query": "¿Pauta?",
+             "clinical_facts": {"embarazo": "sí"}, "clarify_rounds": 0}
+    assert node_re_retrieve(state, None) == {}
+
+
+def test_no_facts_means_no_second_retrieval():
+    state = {"question": "¿Pauta?", "search_query": "¿Pauta?",
+             "clinical_facts": {}, "clarify_rounds": 1}
+    assert node_re_retrieve(state, None) == {}
+
+
+def test_patient_data_is_rendered_compactly_for_the_query():
+    assert _facts_phrase({"embarazo": "sí", "CD4": "200"}) == "embarazo: sí; CD4: 200"
+    assert _facts_phrase({"gestacion": ""}) == "gestacion"
+    assert _facts_phrase({}) == "" and _facts_phrase(None) == ""

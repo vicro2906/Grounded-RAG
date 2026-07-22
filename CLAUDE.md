@@ -239,15 +239,30 @@ keeping strict grounding + validate.
   embeddings, retrieve/retrieve_hybrid, rerank, refine, validate, assess, generate_answer
   (raw version), SYS_PROMPT, build_user_prompt, model constants.
 - `evidence.py` — answer and sources formatting + citation integrity.
-- **`tests/`** — pytest suite, **no API calls and no network** (`.venv\Scripts\python.exe -m
-  pytest`, ~0.4 s). `conftest.py` stubs only the boundaries (refine / assess / validate /
-  generation / retrieval) so `test_pipeline_flow.py` exercises the REAL graph: routing, the
-  interrupt/resume contract the CLI depends on, the clarification cap and the per-question
-  state reset (both leaks are pinned as regressions). `test_evidence.py` covers citation
-  integrity, `test_retrieval_common.py` the concept-collapsing helpers and
-  `test_pipeline_routing.py` the branches that decide whether an unvalidated answer is shown,
-  and `test_llm_client.py` is an ARCHITECTURAL guard: it greps the tree and fails if any module
-  builds its own OpenAI client instead of going through the factory.
+- **`tests/`** — pytest suite, 101 tests, **no API calls and no network**
+  (`.venv\Scripts\python.exe -m pytest`, ~8 s; most of that is importing `main` in the CLI
+  tests, which warms the reranker). The principle: the LLM is replaced ONLY where the
+  randomness enters (refine / assess / validate / generation / retrieval, in `conftest.py`), so
+  everything the pipeline DECIDES stays real and every branch can be visited on demand —
+  including the ones a manual run almost never reaches (judge rejects, judge errors, budget
+  exhausted, second question on the same thread).
+  - `test_pipeline_flow.py` — the REAL graph end to end: routing, the interrupt/resume contract
+    the CLI depends on, answer-before-offer, the refinement loop and its cap, the
+    validator-driven re-retrieval, and both state leaks pinned as regressions.
+  - `test_pipeline_routing.py` — the small decisions in isolation, including the one that must
+    never fail open (a judge that errored routes to the safety message), plus fact folding and
+    the `re_retrieve` no-op that keeps the first pass cheap.
+  - `test_evidence.py` — citation integrity: what gets certified, what gets rejected, and that
+    a rejected quote never drags the real guideline sentence into view.
+  - `test_rag_contracts.py` — the graceful-degradation contracts around each LLM call (refine
+    fails → the question still goes through; validate fails → error, never "valid") and the
+    non-citable prompt blocks, including their order.
+  - `test_cli.py` — the terminal experience: the answer prints before anything is asked, and
+    declining never reprints it. Drives `main_cli` with a scripted graph and a fake `input`.
+  - `test_retrieval_common.py` — concept collapsing, the mapping back to citable payloads, and
+    the mode catalogue.
+  - `test_llm_client.py` — an ARCHITECTURAL guard: it greps the tree and fails if any module
+    builds its own OpenAI client instead of going through the factory.
 - `evaluation.py` — RAGAS evaluation. **A SINGLE set `EVAL_SET` (151 questions)** with a
   `tier` field per question (**simple / single_hop / multihop / adversarial**) → measures
   performance BY QUESTION TYPE. It is built by folding the old pools (golden + multihop, now
@@ -305,7 +320,9 @@ keeping strict grounding + validate.
   as it exists; if there are still-unknown patient data the run then pauses to OFFER a
   refinement, and `Command(resume=…)` carries the reply — Enter declines and ends the run with
   the answer already shown (the CLI only reprints when the text actually changed).
-- Tests: `.venv\Scripts\python.exe -m pytest` (~0.4 s, no API calls). Run them before committing.
+- Tests: `.venv\Scripts\python.exe -m pytest` (101 tests, ~8 s, no API calls). Run them before
+  committing. They freeze the MECHANICS, not the medicine — whether an answer is clinically
+  right is what `evaluation.py` and a clinician are for.
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → opens Studio (EU). See steps in the
   **Trace View** tab (not Turn View).
 - **Choosing the retrieval strategy (Phase 4):** `main.py` compiles FOUR graphs (via
