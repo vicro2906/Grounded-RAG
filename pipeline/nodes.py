@@ -5,8 +5,10 @@ them). The head (rephrase + domain guardrail) and the tail (assess -> generate <
 -> evidence/fallback) are shared by every retrieval mode; only the retrieval node in between
 changes. The expanded "teaching" nodes for the dedicated Studio graphs live in nodes_expanded.
 """
+import functools
 from typing import cast
 
+from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
 from rag import (refine, retrieve_hybrid, rerank, build_context, validate, assess,
@@ -17,9 +19,53 @@ from evidence import format_answer
 
 from .config import (MAX_ITER, CLARIFY_MAX_ROUNDS, CLARIFY_QUESTIONS_PER_ROUND,
                      RETRIEVAL_MODE, VALID_MODES, ConfigSchema,
-                     MSG_NOT_VALIDATED, MSG_VALIDATION_ERROR, MSG_OUT_OF_DOMAIN)
+                     MSG_NOT_VALIDATED, MSG_VALIDATION_ERROR, MSG_OUT_OF_DOMAIN,
+                     MSG_TECHNICAL_ERROR, STEP_FORMATTING, STEP_GENERATION, STEP_RETRIEVAL)
 from .state import RAGState
 from .generation import ClinicalAnswer, structured_llm
+
+
+# --- Technical failures: a message, never a traceback ----------------------
+def guarded(step: str):
+    """Wrap a node so an unreachable service becomes a MESSAGE instead of a crash.
+
+    Without this, an OpenAI outage or a Qdrant timeout propagates out of `invoke` and the
+    doctor gets a Python traceback. The message matters as much as the catch: a technical
+    failure must never be dressed up as a clinical result ("no está en las guías"), because
+    that is a statement about the guidelines that could change a decision.
+
+    `GraphBubbleUp` is re-raised on purpose: LangGraph signals its own control flow with
+    exceptions, and `interrupt()` raises one of them. A bare `except Exception` here would
+    swallow the refinement pause and turn it into a fake outage.
+    """
+    def decorator(fn):
+        # functools.wraps keeps the wrapped signature visible, which LangGraph inspects to
+        # decide whether to hand the node a `config` — so the wrapper has to forward keyword
+        # arguments too, not just positional ones.
+        @functools.wraps(fn)
+        def node(state: RAGState, *args, **kwargs):
+            try:
+                return fn(state, *args, **kwargs)
+            except GraphBubbleUp:
+                raise
+            except Exception as exc:
+                return {"technical_error": step, "technical_detail": f"{type(exc).__name__}: {exc}"}
+        return node
+    return decorator
+
+
+def route_on_error(ok: str):
+    """Conditional edge for every fallible step: on a technical failure jump straight to the
+    message, otherwise carry on to `ok`."""
+    def route(state: RAGState) -> str:
+        return "technical_error" if state.get("technical_error") else ok
+    return route
+
+
+def node_technical_error(state: RAGState) -> dict:
+    """Terminal node for a step that could not run. Names the step so a persistent failure is
+    reportable, without leaking the exception."""
+    return {"output": MSG_TECHNICAL_ERROR.format(step=state.get("technical_error", ""))}
 
 
 # --- Head: rephrase + domain guardrail -------------------------------------
@@ -40,7 +86,8 @@ def node_rephrase(state: RAGState) -> dict:
             "candidate_modifiers": r.get("candidate_modifiers", []),
             "pending_clarifications": [], "clarify_rounds": 0, "assessment": {},
             "asked_questions": [], "concept_map": "",
-            "attempts": 0, "validation": {}, "refocus_query": "", "refining": False}
+            "attempts": 0, "validation": {}, "refocus_query": "", "refining": False,
+            "technical_error": "", "technical_detail": ""}
 
 
 def node_out_of_domain(state: RAGState) -> dict:
@@ -85,12 +132,14 @@ def make_route_in_domain(entries: list):
 
 
 # --- Collapsed retrieval nodes (combined graph) ----------------------------
+@guarded(STEP_RETRIEVAL)
 def node_retrieve(state: RAGState) -> dict:
     """search_query -> ~20 candidates via hybrid search (dense + BM25)."""
     candidates = retrieve_hybrid(state["search_query"], top_k=20, prefetch_limit=30)
     return {"candidates": candidates, "retrieval_mode": "baseline"}
 
 
+@guarded(STEP_RETRIEVAL)
 def node_rerank(state: RAGState) -> dict:
     """candidates -> top 5 reordered by the cross-encoder + numbered context."""
     contexts = rerank(state["search_query"], state["candidates"], top_k=5)
@@ -117,6 +166,7 @@ def _retrieve_with(mode: str, question: str, rewritten_query: str | None) -> tup
 def _make_retrieval_node(mode: str):
     """Build the collapsed retrieval node for `mode` (combined graph). One factory instead of
     one hand-written node per mode: they differ only in which retriever they call."""
+    @guarded(STEP_RETRIEVAL)
     def node(state: RAGState) -> dict:
         contexts, concept_map = _retrieve_with(mode, state["question"],
                                                state.get("search_query"))
@@ -225,6 +275,7 @@ def _facts_phrase(clinical_facts: dict | None) -> str:
     return "; ".join(f"{k}: {v}" if v else k for k, v in facts.items())
 
 
+@guarded(STEP_RETRIEVAL)
 def node_re_retrieve(state: RAGState, config) -> dict:
     """Runs ONCE, right before generate, after the clarification loop gathered all the patient
     data. Re-runs retrieval with those facts folded into the query so the doctor's answers PULL
@@ -244,6 +295,7 @@ def node_re_retrieve(state: RAGState, config) -> dict:
 
 
 # --- Tail: generate <-> validate -> evidence/fallback ----------------------
+@guarded(STEP_GENERATION)
 def node_generate(state: RAGState) -> dict:
     """context + question -> structured answer. Three non-citable blocks may accompany the
     numbered context: the clarified patient data (clinical_facts), which selects the applicable
@@ -280,6 +332,7 @@ def node_validate(state: RAGState) -> dict:
     return {"validation": verdict}
 
 
+@guarded(STEP_RETRIEVAL)
 def node_refocus_retrieve(state: RAGState, config) -> dict:
     """The answer was rejected for lack of grounding: go back for EVIDENCE, not for a rewording.
 
@@ -310,6 +363,7 @@ def node_refocus_retrieve(state: RAGState, config) -> dict:
             "concept_map": concept_map or state.get("concept_map", "")}
 
 
+@guarded(STEP_FORMATTING)
 def node_evidence(state: RAGState) -> dict:
     """answer + index -> final text with the sources and follow-up panel."""
     return {"output": format_answer(state["answer"], state["chunk_index"])}

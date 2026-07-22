@@ -185,6 +185,22 @@ module plus one registry line.
   is then told the context may have changed. No claims to chase (a relevance-only rejection) →
   no-op, no retrieval paid for. This is the pipeline's ONLY path to recover from a bad
   selection; `refocus_query` records what it chased, for the trace.
+- **technical failures (added 2026-07-23):** every node that reaches out to a service —
+  retrieval (all modes), `re_retrieve`, `refocus_retrieve`, `generate`, `evidence` — is wrapped
+  by `nodes.guarded(step)` and leaves through `route_on_error`, so an outage ends in the
+  `technical_error` node with `MSG_TECHNICAL_ERROR` naming the step. **Two reasons, and the
+  second is the clinical one:** an unhandled exception used to propagate out of `invoke` and
+  show the doctor a Python traceback; and a technical failure must NEVER be dressed up as a
+  clinical result — «no está en las guías» is a statement about the guidelines that could
+  change a decision, so the message says explicitly that it is not one. The step label reaches
+  the doctor (`technical_error`), the exception does not (`technical_detail`, kept for the
+  trace — swallowing it silently would turn an outage into a later mystery). `validate` keeps
+  its OWN message (`MSG_VALIDATION_ERROR`): there an answer exists and simply could not be
+  verified. **Trap pinned by a test:** `guarded` re-raises `GraphBubbleUp`, because LangGraph
+  signals control flow with exceptions and `interrupt()` raises one — a bare `except Exception`
+  would turn the refinement pause into a fake outage. It is not load-bearing today (the node
+  that pauses is unguarded) and is kept deliberately, so `test_the_guard_lets_the_pause_through`
+  tests it directly rather than through the graph.
 - **evidence** (`evidence.format_answer`): formats the answer + sources panel with
   literal citations (fuzzy match) + follow-up questions + clinical disclaimer. Text without ANSI.
   It is the LAST barrier before the doctor, so `attribute()` resolves every doubt to `miss`
@@ -239,7 +255,7 @@ keeping strict grounding + validate.
   embeddings, retrieve/retrieve_hybrid, rerank, refine, validate, assess, generate_answer
   (raw version), SYS_PROMPT, build_user_prompt, model constants.
 - `evidence.py` — answer and sources formatting + citation integrity.
-- **`tests/`** — pytest suite, 101 tests, **no API calls and no network**
+- **`tests/`** — pytest suite, 114 tests, **no API calls and no network**
   (`.venv\Scripts\python.exe -m pytest`, ~8 s; most of that is importing `main` in the CLI
   tests, which warms the reranker). The principle: the LLM is replaced ONLY where the
   randomness enters (refine / assess / validate / generation / retrieval, in `conftest.py`), so
@@ -320,7 +336,7 @@ keeping strict grounding + validate.
   as it exists; if there are still-unknown patient data the run then pauses to OFFER a
   refinement, and `Command(resume=…)` carries the reply — Enter declines and ends the run with
   the answer already shown (the CLI only reprints when the text actually changed).
-- Tests: `.venv\Scripts\python.exe -m pytest` (101 tests, ~8 s, no API calls). Run them before
+- Tests: `.venv\Scripts\python.exe -m pytest` (114 tests, ~8 s, no API calls). Run them before
   committing. They freeze the MECHANICS, not the medicine — whether an answer is clinically
   right is what `evaluation.py` and a clinician are for.
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → opens Studio (EU). See steps in the

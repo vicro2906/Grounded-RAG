@@ -59,6 +59,12 @@ class RAGState(TypedDict):
     attempts: int                 # generations done so far (validation loop)
     validation: dict              # validator verdict {is_valid, reason, ...}
     refocus_query: str            # claims the validator rejected, re-retrieved before retrying
+    # A step could not run at all (service unreachable, index unavailable…). `technical_error`
+    # holds the user-facing step label and short-circuits the run to a message; the exception
+    # goes to `technical_detail`, which is NEVER shown but keeps the trace diagnosable —
+    # swallowing an exception without recording it just turns an outage into a later mystery.
+    technical_error: str
+    technical_detail: str
     output: str                   # final formatted text with sources (format_answer)
 
 

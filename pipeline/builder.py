@@ -12,6 +12,11 @@ factor head/tail into `_add_common` and let each mode plug its own retrieval nod
                        refine_offer (interrupt, OPTIONAL) ─┬─ declined -> END
                                                            └─ answered -> re_retrieve ↺
 
+Cutting across all of it: every step that calls out to a service (retrieval, generation,
+formatting) is wrapped by `nodes.guarded` and leaves through `route_on_error`, so an outage
+ends in `technical_error` -> END with a message naming the step, never in a traceback and never
+disguised as a clinical "the guidelines do not cover this".
+
 Two assemblies:
   - build_graph(mode): a DEDICATED graph with only that mode's retrieval path, EXPANDED into
     its real steps (cleanest to visualize in Studio). Exposed as app_baseline/_iterative/_graph.
@@ -45,6 +50,7 @@ def _add_common(builder: StateGraph) -> None:
     builder.add_node("refocus_retrieve", N.node_refocus_retrieve)
     builder.add_node("evidence", N.node_evidence)
     builder.add_node("fallback", N.node_fallback)
+    builder.add_node("technical_error", N.node_technical_error)
 
     builder.add_edge(START, "rephrase")
     builder.add_edge("out_of_domain", END)
@@ -55,19 +61,36 @@ def _add_common(builder: StateGraph) -> None:
     # it up does the run loop back through re_retrieve (which folds the new facts into the
     # query, so the conditional passages are there to cite) and generate again.
     builder.add_edge("assess_context", "re_retrieve")
-    builder.add_edge("re_retrieve", "generate")
-    builder.add_edge("generate", "validate")
+    # Every step that reaches out to a service routes through `route_on_error`: if it could not
+    # run at all, the run jumps to a message naming the step instead of crashing out of invoke
+    # with a traceback (or, worse, being mistaken for "the guidelines do not cover this").
+    builder.add_conditional_edges("re_retrieve", N.route_on_error("generate"),
+                                  {"generate": "generate", "technical_error": "technical_error"})
+    builder.add_conditional_edges("generate", N.route_on_error("validate"),
+                                  {"validate": "validate", "technical_error": "technical_error"})
     # A grounding rejection is usually a RETRIEVAL miss, so the retry does not loop straight
     # back to generate: refocus_retrieve first chases the validator's unsupported claims, and
     # only then is the answer regenerated over evidence that may actually support it.
     builder.add_conditional_edges("validate", N.route_validation,
                                   {"evidence": "evidence", "fallback": "fallback",
                                    "refocus_retrieve": "refocus_retrieve"})
-    builder.add_edge("refocus_retrieve", "generate")
-    builder.add_edge("evidence", "refine_offer")
+    builder.add_conditional_edges("refocus_retrieve", N.route_on_error("generate"),
+                                  {"generate": "generate", "technical_error": "technical_error"})
+    builder.add_conditional_edges("evidence", N.route_on_error("refine_offer"),
+                                  {"refine_offer": "refine_offer",
+                                   "technical_error": "technical_error"})
     builder.add_conditional_edges("refine_offer", N.route_refinement,
                                   {"re_retrieve": "re_retrieve", "end": END})
     builder.add_edge("fallback", END)
+    builder.add_edge("technical_error", END)
+
+
+def _add_retrieval_edge(builder: StateGraph, source: str, ok: str) -> None:
+    """Edge out of a retrieval node: on to `ok`, or to the message if the step could not run.
+    Retrieval is where the outages actually happen (embeddings API, Qdrant, a graph store on
+    disk), so every one of these edges is conditional."""
+    builder.add_conditional_edges(source, N.route_on_error(ok),
+                                  {ok: ok, "technical_error": "technical_error"})
 
 
 def _add_retrieval_collapsed(builder: StateGraph, mode: str) -> None:
@@ -76,12 +99,12 @@ def _add_retrieval_collapsed(builder: StateGraph, mode: str) -> None:
     if mode == "baseline":
         builder.add_node("retrieve", N.node_retrieve)
         builder.add_node("rerank", N.node_rerank)
-        builder.add_edge("retrieve", "rerank")
-        builder.add_edge("rerank", "assess_context")
+        _add_retrieval_edge(builder, "retrieve", "rerank")
+        _add_retrieval_edge(builder, "rerank", "assess_context")
         return
     entry = N.retrieval_entry(mode)
     builder.add_node(entry, N.RETRIEVAL_NODES[mode])
-    builder.add_edge(entry, "assess_context")
+    _add_retrieval_edge(builder, entry, "assess_context")
 
 
 # Modes with a hand-built "teaching" breakdown for Studio. A mode is added here once it has
@@ -96,8 +119,8 @@ def _add_retrieval_expanded(builder: StateGraph, mode: str):
     if mode == "baseline":
         builder.add_node("retrieve", N.node_retrieve)
         builder.add_node("rerank", N.node_rerank)
-        builder.add_edge("retrieve", "rerank")
-        builder.add_edge("rerank", "assess_context")
+        _add_retrieval_edge(builder, "retrieve", "rerank")
+        _add_retrieval_edge(builder, "rerank", "assess_context")
         return "retrieve"
     if mode == "iterative":
         builder.add_node("iter_generate_subquestions", X.node_iter_generate_subquestions)

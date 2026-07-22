@@ -9,8 +9,10 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+from conftest import CHUNK
 from pipeline import build_combined_graph
-from pipeline.config import MSG_NOT_VALIDATED, MSG_OUT_OF_DOMAIN
+from pipeline.config import (MSG_NOT_VALIDATED, MSG_OUT_OF_DOMAIN, MSG_VALIDATION_ERROR,
+                             STEP_FORMATTING, STEP_GENERATION, STEP_RETRIEVAL)
 
 
 BASELINE = {"retrieval_mode": "baseline"}
@@ -149,6 +151,99 @@ def test_no_unsupported_claims_means_no_extra_retrieval(app, graph_env, monkeypa
 
     app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
     assert len(graph_env.retrieval_queries) == 1
+
+
+# --- technical failures: a message, never a traceback ----------------------
+# Everything below asserts the same two things: the doctor gets an intelligible message instead
+# of a stack trace, AND that message is not mistakable for a clinical statement. Saying "no
+# está en las guías" when the truth is "OpenAI is down" is a claim about the guidelines.
+def test_retrieval_outage_ends_in_a_message(app, graph_env, monkeypatch):
+    from pipeline import nodes
+    monkeypatch.setattr(nodes, "retrieve_hybrid",
+                        lambda *a, **k: (_ for _ in ()).throw(ConnectionError("qdrant down")))
+
+    result = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+
+    assert STEP_RETRIEVAL in result["output"]
+    assert "problema técnico" in result["output"]
+    assert "no significa que las guías no cubran" in result["output"]
+    assert not graph_env.llm.calls, "an unreachable index must not reach generation"
+
+
+def test_generation_outage_ends_in_a_message(app, graph_env, monkeypatch):
+    from pipeline import nodes
+
+    class Down:
+        def invoke(self, messages):
+            raise RuntimeError("openai unavailable")
+
+    monkeypatch.setattr(nodes, "structured_llm", Down())
+    result = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+
+    assert STEP_GENERATION in result["output"]
+    assert "__interrupt__" not in result
+
+
+def test_formatting_failure_ends_in_a_message(app, graph_env, monkeypatch):
+    """The last step is pure Python, but if it ever throws we still have a validated answer and
+    no way to render its sources — showing it without them would drop the citations that are
+    the whole promise."""
+    from pipeline import nodes
+    monkeypatch.setattr(nodes, "format_answer",
+                        lambda *a, **k: (_ for _ in ()).throw(KeyError("payload")))
+
+    result = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+    assert STEP_FORMATTING in result["output"]
+
+
+def test_the_failing_step_is_named_and_the_cause_kept_for_the_trace(app, graph_env, monkeypatch):
+    """The doctor gets the step; the exception stays in the state so an outage is diagnosable
+    instead of becoming a silent mystery."""
+    from pipeline import nodes
+    monkeypatch.setattr(nodes, "retrieve_hybrid",
+                        lambda *a, **k: (_ for _ in ()).throw(ConnectionError("qdrant down")))
+
+    result = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+
+    assert result["technical_error"] == STEP_RETRIEVAL
+    assert "qdrant down" in result["technical_detail"]
+    assert "qdrant down" not in result["output"], "the exception must not reach the doctor"
+
+
+def test_a_judge_that_cannot_run_never_shows_the_answer(app, graph_env, monkeypatch):
+    """The validator has its own message because its case is different: an answer EXISTS, we
+    just could not verify it. It must not be shown."""
+    from pipeline import nodes
+    monkeypatch.setattr(nodes, "validate", lambda *a, **k: {
+        "is_valid": False, "error": True, "reason": "técnico", "unsupported_claims": []})
+
+    result = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+    assert result["output"] == MSG_VALIDATION_ERROR
+
+
+def test_guarding_the_pipeline_did_not_break_the_refinement_pause(app, graph_env):
+    """Integration check that the guards left the pause intact. What actually protects it is
+    the GraphBubbleUp re-raise inside `guarded`, pinned directly in test_pipeline_routing."""
+    graph_env.assess_questions = [["¿Hay coinfección por VHB?"]]
+    paused = app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=thread())
+
+    assert "__interrupt__" in paused
+    assert not paused.get("technical_error")
+
+
+def test_a_recovered_service_does_not_poison_the_next_question(app, graph_env, monkeypatch):
+    """technical_error is per-question state, like attempts and validation."""
+    from pipeline import nodes
+    cfg = thread()
+    monkeypatch.setattr(nodes, "retrieve_hybrid",
+                        lambda *a, **k: (_ for _ in ()).throw(ConnectionError("down")))
+    app.invoke({"question": "primera"}, context=BASELINE, config=cfg)
+
+    monkeypatch.setattr(nodes, "retrieve_hybrid", lambda *a, **k: [CHUNK])
+    result = app.invoke({"question": "segunda"}, context=BASELINE, config=cfg)
+
+    assert "RESPUESTA" in result["output"]
+    assert not result.get("technical_error")
 
 
 def test_validation_state_does_not_leak_into_the_next_question(app, graph_env):

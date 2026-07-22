@@ -31,6 +31,16 @@ class ConfigSchema(TypedDict, total=False):
 
 
 # --- User-facing messages (Spanish: shown to the doctor) ---
+# Step labels for MSG_TECHNICAL_ERROR. They are user-facing text, so they live here with the
+# rest of the Spanish rather than inline at the call site.
+STEP_RETRIEVAL   = "al consultar las guías"
+STEP_GENERATION  = "al redactar la respuesta"
+STEP_FORMATTING  = "al preparar las fuentes"
+MSG_TECHNICAL_ERROR = (
+    "No he podido completar la consulta por un problema técnico ({step}). Esto NO es un "
+    "resultado clínico: no significa que las guías no cubran tu pregunta ni que no haya "
+    "recomendación. Vuelve a intentarlo en unos momentos."
+)
 MSG_REFINE_OFFER = (
     "Puedo concretar más la respuesta para este paciente si me facilitas alguno de estos "
     "datos (pulsa Enter para dejarlo así):"

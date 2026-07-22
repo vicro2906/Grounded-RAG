@@ -5,9 +5,12 @@ answer reaches the doctor, so they are worth pinning down on their own.
 """
 import pytest
 
-from pipeline.config import MAX_ITER, VALID_MODES
-from pipeline.nodes import (_facts_phrase, _fold_answers, _resolve_mode, node_re_retrieve,
-                            retrieval_entry, route_refinement, route_validation)
+from langgraph.errors import GraphInterrupt
+
+from pipeline.config import MAX_ITER, STEP_GENERATION, STEP_RETRIEVAL, VALID_MODES
+from pipeline.nodes import (_facts_phrase, _fold_answers, _resolve_mode, guarded,
+                            node_re_retrieve, retrieval_entry, route_on_error,
+                            route_refinement, route_validation)
 from rag import _facts_to_dict
 
 
@@ -42,6 +45,16 @@ def test_supplied_datum_re_answers():
 def test_declined_refinement_ends_the_run():
     assert route_refinement({"refining": False}) == "end"
     assert route_refinement({}) == "end"
+
+
+# --- route_on_error: a failed step never continues down the pipeline -------
+def test_a_failed_step_diverts_to_the_message():
+    assert route_on_error("generate")({"technical_error": STEP_RETRIEVAL}) == "technical_error"
+
+
+def test_a_healthy_step_carries_on():
+    assert route_on_error("generate")({}) == "generate"
+    assert route_on_error("generate")({"technical_error": ""}) == "generate"
 
 
 # --- folding the doctor's answers into the patient facts --------------------
@@ -121,6 +134,48 @@ def test_no_facts_means_no_second_retrieval():
     state = {"question": "¿Pauta?", "search_query": "¿Pauta?",
              "clinical_facts": {}, "clarify_rounds": 1}
     assert node_re_retrieve(state, None) == {}
+
+
+# --- the guard around every step that calls out to a service ---------------
+def test_a_failing_step_becomes_a_labelled_error_not_an_exception():
+    @guarded(STEP_RETRIEVAL)
+    def node(state):
+        raise ConnectionError("qdrant unreachable")
+
+    out = node({})
+    assert out["technical_error"] == STEP_RETRIEVAL
+    assert "ConnectionError" in out["technical_detail"]
+    assert "qdrant unreachable" in out["technical_detail"]
+
+
+def test_a_working_step_is_untouched():
+    @guarded(STEP_RETRIEVAL)
+    def node(state):
+        return {"contexts": ["algo"]}
+
+    assert node({}) == {"contexts": ["algo"]}
+
+
+def test_the_guard_forwards_the_config_langgraph_passes_by_keyword():
+    """Nodes that need the run config receive it as a KEYWORD argument, so a wrapper that only
+    forwarded positional ones would break them the moment they were guarded."""
+    @guarded(STEP_RETRIEVAL)
+    def node(state, config):
+        return {"seen": config}
+
+    assert node({}, config={"configurable": {}}) == {"seen": {"configurable": {}}}
+
+
+def test_the_guard_lets_the_pause_through():
+    """`interrupt()` signals itself with an exception. If the guard swallowed it, a pause would
+    be reported to the doctor as a service outage and the run could never resume — so
+    LangGraph's own control-flow exceptions must pass straight through."""
+    @guarded(STEP_GENERATION)
+    def node(state):
+        raise GraphInterrupt(("pausa",))
+
+    with pytest.raises(GraphInterrupt):
+        node({})
 
 
 def test_patient_data_is_rendered_compactly_for_the_query():
