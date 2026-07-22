@@ -63,7 +63,6 @@ from ragas.metrics import (
     LLMContextPrecisionWithReference,
     LLMContextRecall,
 )
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 
 # JUDGE — gpt-4o-mini (cheap, for iterating) vs gpt-4o (the number you report).
