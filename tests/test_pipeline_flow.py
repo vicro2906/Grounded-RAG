@@ -323,6 +323,65 @@ def test_a_carried_over_fact_steers_the_follow_up_retrieval(app, graph_env):
         "the carried datum must enrich the follow-up's retrieval query"
 
 
+# --- the blocking patient-switch gate --------------------------------------
+def test_a_normal_follow_up_never_pauses_to_confirm(app, graph_env):
+    """The gate must stay invisible unless refine actually flags a contradiction: a normal
+    follow-up about the same patient answers straight through."""
+    cfg = thread()
+    graph_env.assess_questions = [["¿VHB?"], []]
+    app.invoke({"question": "primera"}, context=BASELINE, config=cfg)
+    app.invoke(Command(resume="sí, VHB positivo"), context=BASELINE, config=cfg)
+
+    graph_env.assess_questions = [[]]
+    result = app.invoke({"question": "¿y la dosis?"}, context=BASELINE, config=cfg)
+    assert "RESPUESTA" in result["output"]      # answered, never paused
+
+
+def test_a_flagged_switch_pauses_before_answering(app, graph_env):
+    """When refine flags a probable different patient, the gate must interrupt BEFORE any
+    answer — a cross-patient recommendation is the harm, so this one pause is allowed to block."""
+    cfg = thread()
+    graph_env.assess_questions = [["¿VHB?"], []]
+    app.invoke({"question": "paciente gestante"}, context=BASELINE, config=cfg)
+    app.invoke(Command(resume="embarazo: sí"), context=BASELINE, config=cfg)  # remember a fact
+
+    graph_env.new_patient = True
+    graph_env.assess_questions = [[]]
+    paused = app.invoke({"question": "¿y en un varón de 70 años?"}, context=BASELINE, config=cfg)
+    assert not paused.get("output"), "no answer must be on screen when the gate pauses"
+    assert paused["__interrupt__"][0].value["confirm_new_patient"] is True
+
+
+def test_confirming_a_switch_drops_the_previous_patients_data(app, graph_env):
+    cfg = thread()
+    graph_env.assess_questions = [["¿VHB?"], []]
+    app.invoke({"question": "primera"}, context=BASELINE, config=cfg)
+    app.invoke(Command(resume="sí, VHB positivo"), context=BASELINE, config=cfg)
+
+    graph_env.new_patient = True
+    graph_env.assess_questions = [[]]
+    app.invoke({"question": "otro paciente distinto"}, context=BASELINE, config=cfg)
+    app.invoke(Command(resume="sí"), context=BASELINE, config=cfg)   # yes, new patient
+
+    assert "VHB positivo" not in graph_env.llm.last_user_prompt
+
+
+def test_declining_a_switch_keeps_the_patient(app, graph_env):
+    """An empty (or negative) reply means "same patient": the data must survive so the answer
+    still uses it. Clearing on a stray Enter would silently lose the patient's history."""
+    cfg = thread()
+    graph_env.assess_questions = [["¿VHB?"], []]
+    app.invoke({"question": "primera"}, context=BASELINE, config=cfg)
+    app.invoke(Command(resume="sí, VHB positivo"), context=BASELINE, config=cfg)
+
+    graph_env.new_patient = True
+    graph_env.assess_questions = [[]]
+    app.invoke({"question": "misma persona, otra duda"}, context=BASELINE, config=cfg)
+    app.invoke(Command(resume=""), context=BASELINE, config=cfg)     # Enter = keep
+
+    assert "VHB positivo" in graph_env.llm.last_user_prompt
+
+
 def test_a_new_patient_clears_the_remembered_data(app, graph_env):
     """update_state({patient_facts: {}}) is what the CLI's /nuevo runs — the carried data must
     be gone from the next question so a new patient never inherits the previous one's."""

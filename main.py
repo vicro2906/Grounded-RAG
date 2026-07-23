@@ -58,7 +58,8 @@ from langgraph.types import Command
 
 from pipeline import (build_graph, build_combined_graph, RETRIEVAL_MODE, VALID_MODES,
                       MSG_REFINE_OFFER, MSG_CLI_INTRO, MSG_CLI_HELP, MSG_NEW_PATIENT,
-                      MSG_NO_PATIENT_DATA, MSG_PATIENT_HEADER)
+                      MSG_NO_PATIENT_DATA, MSG_PATIENT_HEADER, MSG_CONFIRM_NEW_PATIENT,
+                      MSG_CONFIRM_NEW_PATIENT_ASK)
 
 # Compiled graphs (registered in langgraph.json). The three dedicated ones are the expanded
 # "teaching" views; `app` is the combined graph with the live retrieval_mode dropdown.
@@ -73,18 +74,33 @@ app = build_combined_graph()
 threading.Thread(target=rag.warmup, daemon=True).start()
 
 
-def _collect_clarifications(interrupts) -> dict | str:
-    """Offer the refinement the graph paused on and shape the reply the way node_refine_offer
-    expects: plain text for a single question, {question: answer} for several.
+def _confirm_new_patient(value) -> str:
+    """The blocking patient-switch gate (before any answer): show the remembered data and ask
+    whether to start fresh. Only an explicit «sí» clears it — Enter keeps the patient."""
+    print(f"\n{MSG_CONFIRM_NEW_PATIENT}")
+    print(_format_patient_facts(value.get("facts")))
+    return input(f"{MSG_CONFIRM_NEW_PATIENT_ASK} ").strip()
 
-    The answer is ALREADY printed by the time this runs, so every question here is optional:
-    an empty reply (Enter) declines it and the run ends with the answer the doctor has."""
-    questions = [q for i in interrupts for q in (i.value or {}).get("questions", [])]
+
+def _collect_clarifications(value) -> dict | str:
+    """Offer the refinement the graph paused on (AFTER the answer is on screen) and shape the
+    reply the way node_refine_offer expects: plain text for a single question, {question:
+    answer} for several. Every question is optional — an empty reply declines it."""
+    questions = list(value.get("questions", []))
     print(f"\n{MSG_REFINE_OFFER}")
     answers = {q: input(f"  · {q} ").strip() for q in questions}
     if len(answers) == 1:
         return next(iter(answers.values()))
     return {q: a for q, a in answers.items() if a}
+
+
+def _resume_for(interrupts):
+    """One pause at a time: dispatch on its kind — the confirm gate asks yes/no BEFORE the
+    answer, the refinement offers questions AFTER it."""
+    value = interrupts[0].value or {}
+    if value.get("confirm_new_patient"):
+        return _confirm_new_patient(value)
+    return _collect_clarifications(value)
 
 
 def _format_patient_facts(facts: dict | None) -> str:
@@ -111,7 +127,7 @@ def _answer_question(app_cli, question, mode, config):
         interrupts = result.get("__interrupt__")
         if not interrupts:
             return
-        payload = Command(resume=_collect_clarifications(interrupts))
+        payload = Command(resume=_resume_for(interrupts))
 
 
 def main_cli():

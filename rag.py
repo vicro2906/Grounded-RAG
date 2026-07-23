@@ -272,10 +272,12 @@ C) CRIBADO de datos del paciente (cribado barato, NO respondas; solo importa si 
 
 D) SEGUIMIENTO (solo si te doy una PREGUNTA ANTERIOR): la consulta actual puede ser una continuación elíptica de ella («¿y en embarazo?», «¿y si hay insuficiencia renal?», «¿a qué dosis?»). En ese caso, resuelve el referente y reescribe la consulta como una pregunta AUTÓNOMA que combine el TEMA de la pregunta anterior con la variación de la actual (p. ej. anterior «¿qué TAR de inicio se recomienda?» + actual «¿y en embarazo?» -> «¿qué TAR de inicio se recomienda en el embarazo?»). REGLAS: (a) el tema que arrastras debe salir LITERALMENTE de la pregunta anterior, no lo inventes; (b) si la pregunta actual ya es autónoma (cambia de tema, o se entiende por sí sola), IGNORA la anterior y reescríbela tal cual; (c) esto NO relaja B.1: no añadas fármacos, dosis ni cifras que no estén en una de las dos preguntas.
 
+E) POSIBLE CAMBIO DE PACIENTE (campo possible_new_patient; solo si te doy DATOS DEL PACIENTE ACTUAL): márcalo true SOLO si la pregunta actual CONTRADICE de forma clara esos datos, de modo que es evidente que trata de OTRA persona. Ejemplos: los datos dicen «embarazo: sí» y la pregunta es sobre un varón; «edad_pediatrica» y la pregunta es claramente geriátrica; una pauta o una situación incompatibles con lo acumulado. NO lo marques por un simple cambio de tema, ni por añadir un dato nuevo que NO contradice lo anterior (eso es un seguimiento normal del MISMO paciente). Si no hay datos acumulados, es false. Ante la duda, false: una marca errónea solo cuesta una confirmación, y el médico siempre puede empezar de cero a mano.
+
 LISTA DE ABREVIATURAS (SIGLA = nombre):
 {_ABBREV_LIST}
 
-Devuelve in_domain (bool), rewritten_query (str), known_facts (lista de strings "atributo: valor") y candidate_modifiers (lista de strings)."""
+Devuelve in_domain (bool), rewritten_query (str), known_facts (lista de strings "atributo: valor"), candidate_modifiers (lista de strings) y possible_new_patient (bool)."""
 
 
 class _Refined(BaseModel):
@@ -283,6 +285,7 @@ class _Refined(BaseModel):
     rewritten_query: str
     known_facts: list[str]
     candidate_modifiers: list[str]
+    possible_new_patient: bool
 
 
 _refine_llm = None
@@ -310,26 +313,48 @@ def _facts_to_dict(facts: list[str]) -> dict:
     return out
 
 
-def refine(query: str, prev_question: str | None = None) -> dict:
-    """Single LLM call that (a) rewrites the query (no new info, normalizing terms), (b)
-    classifies the HIV domain, and (c) screens the patient data present in the question and
-    the modifiers it might need. Returns {query, in_domain, known_facts, candidate_modifiers}.
+def _refine_human(query: str, prev_question: str | None, patient_facts: dict | None) -> str:
+    """Assemble refine's user message. The optional blocks (accumulated patient data, previous
+    question) are added only when present, so the first turn of a fresh conversation sends just
+    the question — an empty "PREGUNTA ANTERIOR" or "DATOS" block only muddies the model."""
+    facts = {k: v for k, v in (patient_facts or {}).items() if k}
+    parts = []
+    if facts:
+        rendered = "\n".join(f"- {k}: {v}" if v else f"- {k}" for k, v in facts.items())
+        parts.append("DATOS DEL PACIENTE ACTUAL (acumulados en la conversación):\n" + rendered)
+    if prev_question:
+        parts.append("PREGUNTA ANTERIOR (contexto, por si la actual es un seguimiento):\n"
+                     + prev_question)
+    if not parts:
+        return query
+    parts.append("PREGUNTA ACTUAL:\n" + query)
+    return "\n\n".join(parts)
 
-    `prev_question` (the previous turn's question) lets it resolve an elliptical follow-up —
-    «¿y en embarazo?» becomes a standalone query carrying the earlier topic — so retrieval gets
-    a self-contained question instead of a fragment. The topic it carries must come literally
-    from one of the two questions (no new clinical info). On LLM failure it does not block:
-    returns the original query, in_domain=True, no facts."""
-    human = (f"PREGUNTA ANTERIOR (contexto, por si la actual es un seguimiento):\n{prev_question}"
-             f"\n\nPREGUNTA ACTUAL:\n{query}") if prev_question else query
+
+def refine(query: str, prev_question: str | None = None,
+           patient_facts: dict | None = None) -> dict:
+    """Single LLM call that (a) rewrites the query (no new info, normalizing terms), (b)
+    classifies the HIV domain, (c) screens the patient data present in the question and the
+    modifiers it might need, (d) resolves an elliptical follow-up against `prev_question`, and
+    (e) flags a probable PATIENT SWITCH. Returns {query, in_domain, known_facts,
+    candidate_modifiers, possible_new_patient}.
+
+    `prev_question` lets «¿y en embarazo?» become a standalone query carrying the earlier topic
+    (from one of the two questions — no new clinical info). `patient_facts` (accumulated so far)
+    lets it flag `possible_new_patient` when the question CONTRADICTS them — the pipeline then
+    confirms before answering, so two patients' data never merge into one recommendation. On
+    LLM failure it does not block: original query, in_domain=True, no facts, no switch."""
+    human = _refine_human(query, prev_question, patient_facts)
     try:
         out = cast(_Refined,
                    _get_refine_llm().invoke([("system", _REPHRASE_SYS), ("human", human)]))
         return {"query": out.rewritten_query.strip() or query, "in_domain": out.in_domain,
                 "known_facts": _facts_to_dict(out.known_facts),
-                "candidate_modifiers": list(out.candidate_modifiers or [])}
+                "candidate_modifiers": list(out.candidate_modifiers or []),
+                "possible_new_patient": bool(out.possible_new_patient)}
     except Exception:
-        return {"query": query, "in_domain": True, "known_facts": {}, "candidate_modifiers": []}
+        return {"query": query, "in_domain": True, "known_facts": {},
+                "candidate_modifiers": [], "possible_new_patient": False}
 
 
 def rephrase(query: str, prev_question: str | None = None) -> str:

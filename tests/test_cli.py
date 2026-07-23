@@ -195,6 +195,21 @@ def _run_with(monkeypatch, app, lines):
     main.main_cli()
 
 
+# --- the blocking patient-switch confirmation ------------------------------
+def test_the_switch_confirmation_is_asked_before_any_answer(monkeypatch, capsys):
+    """The confirm interrupt has no answer yet, so the CLI must show the warning and remembered
+    data and ask — not print an (absent) answer."""
+    paused = {"__interrupt__": (_Interrupt({"confirm_new_patient": True,
+                                            "facts": {"embarazo": "sí"},
+                                            "question": "¿y en un varón?"}),)}
+    app = _run(monkeypatch, [paused, {"output": "RESPUESTA"}],
+               ["¿y en un varón?", "sí", "/salir"])
+
+    out = capsys.readouterr().out
+    assert "paciente distinto" in out and "embarazo: sí" in out
+    assert app.payloads[1].resume == "sí"      # the yes/no reaches the graph verbatim
+
+
 # --- mode selection --------------------------------------------------------
 def test_the_mode_argument_is_honoured(monkeypatch):
     app = _run(monkeypatch, [{"output": "A"}], ["¿pregunta?", "/salir"],

@@ -60,6 +60,14 @@ MSG_CLI_HELP = (
     "  /salir     — termina la sesión"
 )
 MSG_NEW_PATIENT = "De acuerdo, empiezo de cero. He olvidado los datos del paciente anterior."
+MSG_CONFIRM_NEW_PATIENT = (
+    "Esta consulta parece referirse a un paciente distinto del que venía recordando.\n"
+    "Datos que tengo guardados:"
+)
+MSG_CONFIRM_NEW_PATIENT_ASK = (
+    "¿Es un paciente distinto? Escribe «sí» para empezar de cero; pulsa Enter para "
+    "mantener estos datos."
+)
 MSG_NO_PATIENT_DATA = "Todavía no he recogido ningún dato del paciente en esta conversación."
 MSG_PATIENT_HEADER = "Datos del paciente recordados en esta conversación:"
 MSG_NOT_VALIDATED = (

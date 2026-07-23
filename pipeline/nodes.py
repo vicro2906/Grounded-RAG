@@ -86,15 +86,17 @@ def node_rephrase(state: RAGState) -> dict:
     `refine`, so «¿y en embarazo?» is rewritten into a standalone query carrying the earlier
     topic, then records THIS question as the previous one for next turn. Both are cleared only
     on an explicit new patient (never here)."""
-    r = refine(state["question"], prev_question=state.get("prev_question"))
-    patient_facts = {**(state.get("patient_facts") or {}), **r.get("known_facts", {})}
+    prior = state.get("patient_facts") or {}
+    r = refine(state["question"], prev_question=state.get("prev_question"), patient_facts=prior)
+    turn_facts = r.get("known_facts", {})
     return {"search_query": r["query"], "in_domain": r["in_domain"],
-            "patient_facts": patient_facts, "prev_question": state["question"],
+            "patient_facts": {**prior, **turn_facts}, "prev_question": state["question"],
+            "turn_facts": turn_facts, "possible_new_patient": r.get("possible_new_patient", False),
             "candidate_modifiers": r.get("candidate_modifiers", []),
             "pending_clarifications": [], "clarify_rounds": 0, "assessment": {},
             "asked_questions": [], "concept_map": "",
             "attempts": 0, "validation": {}, "refocus_query": "", "refining": False,
-            "technical_error": "", "technical_detail": ""}
+            "technical_error": "", "technical_detail": "", "output": ""}
 
 
 def node_out_of_domain(state: RAGState) -> dict:
@@ -123,19 +125,62 @@ def retrieval_entry(mode: str) -> str:
 
 
 def route_domain(state: RAGState, config) -> str:
-    """Combined graph: after rephrase, route out-of-domain to a message, in-domain to the
-    selected retrieval strategy."""
-    if not state.get("in_domain", True):
-        return "out_of_domain"
+    """After rephrase: out-of-domain to a message, in-domain to the patient-switch gate (which
+    passes straight through unless refine flagged a probable different patient)."""
+    return "confirm_patient" if state.get("in_domain", True) else "out_of_domain"
+
+
+def route_after_confirm(state: RAGState, config) -> str:
+    """Combined graph: from the gate on to the selected retrieval strategy."""
     return retrieval_entry(_resolve_mode(config))
 
 
-def make_route_in_domain(entries: list):
-    """Dedicated graphs: route out-of-domain to a message, in-domain to that graph's retrieval
-    entry node(s) (a single node, or both parallel entries for the graph mode)."""
+def make_route_in_domain():
+    """Dedicated graphs: route out-of-domain to a message, in-domain to the patient-switch gate."""
     def route(state: RAGState):
-        return "out_of_domain" if not state.get("in_domain", True) else entries
+        return "confirm_patient" if state.get("in_domain", True) else "out_of_domain"
     return route
+
+
+def make_route_to(entries: list):
+    """Dedicated graphs: from the gate on to that graph's retrieval entry node(s) — a single
+    node, or both parallel entries for the graph mode's fan-out."""
+    def route(state: RAGState):
+        return entries
+    return route
+
+
+# --- Patient-switch gate: the ONE blocking pause, and only on contradiction ---
+def _is_affirmative(answer) -> bool:
+    """Parse the doctor's yes/no to "is this a different patient?". Clearing the remembered
+    data needs an EXPLICIT yes — an empty reply keeps the patient, because auto-forgetting a
+    patient on a stray Enter is worse than answering one extra question about the same one (and
+    a genuine switch the doctor waves past can still be corrected with /nuevo)."""
+    if isinstance(answer, bool):
+        return answer
+    return str(answer or "").strip().lower()[:2] in ("s", "sí", "si", "y", "ye", "1", "tr", "ok")
+
+
+def node_confirm_patient(state: RAGState) -> dict:
+    """Blocking safety gate. If refine flagged that this question likely concerns a DIFFERENT
+    patient than the accumulated facts, pause and ASK before answering — answering it with the
+    previous patient's renal function or gestation folded in would put a wrong recommendation on
+    screen, and that is the exact harm the whole system guards against. This is the deliberate
+    exception to answer-first: the clarification is offered after the answer because a generic
+    answer is safe, but a cross-patient answer is not.
+
+    It fires ONLY on a flagged contradiction AND only when there is remembered data to
+    contradict, so a normal follow-up never pauses. On "yes, new patient" it drops the previous
+    patient's facts, keeping only this question's own (`turn_facts`); `prev_question` was already
+    set to this question by rephrase, so the next follow-up resolves against it correctly."""
+    if not state.get("possible_new_patient") or not (state.get("patient_facts") or {}):
+        return {"possible_new_patient": False}
+    answer = interrupt({"confirm_new_patient": True,
+                        "facts": state.get("patient_facts"), "question": state["question"]})
+    if _is_affirmative(answer):
+        return {"patient_facts": dict(state.get("turn_facts") or {}),
+                "possible_new_patient": False}
+    return {"possible_new_patient": False}
 
 
 # --- Collapsed retrieval nodes (combined graph) ----------------------------

@@ -8,9 +8,9 @@ import pytest
 from langgraph.errors import GraphInterrupt
 
 from pipeline.config import MAX_ITER, STEP_GENERATION, STEP_RETRIEVAL, VALID_MODES
-from pipeline.nodes import (_facts_phrase, _fold_answers, _resolve_mode, guarded,
-                            node_re_retrieve, retrieval_entry, route_on_error,
-                            route_refinement, route_validation)
+from pipeline.nodes import (_facts_phrase, _fold_answers, _is_affirmative, _resolve_mode,
+                            guarded, node_confirm_patient, node_re_retrieve, retrieval_entry,
+                            route_on_error, route_refinement, route_validation)
 from rag import _facts_to_dict
 
 
@@ -45,6 +45,30 @@ def test_supplied_datum_re_answers():
 def test_declined_refinement_ends_the_run():
     assert route_refinement({"refining": False}) == "end"
     assert route_refinement({}) == "end"
+
+
+# --- the patient-switch gate: only pauses on a real, remembered contradiction ---
+def test_the_gate_is_a_no_op_without_a_flag():
+    """No interrupt is raised (calling it would raise GraphInterrupt if it tried to pause)."""
+    assert node_confirm_patient({"possible_new_patient": False,
+                                 "patient_facts": {"embarazo": "sí"}}) == {
+        "possible_new_patient": False}
+
+
+def test_the_gate_is_a_no_op_with_a_flag_but_nothing_remembered():
+    """A flag with no accumulated data has nothing to contradict — the first question can't be a
+    'switch'. It must not pause."""
+    assert node_confirm_patient({"possible_new_patient": True, "patient_facts": {}}) == {
+        "possible_new_patient": False}
+
+
+def test_only_an_explicit_yes_clears_the_patient():
+    """Clearing is destructive, so it needs an affirmative; anything else keeps the data."""
+    assert _is_affirmative("sí") and _is_affirmative("si") and _is_affirmative("s")
+    assert _is_affirmative(True)
+    assert not _is_affirmative("")      # a stray Enter keeps the patient
+    assert not _is_affirmative("no")
+    assert not _is_affirmative(None)
 
 
 # --- route_on_error: a failed step never continues down the pipeline -------

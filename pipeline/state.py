@@ -53,6 +53,9 @@ class RAGState(TypedDict):
     prev_question: str            # SESSION-scoped: the previous turn's question, so refine can
                                   # resolve an elliptical follow-up («¿y en embarazo?»); cleared per patient
     candidate_modifiers: list     # cheap screen (refine): modifiers the question might need
+    turn_facts: dict              # THIS question's own known_facts (before accumulation), so the
+                                  # patient-switch gate can drop the previous patient's on confirm
+    possible_new_patient: bool    # refine flagged this question as likely a DIFFERENT patient
     assessment: dict              # assess reasoning {branches_on, clinically_relevant, already_covered}
     pending_clarifications: list  # dimensions still unknown: unknown-block in the prompt, then
                                   # offered as the optional refinement once the answer is out

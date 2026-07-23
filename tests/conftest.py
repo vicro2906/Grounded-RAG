@@ -74,13 +74,17 @@ def graph_env(monkeypatch):
         retrieval_queries: list[str] = []      # every query retrieval was asked to run
         rerank_calls: list[tuple] = []         # (query, candidates, top_k) per rerank
         refine_prev: list = []                 # prev_question refine was called with, per turn
+        refine_facts: list = []                # patient_facts refine was called with, per turn
+        new_patient = False                    # make refine flag a probable patient switch
 
     env = Env()
 
-    def fake_refine(question, prev_question=None):
+    def fake_refine(question, prev_question=None, patient_facts=None):
         env.refine_prev.append(prev_question)
+        env.refine_facts.append(patient_facts)
         return {"query": f"{question} (reescrita)", "in_domain": "fuera" not in question,
-                "known_facts": {}, "candidate_modifiers": ["coinfeccion_VHB"]}
+                "known_facts": {}, "candidate_modifiers": ["coinfeccion_VHB"],
+                "possible_new_patient": env.new_patient}
 
     def fake_assess(question, context, **kwargs):
         i, env.assess_calls = env.assess_calls, env.assess_calls + 1

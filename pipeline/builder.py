@@ -5,7 +5,9 @@ fallback) are identical for every architecture; only the retrieval section chang
 factor head/tail into `_add_common` and let each mode plug its own retrieval node(s).
 
     START -> rephrase ─┬─ out of domain -> out_of_domain -> END
-                       └─ in domain -> [retrieval] -> assess_context -> re_retrieve -> generate
+                       └─ in domain -> confirm_patient (interrupt only on a likely patient
+                                       switch) -> [retrieval] -> assess_context -> re_retrieve
+                                       -> generate
                                        generate -> validate ─┬─ evidence -> refine_offer
                                                              ├─ refocus_retrieve -> generate ↺
                                                              └─ fallback -> END
@@ -42,6 +44,7 @@ def _add_common(builder: StateGraph) -> None:
     rephrase routing are added by the caller (the only mode-dependent parts)."""
     builder.add_node("rephrase", N.node_rephrase)
     builder.add_node("out_of_domain", N.node_out_of_domain)
+    builder.add_node("confirm_patient", N.node_confirm_patient)
     builder.add_node("assess_context", N.node_assess_context)
     builder.add_node("refine_offer", N.node_refine_offer)
     builder.add_node("re_retrieve", N.node_re_retrieve)
@@ -167,8 +170,9 @@ def build_graph(mode: str = "graph", checkpointer=None):
     _add_common(builder)
     entry = _add_retrieval_expanded(builder, mode)
     entries = entry if isinstance(entry, list) else [entry]
-    builder.add_conditional_edges("rephrase", N.make_route_in_domain(entries),
-                                  entries + ["out_of_domain"])
+    builder.add_conditional_edges("rephrase", N.make_route_in_domain(),
+                                  ["confirm_patient", "out_of_domain"])
+    builder.add_conditional_edges("confirm_patient", N.make_route_to(entries), entries)
     return builder.compile(checkpointer=checkpointer)
 
 
@@ -182,6 +186,10 @@ def build_combined_graph(checkpointer=None):
     for m in VALID_MODES:
         _add_retrieval_collapsed(builder, m)
     targets = {N.retrieval_entry(m): N.retrieval_entry(m) for m in VALID_MODES}
+    # rephrase -> out-of-domain | patient-switch gate -> the chosen retrieval strategy. The gate
+    # passes straight through unless refine flagged a probable different patient.
     builder.add_conditional_edges("rephrase", N.route_domain,
-                                  {**targets, "out_of_domain": "out_of_domain"})
+                                  {"confirm_patient": "confirm_patient",
+                                   "out_of_domain": "out_of_domain"})
+    builder.add_conditional_edges("confirm_patient", N.route_after_confirm, targets)
     return builder.compile(checkpointer=checkpointer)

@@ -47,7 +47,7 @@ def test_refine_failure_lets_the_question_through(monkeypatch):
 
 def test_refine_falls_back_to_the_original_when_the_rewrite_is_empty(monkeypatch):
     monkeypatch.setattr(rag, "_get_refine_llm", lambda: _Canned(rag._Refined(
-        in_domain=True, rewritten_query="   ", known_facts=[], candidate_modifiers=[])))
+        in_domain=True, rewritten_query="   ", known_facts=[], candidate_modifiers=[], possible_new_patient=False)))
 
     assert rag.refine("pregunta original")["query"] == "pregunta original"
 
@@ -56,7 +56,7 @@ def test_refine_passes_the_previous_question_for_follow_up_resolution(monkeypatc
     """A follow-up like «¿y en embarazo?» is only resolvable if refine sees the previous
     question, so it must reach the LLM's human message."""
     llm = _Canned(rag._Refined(in_domain=True, rewritten_query="¿qué TAR en embarazo?",
-                               known_facts=[], candidate_modifiers=[]))
+                               known_facts=[], candidate_modifiers=[], possible_new_patient=False))
     monkeypatch.setattr(rag, "_get_refine_llm", lambda: llm)
 
     rag.refine("¿y en embarazo?", prev_question="¿qué TAR de inicio se recomienda?")
@@ -70,7 +70,7 @@ def test_refine_without_a_previous_question_sends_only_the_question(monkeypatch)
     """The first turn has no prior context: the human message is just the question, not an
     empty "PREGUNTA ANTERIOR" block that would only confuse the model."""
     llm = _Canned(rag._Refined(in_domain=True, rewritten_query="reescrita",
-                               known_facts=[], candidate_modifiers=[]))
+                               known_facts=[], candidate_modifiers=[], possible_new_patient=False))
     monkeypatch.setattr(rag, "_get_refine_llm", lambda: llm)
 
     rag.refine("¿qué es el VIH?")
@@ -79,10 +79,37 @@ def test_refine_without_a_previous_question_sends_only_the_question(monkeypatch)
     assert "PREGUNTA ANTERIOR" not in llm.calls[-1][-1][1]
 
 
+def test_refine_shows_the_accumulated_facts_so_it_can_flag_a_switch(monkeypatch):
+    """The patient-switch flag is only meaningful if refine sees what to contradict, so the
+    accumulated facts must reach the LLM's human message."""
+    llm = _Canned(rag._Refined(in_domain=True, rewritten_query="r", known_facts=[],
+                               candidate_modifiers=[], possible_new_patient=True))
+    monkeypatch.setattr(rag, "_get_refine_llm", lambda: llm)
+
+    out = rag.refine("¿y en un varón?", patient_facts={"embarazo": "sí"})
+
+    assert "embarazo: sí" in llm.calls[-1][-1][1]
+    assert out["possible_new_patient"] is True
+
+
+def test_refine_reports_no_switch_by_default(monkeypatch):
+    llm = _Canned(rag._Refined(in_domain=True, rewritten_query="r", known_facts=[],
+                               candidate_modifiers=[], possible_new_patient=False))
+    monkeypatch.setattr(rag, "_get_refine_llm", lambda: llm)
+    assert rag.refine("pregunta")["possible_new_patient"] is False
+
+
+def test_refine_failure_flags_no_switch(monkeypatch):
+    """A technical hiccup must not invent a patient switch and pause the run."""
+    monkeypatch.setattr(rag, "_get_refine_llm", lambda: _Boom())
+    assert rag.refine("p", patient_facts={"embarazo": "sí"})["possible_new_patient"] is False
+
+
 def test_refine_parses_the_patient_data_it_screened(monkeypatch):
     monkeypatch.setattr(rag, "_get_refine_llm", lambda: _Canned(rag._Refined(
         in_domain=True, rewritten_query="reescrita",
-        known_facts=["embarazo: sí", "CD4: 200"], candidate_modifiers=["funcion_renal"])))
+        known_facts=["embarazo: sí", "CD4: 200"], candidate_modifiers=["funcion_renal"],
+        possible_new_patient=False)))
 
     out = rag.refine("da igual")
     assert out["known_facts"] == {"embarazo": "sí", "CD4": "200"}
