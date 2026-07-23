@@ -60,23 +60,23 @@ def test_a_healthy_step_carries_on():
 # --- folding the doctor's answers into the patient facts --------------------
 def test_single_answer_is_keyed_by_the_question_it_answers():
     folded = _fold_answers({}, ["¿Hay coinfección por VHB?"], "sí")
-    assert folded["clinical_facts"] == {"¿Hay coinfección por VHB?": "sí"}
+    assert folded["patient_facts"] == {"¿Hay coinfección por VHB?": "sí"}
     assert folded["refining"] is True
 
 
 def test_blank_answer_declines_without_losing_the_question():
     """An unanswered question must still count as asked, or assess would offer it again."""
     folded = _fold_answers({}, ["¿Función renal?"], "")
-    assert folded["clinical_facts"] == {}
+    assert folded["patient_facts"] == {}
     assert folded["refining"] is False
     assert folded["asked_questions"] == ["¿Función renal?"]
 
 
 def test_structured_answers_merge_and_drop_the_blank_ones():
-    folded = _fold_answers({"clinical_facts": {"CD4": "200"}},
+    folded = _fold_answers({"patient_facts": {"CD4": "200"}},
                            ["¿VHB?", "¿Función renal?"],
                            {"¿VHB?": "sí", "¿Función renal?": "  "})
-    assert folded["clinical_facts"] == {"CD4": "200", "¿VHB?": "sí"}
+    assert folded["patient_facts"] == {"CD4": "200", "¿VHB?": "sí"}
 
 
 def test_unanswered_dimensions_stay_flagged_as_unknown():
@@ -88,8 +88,8 @@ def test_unanswered_dimensions_stay_flagged_as_unknown():
 
 
 def test_previous_facts_are_preserved():
-    folded = _fold_answers({"clinical_facts": {"embarazo": "sí"}}, ["¿VHB?"], "no")
-    assert folded["clinical_facts"] == {"embarazo": "sí", "¿VHB?": "no"}
+    folded = _fold_answers({"patient_facts": {"embarazo": "sí"}}, ["¿VHB?"], "no")
+    assert folded["patient_facts"] == {"embarazo": "sí", "¿VHB?": "no"}
 
 
 # --- mode resolution: unknown input must not crash a run --------------------
@@ -126,13 +126,13 @@ def test_malformed_facts_are_dropped_not_crashed():
 def test_no_refinement_means_no_second_retrieval():
     """Facts that arrived inside the question were already in the first retrieval query."""
     state = {"question": "¿Pauta?", "search_query": "¿Pauta?",
-             "clinical_facts": {"embarazo": "sí"}, "clarify_rounds": 0}
+             "patient_facts": {"embarazo": "sí"}, "clarify_rounds": 0}
     assert node_re_retrieve(state, None) == {}
 
 
 def test_no_facts_means_no_second_retrieval():
     state = {"question": "¿Pauta?", "search_query": "¿Pauta?",
-             "clinical_facts": {}, "clarify_rounds": 1}
+             "patient_facts": {}, "clarify_rounds": 1}
     assert node_re_retrieve(state, None) == {}
 
 

@@ -42,12 +42,14 @@ class RAGState(TypedDict):
     # its selection (PathRAG's relational paths) as text. It reaches generation as a
     # NON-CITABLE block — reasoning aid only, never a source. "" for the modes without one.
     concept_map: str
-    # --- Clarification (slot-filling): patient data steers generation, never cited ---
-    # These carry NO reducer: they are RESET per question in node_rephrase (Studio threads
-    # persist state across questions, so an accumulating reducer would leak the previous
-    # patient's data / spent round budget into the next question). Within ONE question,
-    # node_clarify merges/increments them by hand — enough, as they are written sequentially.
-    clinical_facts: dict          # patient data {attr: value}: seeded in rephrase, merged in clarify
+    # --- Patient data: steers generation and retrieval, never cited ------------------
+    # SESSION-SCOPED, and the ONE field that deliberately survives across questions: the same
+    # patient spans several questions, so `node_rephrase` ACCUMULATES this turn's facts into it
+    # instead of resetting it. It is cleared only on an explicit "new patient" (the CLI's
+    # /nuevo, or update_state), so the previous patient's renal function can never silently
+    # steer the next patient's answer. No reducer — every writer merges by hand (rephrase folds
+    # in the question's facts, `_fold_answers` the refinement's), enough as they run in order.
+    patient_facts: dict           # accumulated {attr: value}; survives the question, cleared per patient
     candidate_modifiers: list     # cheap screen (refine): modifiers the question might need
     assessment: dict              # assess reasoning {branches_on, clinically_relevant, already_covered}
     pending_clarifications: list  # dimensions still unknown: unknown-block in the prompt, then

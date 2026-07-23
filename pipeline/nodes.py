@@ -73,16 +73,21 @@ def node_rephrase(state: RAGState) -> dict:
     """question -> rewritten/normalized query + domain classification (single LLM call), plus
     the cheap half of the clarification step (seeds clinical_facts / candidate_modifiers).
 
-    Runs on EVERY question, so it is also the RESET point for every per-question field. A
-    thread outlives the question (Studio, and now the CLI, keep one across turns), so anything
-    not reset here leaks into the NEXT question. Two loops depend on this: the clarification
-    one (clarify_rounds / asked_questions / clinical_facts — a spent budget or the previous
-    patient's data) and the validation one (attempts / validation — a carried-over `attempts`
-    silently costs the next question its retry, and a carried-over rejected `validation` makes
-    node_generate open with "your previous answer was REJECTED" on a first attempt)."""
+    Runs on EVERY question, so it is also the RESET point for every PER-QUESTION field. A thread
+    outlives the question (Studio, and the CLI, keep one across turns), so anything reset here
+    starts each question clean: the clarification budget (clarify_rounds / asked_questions), the
+    validation loop (attempts / validation — a carried-over `attempts` costs the next question
+    its retry, a carried-over rejected `validation` opens generate with "your previous answer
+    was REJECTED"), and the error/refocus flags.
+
+    `patient_facts` is the ONE exception: it is SESSION-scoped, so instead of resetting it this
+    node ACCUMULATES the facts screened from this question into it. That is what makes a
+    follow-up ("¿y la monitorización?") keep the VHB coinfection mentioned two questions ago.
+    It is cleared only on an explicit new patient (never here)."""
     r = refine(state["question"])
+    patient_facts = {**(state.get("patient_facts") or {}), **r.get("known_facts", {})}
     return {"search_query": r["query"], "in_domain": r["in_domain"],
-            "clinical_facts": r.get("known_facts", {}),
+            "patient_facts": patient_facts,
             "candidate_modifiers": r.get("candidate_modifiers", []),
             "pending_clarifications": [], "clarify_rounds": 0, "assessment": {},
             "asked_questions": [], "concept_map": "",
@@ -134,15 +139,16 @@ def make_route_in_domain(entries: list):
 # --- Collapsed retrieval nodes (combined graph) ----------------------------
 @guarded(STEP_RETRIEVAL)
 def node_retrieve(state: RAGState) -> dict:
-    """search_query -> ~20 candidates via hybrid search (dense + BM25)."""
-    candidates = retrieve_hybrid(state["search_query"], top_k=20, prefetch_limit=30)
+    """search_query (+ carried-over patient facts) -> ~20 candidates via hybrid (dense + BM25)."""
+    candidates = retrieve_hybrid(_with_facts(state["search_query"], state),
+                                 top_k=20, prefetch_limit=30)
     return {"candidates": candidates, "retrieval_mode": "baseline"}
 
 
 @guarded(STEP_RETRIEVAL)
 def node_rerank(state: RAGState) -> dict:
     """candidates -> top 5 reordered by the cross-encoder + numbered context."""
-    contexts = rerank(state["search_query"], state["candidates"], top_k=5)
+    contexts = rerank(_with_facts(state["search_query"], state), state["candidates"], top_k=5)
     chunk_index, formatted_context = build_context(contexts)
     return {"contexts": contexts, "chunk_index": chunk_index,
             "formatted_context": formatted_context}
@@ -168,8 +174,8 @@ def _make_retrieval_node(mode: str):
     one hand-written node per mode: they differ only in which retriever they call."""
     @guarded(STEP_RETRIEVAL)
     def node(state: RAGState) -> dict:
-        contexts, concept_map = _retrieve_with(mode, state["question"],
-                                               state.get("search_query"))
+        rewritten = _with_facts(state.get("search_query") or state["question"], state)
+        contexts, concept_map = _retrieve_with(mode, state["question"], rewritten)
         chunk_index, formatted_context = build_context(contexts)
         return {"contexts": contexts, "chunk_index": chunk_index,
                 "formatted_context": formatted_context, "concept_map": concept_map,
@@ -196,7 +202,7 @@ def node_assess_context(state: RAGState) -> dict:
     if state.get("clarify_rounds", 0) >= CLARIFY_MAX_ROUNDS:
         return {"pending_clarifications": []}   # budget spent: do not ask again
     a = assess(state["question"], state["formatted_context"],
-               known_facts=state.get("clinical_facts"),
+               known_facts=state.get("patient_facts"),
                candidate_modifiers=state.get("candidate_modifiers"),
                asked_questions=state.get("asked_questions"),
                max_questions=CLARIFY_QUESTIONS_PER_ROUND)
@@ -206,12 +212,12 @@ def node_assess_context(state: RAGState) -> dict:
 
 
 def _fold_answers(state: RAGState, pending: list, answers) -> dict:
-    """Merge the doctor's answers into clinical_facts and close the round.
+    """Merge the doctor's refinement answers into patient_facts and close the round.
 
     Plain text is keyed by the QUESTION it answers (not by a fixed key) so several answers do
     not overwrite each other, and every question asked is recorded even when left blank — a
-    skipped question must not come back. clinical_facts / clarify_rounds carry no reducer (they
-    are reset per question), so the merge is done by hand here."""
+    skipped question must not come back. patient_facts carries no reducer (so it can be cleared
+    per patient), so the merge is done by hand here; clarify_rounds is per-question."""
     if isinstance(answers, dict):
         new_facts = {k: v for k, v in answers.items() if k and str(v).strip()}
     else:
@@ -224,7 +230,7 @@ def _fold_answers(state: RAGState, pending: list, answers) -> dict:
     # skipped instead of silently assuming them. (It will not be offered again — the round
     # budget is spent.) Free text answering several questions at once cannot be attributed to
     # any of them, so they all stay open.
-    return {"clinical_facts": {**(state.get("clinical_facts") or {}), **new_facts},
+    return {"patient_facts": {**(state.get("patient_facts") or {}), **new_facts},
             "clarify_rounds": state.get("clarify_rounds", 0) + 1,
             "pending_clarifications": [q for q in pending if q not in new_facts],
             "asked_questions": list(state.get("asked_questions") or []) + list(pending),
@@ -269,26 +275,36 @@ def _retrieve_for_mode(mode: str, question: str, query: str) -> tuple[list, str]
     return _retrieve_with(mode, question, query)
 
 
-def _facts_phrase(clinical_facts: dict | None) -> str:
+def _facts_phrase(patient_facts: dict | None) -> str:
     """Compact inline rendering of the patient data, to enrich the retrieval query."""
-    facts = {k: v for k, v in (clinical_facts or {}).items() if k}
+    facts = {k: v for k, v in (patient_facts or {}).items() if k}
     return "; ".join(f"{k}: {v}" if v else k for k, v in facts.items())
+
+
+def _with_facts(base: str, state: RAGState) -> str:
+    """Append the accumulated patient facts to a retrieval query.
+
+    This is what carries a datum ACROSS turns: on the second question the facts are no longer in
+    the question text, so without this the VHB coinfection mentioned earlier would steer
+    generation (it is in the prompt) but not retrieval — and generate would be told to use a
+    branch whose chunk was never fetched. Enriching the query keeps the two in step. On the
+    first turn, where the fact is still in the question, it is merely redundant."""
+    facts = _facts_phrase(state.get("patient_facts"))
+    return f"{base}\nContexto del paciente: {facts}" if facts else base
 
 
 @guarded(STEP_RETRIEVAL)
 def node_re_retrieve(state: RAGState, config) -> dict:
-    """Runs ONCE, right before generate, after the clarification loop gathered all the patient
-    data. Re-runs retrieval with those facts folded into the query so the doctor's answers PULL
-    the conditional passages (e.g. the HBV-coinfection or first-trimester branch) for generate
-    to cite. Dispatches on the mode that already ran; no-ops unless clarification ADDED facts —
-    facts that came in the question itself were already in the initial retrieval query."""
-    facts = _facts_phrase(state.get("clinical_facts"))
-    if not facts or not state.get("clarify_rounds"):
+    """After a refinement added patient data MID-TURN, re-run retrieval so the new datum pulls
+    the conditional passages (the HBV-coinfection or first-trimester branch) for generate to
+    cite. No-op unless THIS turn's refinement added something (clarify_rounds > 0): the initial
+    retrieval already enriched with every fact known at the start of the turn, including data
+    carried over from earlier turns, so there is nothing new to fetch otherwise."""
+    if not state.get("clarify_rounds") or not _facts_phrase(state.get("patient_facts")):
         return {}
     mode = state.get("retrieval_mode") or _resolve_mode(config)
-    patient = f"Contexto del paciente: {facts}"
-    enriched = f"{state.get('search_query') or state['question']}\n{patient}"
-    contexts, concept_map = _retrieve_for_mode(mode, f"{state['question']}\n{patient}", enriched)
+    rewritten = _with_facts(state.get("search_query") or state["question"], state)
+    contexts, concept_map = _retrieve_for_mode(mode, state["question"], rewritten)
     chunk_index, formatted_context = build_context(contexts)
     return {"contexts": contexts, "chunk_index": chunk_index,
             "formatted_context": formatted_context, "concept_map": concept_map}
@@ -305,7 +321,7 @@ def node_generate(state: RAGState) -> dict:
     be grounded in the chunks. On a validator rejection, its feedback is injected so the retry
     can correct it."""
     user = build_user_prompt(state["question"], state["formatted_context"],
-                             clinical_facts=state.get("clinical_facts"),
+                             clinical_facts=state.get("patient_facts"),
                              concept_map=state.get("concept_map"),
                              open_questions=state.get("pending_clarifications"))
     val = state.get("validation")
@@ -354,7 +370,7 @@ def node_refocus_retrieve(state: RAGState, config) -> dict:
     previous = state.get("contexts") or []
     found, concept_map = _retrieve_for_mode(
         mode, f"{state['question']}\n{focus}",
-        f"{state.get('search_query') or state['question']}\n{focus}")
+        f"{_with_facts(state.get('search_query') or state['question'], state)}\n{focus}")
     contexts = rerank(state["question"], merge_dedup(found, previous),
                       top_k=len(previous) or 8)
     chunk_index, formatted_context = build_context(contexts)

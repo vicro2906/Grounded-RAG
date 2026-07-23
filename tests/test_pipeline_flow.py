@@ -263,9 +263,11 @@ def test_validation_state_does_not_leak_into_the_next_question(app, graph_env):
     assert "RESPUESTA" in result["output"]
 
 
-def test_clarification_state_does_not_leak_into_the_next_question(app, graph_env):
-    """Same guarantee for the clarification side: a spent round budget must not silently skip
-    the refinement on the following question, nor carry the previous patient's data into it."""
+def test_the_round_budget_resets_but_the_patient_is_remembered(app, graph_env):
+    """The two things must move in OPPOSITE directions across a turn, which is the whole point
+    of splitting session-scoped from per-question state: the clarification BUDGET resets (the
+    second question can offer its own refinement), while the patient DATA carries (the VHB
+    coinfection supplied for the first question still steers the second)."""
     cfg = thread()
     graph_env.assess_questions = [["¿Hay coinfección por VHB?"], []]
     app.invoke({"question": "primera pregunta"}, context=BASELINE, config=cfg)
@@ -273,10 +275,42 @@ def test_clarification_state_does_not_leak_into_the_next_question(app, graph_env
 
     graph_env.assess_calls = 0
     graph_env.assess_questions = [["¿Función renal?"], []]
+    # Budget reset -> the second question is free to raise its own refinement.
     paused = app.invoke({"question": "segunda pregunta"}, context=BASELINE, config=cfg)
     assert paused["__interrupt__"][0].value["questions"] == ["¿Función renal?"]
+    # Patient remembered -> the first question's datum is already in the second answer's prompt.
+    assert "VHB positivo" in graph_env.llm.last_user_prompt
 
     app.invoke(Command(resume="aclaramiento 30 ml/min"), context=BASELINE, config=cfg)
     prompt = graph_env.llm.last_user_prompt
-    assert "aclaramiento 30 ml/min" in prompt
-    assert "VHB positivo" not in prompt, "previous patient's data leaked in"
+    assert "aclaramiento 30 ml/min" in prompt and "VHB positivo" in prompt
+
+
+def test_a_carried_over_fact_steers_the_follow_up_retrieval(app, graph_env):
+    """A remembered datum must reach the NEXT question's retrieval, not only its generation:
+    otherwise generate is told to use the VHB branch whose chunk was never fetched."""
+    cfg = thread()
+    graph_env.assess_questions = [["¿Hay coinfección por VHB?"], []]
+    app.invoke({"question": "primera pregunta"}, context=BASELINE, config=cfg)
+    app.invoke(Command(resume="sí, VHB positivo"), context=BASELINE, config=cfg)
+
+    graph_env.assess_questions = [[]]
+    graph_env.retrieval_queries.clear()
+    app.invoke({"question": "¿y la monitorización?"}, context=BASELINE, config=cfg)
+    assert any("VHB positivo" in q for q in graph_env.retrieval_queries), \
+        "the carried datum must enrich the follow-up's retrieval query"
+
+
+def test_a_new_patient_clears_the_remembered_data(app, graph_env):
+    """update_state({patient_facts: {}}) is what the CLI's /nuevo runs — the carried data must
+    be gone from the next question so a new patient never inherits the previous one's."""
+    cfg = thread()
+    graph_env.assess_questions = [["¿Hay coinfección por VHB?"], []]
+    app.invoke({"question": "primera pregunta"}, context=BASELINE, config=cfg)
+    app.invoke(Command(resume="sí, VHB positivo"), context=BASELINE, config=cfg)
+
+    app.update_state(cfg, {"patient_facts": {}})
+
+    graph_env.assess_questions = [[]]
+    app.invoke({"question": "otro paciente"}, context=BASELINE, config=cfg)
+    assert "VHB positivo" not in graph_env.llm.last_user_prompt

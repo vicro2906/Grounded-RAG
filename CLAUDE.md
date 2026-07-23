@@ -99,20 +99,30 @@ module plus one registry line.
   at a time only made sense while each pause was the price of getting any answer at all.
   Questions left unanswered STAY in `pending_clarifications`, so the refined answer keeps
   presenting their branches (they are simply not offered again — the budget is spent).
-  **`clinical_facts`/`clarify_rounds` carry NO reducer**: they are RESET per question in
-  `node_rephrase` (Studio and the CLI persist thread state; with accumulating reducers the
-  previous patient's data and the spent round budget leaked into the next question). Within ONE
-  question the merge/increment is done by `_fold_answers` by hand (reading the state), enough
-  because they are written sequentially.
+  **Session vs per-question state (multi-turn, 2026-07-23).** `patient_facts` is **SESSION-scoped**:
+  the same patient spans several questions, so `node_rephrase` ACCUMULATES the facts screened
+  from each question into it instead of resetting it, and `_fold_answers` merges the
+  refinement's on top. It is cleared ONLY on an explicit new patient (the CLI's `/nuevo`, which
+  runs `update_state({patient_facts: {}})`), so the previous patient's renal function can never
+  silently steer the next patient's answer. **Everything else is per-question and IS reset in
+  `node_rephrase`** — the clarification budget (`clarify_rounds`/`asked_questions`), the
+  validation loop (`attempts`/`validation`), the error/refocus flags. None carries a reducer;
+  each writer merges by hand (sequential writes). The split is what makes a follow-up remember
+  the patient while the round budget still resets so the next question can raise its own
+  refinement.
 - **re_retrieve** (node in `pipeline/nodes.py`): sits on the path to `generate`, and is a
   **no-op on the first pass** — it only does work when a refinement ADDED facts
   (`clarify_rounds` > 0). Facts that came in the question itself were already in the initial
   retrieval query, so re-retrieving with them would be a redundant full pass (latency fix).
-  When the doctor does supply a datum it **re-retrieves with ALL the `clinical_facts` injected
+  When the doctor does supply a datum it **re-retrieves with ALL the `patient_facts` injected
   into the query** (dispatches on `retrieval_mode` through `_retrieve_for_mode`) and OVERWRITES
   `contexts` → so the datum PULLS the conditional passages (the HBV branch, the
-  first-trimester one…) and `generate` CITES them, not just steers generation. **Total: 1
-  initial retrieve, plus 1 more only if the refinement was taken up.** Tested: with
+  first-trimester one…) and `generate` CITES them, not just steers generation. **Carried-over
+  facts are handled by `_with_facts`, not re_retrieve:** the INITIAL retrieval of every turn
+  already enriches its query with the accumulated `patient_facts`, so a datum from an earlier
+  turn steers this turn's retrieval from the start; re_retrieve is only for facts a refinement
+  adds MID-turn (after the initial retrieval already ran). **Total: 1 initial retrieve, plus 1
+  more only if the refinement was taken up.** Tested: with
   "HBV coinfection" the HBV-specific chunks enter the top-5. The `clinical_facts` ALSO enter
   `generate` as a NON-citable **"DATOS APORTADOS POR EL MÉDICO"** block (they select the
   guide's branch; the literal citations still come from the chunks). **Requires a checkpointer**
@@ -255,7 +265,7 @@ keeping strict grounding + validate.
   embeddings, retrieve/retrieve_hybrid, rerank, refine, validate, assess, generate_answer
   (raw version), SYS_PROMPT, build_user_prompt, model constants.
 - `evidence.py` — answer and sources formatting + citation integrity.
-- **`tests/`** — pytest suite, 114 tests, **no API calls and no network**
+- **`tests/`** — pytest suite, 122 tests, **no API calls and no network**
   (`.venv\Scripts\python.exe -m pytest`, ~8 s; most of that is importing `main` in the CLI
   tests, which warms the reranker). The principle: the LLM is replaced ONLY where the
   randomness enters (refine / assess / validate / generation / retrieval, in `conftest.py`), so
@@ -273,8 +283,9 @@ keeping strict grounding + validate.
   - `test_rag_contracts.py` — the graceful-degradation contracts around each LLM call (refine
     fails → the question still goes through; validate fails → error, never "valid") and the
     non-citable prompt blocks, including their order.
-  - `test_cli.py` — the terminal experience: the answer prints before anything is asked, and
-    declining never reprints it. Drives `main_cli` with a scripted graph and a fake `input`.
+  - `test_cli.py` — the terminal experience: answer-before-offer, declining never reprints, the
+    REPL commands (`/nuevo`/`/paciente`/`/salir`), one thread across questions, EOF ends
+    cleanly. Drives `main_cli` with a scripted graph and a fake `input`.
   - `test_retrieval_common.py` — concept collapsing, the mapping back to citable payloads, and
     the mode catalogue.
   - `test_llm_client.py` — an ARCHITECTURAL guard: it greps the tree and fails if any module
@@ -331,12 +342,15 @@ keeping strict grounding + validate.
 
 ## How to run
 
-- App (interactive CLI): `.venv\Scripts\python.exe main.py`. It compiles its OWN graph instance
-  with an `InMemorySaver` (the platform is not there to inject one). The answer prints as soon
-  as it exists; if there are still-unknown patient data the run then pauses to OFFER a
-  refinement, and `Command(resume=…)` carries the reply — Enter declines and ends the run with
-  the answer already shown (the CLI only reprints when the text actually changed).
-- Tests: `.venv\Scripts\python.exe -m pytest` (114 tests, ~8 s, no API calls). Run them before
+- App (**conversational CLI**): `.venv\Scripts\python.exe main.py`. It compiles its OWN graph
+  instance with an `InMemorySaver` (the platform is not there to inject one) and runs a REPL on
+  ONE thread, so the patient is remembered across questions. The answer prints as soon as it
+  exists; if there are still-unknown patient data the run then pauses to OFFER a refinement, and
+  `Command(resume=…)` carries the reply — Enter declines and ends with the answer already shown
+  (it only reprints when the text changed). Commands: **`/nuevo`** (forget the patient and start
+  fresh — `update_state({patient_facts: {}})`), **`/paciente`** (show the remembered data),
+  `/ayuda`, `/salir`.
+- Tests: `.venv\Scripts\python.exe -m pytest` (122 tests, ~9 s, no API calls). Run them before
   committing. They freeze the MECHANICS, not the medicine — whether an answer is clinically
   right is what `evaluation.py` and a clinician are for.
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → opens Studio (EU). See steps in the
@@ -488,10 +502,14 @@ the plan, not as a bug list to rediscover.
   whether the conditional "branch" answers actually read better to a clinician than the old
   interrogation did. Still open from the original finding: `assess` runs even when `refine`
   returned an empty `candidate_modifiers`, a screen already computed for free.
-- **OPEN D — no multi-turn memory.** The system emits 3 follow-up questions it cannot itself
-  answer in context, and the `clinical_facts` that cost 3 interrupts evaporate on the next
-  question. The fix is SCOPING, not resetting: session-level `patient_facts` (visible and
-  clearable) vs per-question state.
+- **OPEN D — multi-turn memory: patient facts DONE (2026-07-23), contextual rewriting +
+  auto-detect PENDING.** The fix was SCOPING, not resetting: `patient_facts` is now
+  session-scoped (accumulates across questions, feeds both retrieval via `_with_facts` and
+  generation), visible with `/paciente` and cleared with `/nuevo`; the CLI is a REPL on one
+  thread. **Still pending (staged):** (2) rewriting a follow-up against the conversation so
+  «¿y en embarazo?» is understood as a continuation (needs history threaded into `refine`), and
+  (3) auto-detecting a probable patient switch (contradictory facts) and asking to confirm
+  before answering. The 3 follow-up questions the system emits are still not clickable.
 - **OPEN E — the evaluation does not measure the shipped system.** `build_dataset` calls
   retriever + `generate_answer` directly, skipping `refine`, `assess`/`clarify`, `re_retrieve`,
   the `validate` loop and `evidence`. So no number covers the riskiest component: the FALSE

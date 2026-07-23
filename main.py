@@ -57,7 +57,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from pipeline import (build_graph, build_combined_graph, RETRIEVAL_MODE, VALID_MODES,
-                      MSG_REFINE_OFFER)
+                      MSG_REFINE_OFFER, MSG_CLI_INTRO, MSG_CLI_HELP, MSG_NEW_PATIENT,
+                      MSG_NO_PATIENT_DATA, MSG_PATIENT_HEADER)
 
 # Compiled graphs (registered in langgraph.json). The three dedicated ones are the expanded
 # "teaching" views; `app` is the combined graph with the live retrieval_mode dropdown.
@@ -86,31 +87,72 @@ def _collect_clarifications(interrupts) -> dict | str:
     return {q: a for q, a in answers.items() if a}
 
 
-def main_cli():
-    mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in VALID_MODES else RETRIEVAL_MODE
-    # Own instance WITH persistence: the graphs above are for the platform (which injects its
-    # own checkpointer), this one is a plain embedding and must carry its own to resume the
-    # clarification interrupt. Compiled here so importing main.py for Studio never pays for it.
-    app_cli = build_combined_graph(checkpointer=InMemorySaver())
-    # One thread per run: the checkpointer keys the paused state by thread_id, and resuming
-    # the clarification interrupt means invoking again on that same thread.
-    config = {"configurable": {"thread_id": uuid.uuid4().hex},
-              "tags": [f"mode:{mode}"], "metadata": {"retrieval_mode": mode}}  # LangSmith
-    payload = {"question": input("¿Cuál es tu pregunta?: ")}
+def _format_patient_facts(facts: dict | None) -> str:
+    """One line per remembered datum, for /paciente and the always-visible header."""
+    items = {k: v for k, v in (facts or {}).items() if k}
+    if not items:
+        return MSG_NO_PATIENT_DATA
+    lines = "\n".join(f"  · {k}: {v}" if v else f"  · {k}" for k, v in items.items())
+    return f"{MSG_PATIENT_HEADER}\n{lines}"
+
+
+def _answer_question(app_cli, question, mode, config):
+    """Run one question to completion, handling the (optional) refinement pause. The answer is
+    printed as soon as it exists — the pause happens WITH it already on screen — and only when
+    it changed, so declining the offer never reprints the same text."""
+    payload = {"question": question}
     shown = None
     while True:
         result = app_cli.invoke(payload, context={"retrieval_mode": mode}, config=config)
-        # Print as soon as there is something to print — the refinement pause happens WITH the
-        # answer already produced — and only when it changed, so declining the offer does not
-        # reprint the same text.
         output = result.get("output")
         if output and output != shown:
-            print(output)
+            print(f"\n{output}")
             shown = output
         interrupts = result.get("__interrupt__")
         if not interrupts:
-            break
+            return
         payload = Command(resume=_collect_clarifications(interrupts))
+
+
+def main_cli():
+    mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in VALID_MODES else RETRIEVAL_MODE
+    # Own instance WITH persistence: the graphs above are for the platform (which injects its
+    # own checkpointer), this one is a plain embedding and must carry its own — both to resume
+    # the clarification interrupt AND to remember the patient across questions. Compiled here so
+    # importing main.py for Studio never pays for it.
+    app_cli = build_combined_graph(checkpointer=InMemorySaver())
+    # ONE thread for the whole conversation: the checkpointer keys the accumulated patient data
+    # (and any paused run) by thread_id, so every question in this session shares it.
+    config = {"configurable": {"thread_id": uuid.uuid4().hex},
+              "tags": [f"mode:{mode}"], "metadata": {"retrieval_mode": mode}}  # LangSmith
+
+    print(MSG_CLI_INTRO)
+    while True:
+        try:
+            text = input("\n> ").strip()
+        except EOFError:      # piped input exhausted / Ctrl-Z — end cleanly, not with a traceback
+            break
+        if not text:
+            continue
+
+        low = text.lower()
+        if low in ("/salir", "/exit", "/quit", "salir"):
+            break
+        if low in ("/ayuda", "/help"):
+            print(MSG_CLI_HELP)
+            continue
+        if low in ("/paciente", "/datos"):
+            facts = app_cli.get_state(config).values.get("patient_facts")
+            print(_format_patient_facts(facts))
+            continue
+        if low in ("/nuevo", "/reset"):
+            # Clear the session-scoped patient data directly on the thread — a new patient must
+            # not inherit the previous one's facts. Per-question state is already reset each turn.
+            app_cli.update_state(config, {"patient_facts": {}})
+            print(MSG_NEW_PATIENT)
+            continue
+
+        _answer_question(app_cli, text, mode, config)
 
 
 if __name__ == "__main__":

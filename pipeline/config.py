@@ -45,6 +45,23 @@ MSG_REFINE_OFFER = (
     "Puedo concretar más la respuesta para este paciente si me facilitas alguno de estos "
     "datos (pulsa Enter para dejarlo así):"
 )
+
+# --- CLI (conversational REPL) ---
+MSG_CLI_INTRO = (
+    "Asistente sobre las guías de VIH (GeSIDA). Escribe tu consulta y pulsa Enter.\n"
+    "Los datos que menciones se recuerdan durante la conversación para afinar las respuestas.\n"
+    "Comandos:  /nuevo (empezar con otro paciente) · /paciente (ver datos recordados) · "
+    "/salir"
+)
+MSG_CLI_HELP = (
+    "Comandos disponibles:\n"
+    "  /nuevo     — olvida los datos del paciente actual y empieza de cero\n"
+    "  /paciente  — muestra los datos que recuerdo de este paciente\n"
+    "  /salir     — termina la sesión"
+)
+MSG_NEW_PATIENT = "De acuerdo, empiezo de cero. He olvidado los datos del paciente anterior."
+MSG_NO_PATIENT_DATA = "Todavía no he recogido ningún dato del paciente en esta conversación."
+MSG_PATIENT_HEADER = "Datos del paciente recordados en esta conversación:"
 MSG_NOT_VALIDATED = (
     "No he podido elaborar una respuesta suficientemente fundamentada en las guías "
     "para esta consulta. Te sugiero reformular la pregunta o revisar directamente las "
