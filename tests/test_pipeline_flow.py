@@ -286,6 +286,28 @@ def test_the_round_budget_resets_but_the_patient_is_remembered(app, graph_env):
     assert "aclaramiento 30 ml/min" in prompt and "VHB positivo" in prompt
 
 
+def test_each_question_is_rewritten_against_the_previous_one(app, graph_env):
+    """Contextual rewriting: turn 2's refine must receive turn 1's question, so an elliptical
+    follow-up can be resolved. Turn 1 has nothing before it."""
+    cfg = thread()
+    graph_env.assess_questions = [[], []]
+    app.invoke({"question": "¿qué TAR de inicio se recomienda?"}, context=BASELINE, config=cfg)
+    app.invoke({"question": "¿y en embarazo?"}, context=BASELINE, config=cfg)
+
+    assert graph_env.refine_prev == [None, "¿qué TAR de inicio se recomienda?"]
+
+
+def test_a_new_patient_also_resets_the_conversation_context(app, graph_env):
+    """After /nuevo the next question must not resolve against the previous patient's question."""
+    cfg = thread()
+    graph_env.assess_questions = [[], []]
+    app.invoke({"question": "¿qué TAR de inicio se recomienda?"}, context=BASELINE, config=cfg)
+    app.update_state(cfg, {"patient_facts": {}, "prev_question": ""})
+    app.invoke({"question": "¿y en embarazo?"}, context=BASELINE, config=cfg)
+
+    assert graph_env.refine_prev[-1] == ""      # no prior question carried across the reset
+
+
 def test_a_carried_over_fact_steers_the_follow_up_retrieval(app, graph_env):
     """A remembered datum must reach the NEXT question's retrieval, not only its generation:
     otherwise generate is told to use the VHB branch whose chunk was never fetched."""

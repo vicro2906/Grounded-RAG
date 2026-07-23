@@ -80,14 +80,16 @@ def node_rephrase(state: RAGState) -> dict:
     its retry, a carried-over rejected `validation` opens generate with "your previous answer
     was REJECTED"), and the error/refocus flags.
 
-    `patient_facts` is the ONE exception: it is SESSION-scoped, so instead of resetting it this
-    node ACCUMULATES the facts screened from this question into it. That is what makes a
-    follow-up ("¿y la monitorización?") keep the VHB coinfection mentioned two questions ago.
-    It is cleared only on an explicit new patient (never here)."""
-    r = refine(state["question"])
+    `patient_facts` and `prev_question` are the SESSION-scoped exceptions: instead of resetting
+    them this node ACCUMULATES facts into the first (so a follow-up keeps the VHB coinfection
+    mentioned two questions ago) and hands the second — the PREVIOUS turn's question — to
+    `refine`, so «¿y en embarazo?» is rewritten into a standalone query carrying the earlier
+    topic, then records THIS question as the previous one for next turn. Both are cleared only
+    on an explicit new patient (never here)."""
+    r = refine(state["question"], prev_question=state.get("prev_question"))
     patient_facts = {**(state.get("patient_facts") or {}), **r.get("known_facts", {})}
     return {"search_query": r["query"], "in_domain": r["in_domain"],
-            "patient_facts": patient_facts,
+            "patient_facts": patient_facts, "prev_question": state["question"],
             "candidate_modifiers": r.get("candidate_modifiers", []),
             "pending_clarifications": [], "clarify_rounds": 0, "assessment": {},
             "asked_questions": [], "concept_map": "",

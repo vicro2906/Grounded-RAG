@@ -168,7 +168,7 @@ def test_new_patient_clears_the_remembered_data(monkeypatch, capsys):
     app.state = {"patient_facts": {"coinfeccion_VHB": "sí"}}
     _run_with(monkeypatch, app, ["¿pregunta?", "/nuevo", "/salir"])
 
-    assert app.updates == [{"patient_facts": {}}]
+    assert app.updates == [{"patient_facts": {}, "prev_question": ""}]
     assert "empiezo de cero" in capsys.readouterr().out.lower()
 
 

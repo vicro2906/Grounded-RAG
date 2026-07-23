@@ -50,6 +50,8 @@ class RAGState(TypedDict):
     # steer the next patient's answer. No reducer — every writer merges by hand (rephrase folds
     # in the question's facts, `_fold_answers` the refinement's), enough as they run in order.
     patient_facts: dict           # accumulated {attr: value}; survives the question, cleared per patient
+    prev_question: str            # SESSION-scoped: the previous turn's question, so refine can
+                                  # resolve an elliptical follow-up («¿y en embarazo?»); cleared per patient
     candidate_modifiers: list     # cheap screen (refine): modifiers the question might need
     assessment: dict              # assess reasoning {branches_on, clinically_relevant, already_covered}
     pending_clarifications: list  # dimensions still unknown: unknown-block in the prompt, then

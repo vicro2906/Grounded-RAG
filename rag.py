@@ -270,6 +270,8 @@ C) CRIBADO de datos del paciente (cribado barato, NO respondas; solo importa si 
    1. known_facts: extrae los datos clínicos del PACIENTE que YA aparecen explícitos en la pregunta, como pares «atributo: valor». Ejemplos: "embarazo: sí", "semana_gestacion: 12", "aclaramiento_renal: 25 ml/min", "coinfeccion_VHB: sí", "CD4: 200", "carga_viral: indetectable", "pauta_actual: BIC/FTC/TAF". Solo lo dicho explícitamente; NO inventes ni infieras valores.
    2. candidate_modifiers: lista de modificadores clínicos que esta pregunta PODRÍA necesitar para una recomendación precisa y que NO están ya resueltos en known_facts. Elige de esta lista cerrada cuando apliquen: "gestacion", "funcion_renal", "funcion_hepatica", "coinfeccion_VHB", "coinfeccion_VHC", "cd4", "carga_viral", "resistencias", "pauta_actual", "interacciones", "edad_pediatrica", "lactancia". No es una decisión final (eso lo confirma otro componente con la evidencia recuperada); aquí solo señalas candidatos plausibles. Si la pregunta es general/definitoria y no depende de datos del paciente, devuelve lista vacía.
 
+D) SEGUIMIENTO (solo si te doy una PREGUNTA ANTERIOR): la consulta actual puede ser una continuación elíptica de ella («¿y en embarazo?», «¿y si hay insuficiencia renal?», «¿a qué dosis?»). En ese caso, resuelve el referente y reescribe la consulta como una pregunta AUTÓNOMA que combine el TEMA de la pregunta anterior con la variación de la actual (p. ej. anterior «¿qué TAR de inicio se recomienda?» + actual «¿y en embarazo?» -> «¿qué TAR de inicio se recomienda en el embarazo?»). REGLAS: (a) el tema que arrastras debe salir LITERALMENTE de la pregunta anterior, no lo inventes; (b) si la pregunta actual ya es autónoma (cambia de tema, o se entiende por sí sola), IGNORA la anterior y reescríbela tal cual; (c) esto NO relaja B.1: no añadas fármacos, dosis ni cifras que no estén en una de las dos preguntas.
+
 LISTA DE ABREVIATURAS (SIGLA = nombre):
 {_ABBREV_LIST}
 
@@ -308,14 +310,21 @@ def _facts_to_dict(facts: list[str]) -> dict:
     return out
 
 
-def refine(query: str) -> dict:
+def refine(query: str, prev_question: str | None = None) -> dict:
     """Single LLM call that (a) rewrites the query (no new info, normalizing terms), (b)
     classifies the HIV domain, and (c) screens the patient data present in the question and
     the modifiers it might need. Returns {query, in_domain, known_facts, candidate_modifiers}.
-    On LLM failure it does not block: returns the original query, in_domain=True, no facts."""
+
+    `prev_question` (the previous turn's question) lets it resolve an elliptical follow-up —
+    «¿y en embarazo?» becomes a standalone query carrying the earlier topic — so retrieval gets
+    a self-contained question instead of a fragment. The topic it carries must come literally
+    from one of the two questions (no new clinical info). On LLM failure it does not block:
+    returns the original query, in_domain=True, no facts."""
+    human = (f"PREGUNTA ANTERIOR (contexto, por si la actual es un seguimiento):\n{prev_question}"
+             f"\n\nPREGUNTA ACTUAL:\n{query}") if prev_question else query
     try:
         out = cast(_Refined,
-                   _get_refine_llm().invoke([("system", _REPHRASE_SYS), ("human", query)]))
+                   _get_refine_llm().invoke([("system", _REPHRASE_SYS), ("human", human)]))
         return {"query": out.rewritten_query.strip() or query, "in_domain": out.in_domain,
                 "known_facts": _facts_to_dict(out.known_facts),
                 "candidate_modifiers": list(out.candidate_modifiers or [])}
@@ -323,9 +332,9 @@ def refine(query: str) -> dict:
         return {"query": query, "in_domain": True, "known_facts": {}, "candidate_modifiers": []}
 
 
-def rephrase(query: str) -> str:
+def rephrase(query: str, prev_question: str | None = None) -> str:
     """Rewritten query only (the piece of refine() the retrievers need)."""
-    return refine(query)["query"]
+    return refine(query, prev_question)["query"]
 
 
 def build_context(context: list):

@@ -146,9 +146,10 @@ def main_cli():
             print(_format_patient_facts(facts))
             continue
         if low in ("/nuevo", "/reset"):
-            # Clear the session-scoped patient data directly on the thread — a new patient must
-            # not inherit the previous one's facts. Per-question state is already reset each turn.
-            app_cli.update_state(config, {"patient_facts": {}})
+            # Clear the session-scoped state directly on the thread — a new patient inherits
+            # neither the previous one's facts NOR its conversation (so a follow-up does not
+            # resolve against the old patient's question). Per-question state resets each turn.
+            app_cli.update_state(config, {"patient_facts": {}, "prev_question": ""})
             print(MSG_NEW_PATIENT)
             continue
 

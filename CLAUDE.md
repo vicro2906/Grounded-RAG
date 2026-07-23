@@ -57,11 +57,15 @@ module plus one registry line.
 
 - **rephrase** (`rag.refine`, gpt-4o-mini): a single call that (a) classifies whether the
   question belongs to the HIV domain (`in_domain`); (b) rewrites the query WITHOUT adding
-  info, normalizing terms in BOTH forms «full name (ABBR)» with `abbreviations.py`; and (c)
-  **screens** the patient data already present (`known_facts`→`clinical_facts`) and the
+  info, normalizing terms in BOTH forms «full name (ABBR)» with `abbreviations.py`; (c)
+  **screens** the patient data already present (`known_facts`→`patient_facts`) and the
   clinical modifiers the question might need (`candidate_modifiers`) — the cheap half of the
-  clarification step. If out of domain → `out_of_domain` (direct message, short-circuits the
-  pipeline). Generation uses the ORIGINAL question, not the rewritten one.
+  clarification step; and (d) **resolves an elliptical follow-up** against the PREVIOUS
+  question (`prev_question`, session-scoped): «¿y en embarazo?» is rewritten into a standalone
+  query carrying the earlier topic (which must come literally from one of the two questions —
+  no new clinical info), so retrieval gets a self-contained question. If out of domain →
+  `out_of_domain` (direct message, short-circuits the pipeline). Generation uses the ORIGINAL
+  question, not the rewritten one.
 - **assess_context + clarify** (`rag.assess`, **gpt-4o** `ASSESS_MODEL`; nodes in `pipeline/nodes.py`):
   **interactive clarification gate** (Phase 5, slot-filling) between retrieval and `generate`.
   It reasons over structured fields (order = CoT) via TWO paths, with **CLINICAL KNOWLEDGE as
@@ -265,7 +269,7 @@ keeping strict grounding + validate.
   embeddings, retrieve/retrieve_hybrid, rerank, refine, validate, assess, generate_answer
   (raw version), SYS_PROMPT, build_user_prompt, model constants.
 - `evidence.py` — answer and sources formatting + citation integrity.
-- **`tests/`** — pytest suite, 122 tests, **no API calls and no network**
+- **`tests/`** — pytest suite, 126 tests, **no API calls and no network**
   (`.venv\Scripts\python.exe -m pytest`, ~8 s; most of that is importing `main` in the CLI
   tests, which warms the reranker). The principle: the LLM is replaced ONLY where the
   randomness enters (refine / assess / validate / generation / retrieval, in `conftest.py`), so
@@ -350,7 +354,7 @@ keeping strict grounding + validate.
   (it only reprints when the text changed). Commands: **`/nuevo`** (forget the patient and start
   fresh — `update_state({patient_facts: {}})`), **`/paciente`** (show the remembered data),
   `/ayuda`, `/salir`.
-- Tests: `.venv\Scripts\python.exe -m pytest` (122 tests, ~9 s, no API calls). Run them before
+- Tests: `.venv\Scripts\python.exe -m pytest` (126 tests, ~9 s, no API calls). Run them before
   committing. They freeze the MECHANICS, not the medicine — whether an answer is clinically
   right is what `evaluation.py` and a clinician are for.
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → opens Studio (EU). See steps in the
@@ -502,14 +506,16 @@ the plan, not as a bug list to rediscover.
   whether the conditional "branch" answers actually read better to a clinician than the old
   interrogation did. Still open from the original finding: `assess` runs even when `refine`
   returned an empty `candidate_modifiers`, a screen already computed for free.
-- **OPEN D — multi-turn memory: patient facts DONE (2026-07-23), contextual rewriting +
-  auto-detect PENDING.** The fix was SCOPING, not resetting: `patient_facts` is now
+- **OPEN D — multi-turn memory: patient facts + contextual rewriting DONE (2026-07-23),
+  auto-detect PENDING.** The fix was SCOPING, not resetting. (1) `patient_facts` is
   session-scoped (accumulates across questions, feeds both retrieval via `_with_facts` and
   generation), visible with `/paciente` and cleared with `/nuevo`; the CLI is a REPL on one
-  thread. **Still pending (staged):** (2) rewriting a follow-up against the conversation so
-  «¿y en embarazo?» is understood as a continuation (needs history threaded into `refine`), and
-  (3) auto-detecting a probable patient switch (contradictory facts) and asking to confirm
-  before answering. The 3 follow-up questions the system emits are still not clickable.
+  thread. (2) `refine` now resolves an elliptical follow-up against `prev_question` (the
+  previous turn's question, session-scoped, cleared by `/nuevo`), so «¿y en embarazo?» retrieves
+  as a standalone query — decided as "previous question only" (the cheap 90%, not an N-window).
+  **Still pending:** (3) auto-detecting a probable patient switch (contradictory facts) and
+  asking to confirm before answering. The 3 follow-up questions the system emits are still not
+  clickable.
 - **OPEN E — the evaluation does not measure the shipped system.** `build_dataset` calls
   retriever + `generate_answer` directly, skipping `refine`, `assess`/`clarify`, `re_retrieve`,
   the `validate` loop and `evidence`. So no number covers the riskiest component: the FALSE
