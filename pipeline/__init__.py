@@ -8,11 +8,25 @@ Assembled from the shared retrieval/generation primitives in `rag.py`:
   - builder   — head/tail assembly + build_graph (dedicated) / build_combined_graph.
 """
 from .builder import build_graph, build_combined_graph
+from .nodes import refinement_reply
 from .config import (RETRIEVAL_MODE, VALID_MODES, MSG_REFINE_OFFER, MSG_CLI_INTRO, MSG_CLI_HELP,
                      MSG_NEW_PATIENT, MSG_NO_PATIENT_DATA, MSG_PATIENT_HEADER,
-                     MSG_CONFIRM_NEW_PATIENT, MSG_CONFIRM_NEW_PATIENT_ASK)
+                     MSG_CONFIRM_NEW_PATIENT, MSG_CONFIRM_NEW_PATIENT_ASK,
+                     MSG_STEP_INITIAL, MSG_STEP_RESUMED, MSG_STEP_LABELS, MSG_STEP_SOURCES,
+                     MSG_STEP_SOURCES_MORE, STEP_SOURCES_SHOWN, MSG_CANCELLED, MSG_EXIT_HINT,
+                     MSG_WEB_INTRO, MSG_WEB_NEW_PATIENT, MSG_WEB_SHOW_PATIENT,
+                     MSG_WEB_REFINE_YES, MSG_WEB_REFINE_NO, MSG_WEB_REFINE_ASK,
+                     MSG_WEB_CONFIRM_YES, MSG_WEB_CONFIRM_NO, MSG_WEB_SOURCES_STEP,
+                     MSG_WEB_REFINE_OFFER)
 
-__all__ = ["build_graph", "build_combined_graph", "RETRIEVAL_MODE", "VALID_MODES",
+__all__ = ["build_graph", "build_combined_graph", "refinement_reply",
+           "RETRIEVAL_MODE", "VALID_MODES",
            "MSG_REFINE_OFFER", "MSG_CLI_INTRO", "MSG_CLI_HELP", "MSG_NEW_PATIENT",
            "MSG_NO_PATIENT_DATA", "MSG_PATIENT_HEADER", "MSG_CONFIRM_NEW_PATIENT",
-           "MSG_CONFIRM_NEW_PATIENT_ASK"]
+           "MSG_CONFIRM_NEW_PATIENT_ASK", "MSG_STEP_INITIAL", "MSG_STEP_RESUMED",
+           "MSG_STEP_LABELS", "MSG_STEP_SOURCES", "MSG_STEP_SOURCES_MORE",
+           "STEP_SOURCES_SHOWN", "MSG_CANCELLED", "MSG_EXIT_HINT",
+           "MSG_WEB_INTRO", "MSG_WEB_NEW_PATIENT", "MSG_WEB_SHOW_PATIENT",
+           "MSG_WEB_REFINE_YES", "MSG_WEB_REFINE_NO", "MSG_WEB_REFINE_ASK",
+           "MSG_WEB_CONFIRM_YES", "MSG_WEB_CONFIRM_NO", "MSG_WEB_SOURCES_STEP",
+           "MSG_WEB_REFINE_OFFER"]

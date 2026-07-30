@@ -5,7 +5,8 @@ certified as literal, what gets silently rewritten, and which evidence grades ri
 """
 import pytest
 
-from evidence import attribute, format_answer, section_label, split_items
+from evidence import (INSUFFICIENT_TEXT, LBL_CONSULTED, attribute, format_answer,
+                      format_answer_markdown, resolve_answer, section_label, split_items)
 
 ANSWER_QUOTE = "iniciar precozmente un TAR que incluya TDF o TAF y FTC o 3TC"
 
@@ -127,6 +128,104 @@ def test_insufficient_information_shows_no_sources_or_followups():
     out = format_answer(answer, {1: CHUNK})
     assert "INFORMACIÓN INSUFICIENTE" in out
     assert "FUENTES" not in out
+
+
+# --- the answer as data ----------------------------------------------------
+# `resolve_answer` is what a non-terminal frontend consumes: the same integrity verdicts, but
+# as structure it can turn into collapsible sources and clickable follow-ups. The panel tests
+# above are the regression guard for the rendering; these pin the DATA.
+def test_the_view_carries_the_certified_quote_with_its_grade():
+    answer = {"sufficient_information": True, "answer": "Texto.",
+              "sources_used": [{"ref": 1, "quote": ANSWER_QUOTE}],
+              "follow_up_questions": ["¿Y si hay cirrosis?"]}
+    view = resolve_answer(answer, {1: CHUNK})
+
+    assert view.sufficient and view.follow_ups == ["¿Y si hay cirrosis?"]
+    [source] = view.sources
+    assert source.year == 2022 and source.section.startswith("§7.4.4")
+    [cite] = source.citations
+    assert cite.status == "exact" and cite.grades == ["A-I"]
+
+
+def test_a_rejected_quote_leaves_the_section_consulted_and_nothing_else():
+    """The data must not leak what the rendering refuses to show: a frontend reading the view
+    directly has to reach the same verdict, or the integrity check only guards the terminal."""
+    answer = {"sufficient_information": True, "answer": "Se inicia TAR con ABC.",
+              "sources_used": [{"ref": 1, "quote": "un TAR que incluya ABC"}],
+              "follow_up_questions": []}
+    [source] = resolve_answer(answer, {1: CHUNK}).sources
+
+    assert source.consulted_only and source.citations == []
+
+
+def test_the_view_groups_by_section_like_the_panel_does():
+    answer = {"sufficient_information": True, "answer": "Texto.",
+              "sources_used": [{"ref": 1, "quote": ANSWER_QUOTE},
+                               {"ref": 2, "quote": "No debe suspenderse el tratamiento frente "
+                                                   "al VHB sin vigilancia estrecha"}],
+              "follow_up_questions": []}
+    view = resolve_answer(answer, {1: CHUNK, 2: CHUNK})
+
+    assert len(view.sources) == 1 and len(view.sources[0].citations) == 2
+
+
+def test_an_insufficient_answer_has_no_sources_and_no_followups():
+    """Follow-up questions must always relate to an answer; with none there are none to offer,
+    whatever the model returned."""
+    answer = {"sufficient_information": False, "answer": "No disponible.",
+              "sources_used": [{"ref": 1, "quote": ANSWER_QUOTE}],
+              "follow_up_questions": ["¿algo?"]}
+    view = resolve_answer(answer, {1: CHUNK})
+
+    assert not view.sufficient and view.sources == [] and view.follow_ups == []
+
+
+def test_a_missing_answer_falls_back_to_the_standard_wording():
+    view = resolve_answer({"sufficient_information": False}, {})
+    assert view.text == INSUFFICIENT_TEXT
+
+
+def test_blank_follow_ups_are_dropped():
+    answer = {"sufficient_information": True, "answer": "Texto.", "sources_used": [],
+              "follow_up_questions": ["  ", "¿Y en embarazo?", None]}
+    assert resolve_answer(answer, {}).follow_ups == ["¿Y en embarazo?"]
+
+
+# --- the markdown rendering (web) ------------------------------------------
+# A second rendering of the same view. What matters is that it cannot tell the doctor anything
+# different from the terminal — same citations, same refusals, same disclaimer.
+def test_markdown_shows_the_certified_quote_and_its_grade():
+    answer = {"sufficient_information": True, "answer": "Se inicia TAR.",
+              "sources_used": [{"ref": 1, "quote": ANSWER_QUOTE}], "follow_up_questions": []}
+    out = format_answer_markdown(resolve_answer(answer, {1: CHUNK}))
+
+    assert "Se inicia TAR." in out and ANSWER_QUOTE in out
+    assert "A-I" in out and "§7.4.4" in out
+
+
+def test_markdown_refuses_a_rejected_quote_exactly_like_the_panel():
+    """The web must not display a guideline sentence the terminal would have suppressed."""
+    answer = {"sufficient_information": True, "answer": "Se inicia TAR con ABC.",
+              "sources_used": [{"ref": 1, "quote": "un TAR que incluya ABC"}],
+              "follow_up_questions": []}
+    out = format_answer_markdown(resolve_answer(answer, {1: CHUNK}))
+
+    assert "TDF o TAF" not in out
+    assert LBL_CONSULTED in out
+
+
+def test_markdown_leaves_the_follow_ups_out():
+    """They become buttons in the web; printed as text too they would be dead duplicates."""
+    answer = {"sufficient_information": True, "answer": "Texto.", "sources_used": [],
+              "follow_up_questions": ["¿Y en embarazo?"]}
+    assert "¿Y en embarazo?" not in format_answer_markdown(resolve_answer(answer, {}))
+
+
+def test_the_disclaimer_rides_with_every_markdown_answer():
+    for sufficient in (True, False):
+        answer = {"sufficient_information": sufficient, "answer": "Texto.",
+                  "sources_used": [], "follow_up_questions": []}
+        assert "no sustituye" in format_answer_markdown(resolve_answer(answer, {}))
 
 
 # --- helpers ---------------------------------------------------------------

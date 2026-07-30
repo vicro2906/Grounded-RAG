@@ -3,6 +3,7 @@
 These cover the two loops that carry state (clarification and validation) and the routing
 between them — the parts where a regression is silent rather than loud.
 """
+import asyncio
 import uuid
 
 import pytest
@@ -10,9 +11,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from conftest import CHUNK
-from pipeline import build_combined_graph
-from pipeline.config import (MSG_NOT_VALIDATED, MSG_OUT_OF_DOMAIN, MSG_VALIDATION_ERROR,
-                             STEP_FORMATTING, STEP_GENERATION, STEP_RETRIEVAL)
+from pipeline import build_combined_graph, refinement_reply
+from pipeline.config import (MSG_NOT_VALIDATED, MSG_OUT_OF_DOMAIN, MSG_STEP_LABELS,
+                             MSG_VALIDATION_ERROR, STEP_FORMATTING, STEP_GENERATION,
+                             STEP_RETRIEVAL)
 
 
 BASELINE = {"retrieval_mode": "baseline"}
@@ -321,6 +323,178 @@ def test_a_carried_over_fact_steers_the_follow_up_retrieval(app, graph_env):
     app.invoke({"question": "¿y la monitorización?"}, context=BASELINE, config=cfg)
     assert any("VHB positivo" in q for q in graph_env.retrieval_queries), \
         "the carried datum must enrich the follow-up's retrieval query"
+
+
+# --- declining an offer of SEVERAL questions -------------------------------
+# The default offer carries three questions (CLARIFY_QUESTIONS_PER_ROUND), and Enter on all of
+# them is the documented way out. It did not work: the CLI encoded "nothing answered" as {},
+# LangGraph does not accept an empty dict as a resume value, and the interrupt fired again with
+# the budget never spent — the same three questions, forever. Only the real graph shows this;
+# the fake one in test_cli.py resumes on anything.
+def test_leaving_every_question_blank_ends_the_run(app, graph_env):
+    graph_env.assess_questions = [["¿Serología?", "¿Carga viral?", "¿CD4?"]]
+    cfg = thread()
+    app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=cfg)
+
+    reply = refinement_reply(["¿Serología?", "¿Carga viral?", "¿CD4?"],
+                             {"¿Serología?": "", "¿Carga viral?": "", "¿CD4?": ""})
+    done = app.invoke(Command(resume=reply), context=BASELINE, config=cfg)
+
+    assert "__interrupt__" not in done, "declining must end the run, not re-ask"
+    assert "RESPUESTA" in done["output"]
+
+
+def test_an_empty_dict_is_never_what_a_decline_looks_like(app, graph_env):
+    """Pinning the trap itself rather than only its symptom: if some frontend ever sends {},
+    the run silently loops. `refinement_reply` is the one place that must not produce it."""
+    assert refinement_reply(["¿A?", "¿B?"], {"¿A?": "", "¿B?": "   "}) == ""
+    assert refinement_reply(["¿A?", "¿B?"], {}) == ""
+    assert refinement_reply(["¿A?"], {"¿A?": ""}) == ""
+
+
+def test_answering_only_some_questions_still_refines(app, graph_env):
+    graph_env.assess_questions = [["¿Serología?", "¿Carga viral?", "¿CD4?"], []]
+    cfg = thread()
+    app.invoke({"question": "¿Qué pauta inicio?"}, context=BASELINE, config=cfg)
+
+    reply = refinement_reply(["¿Serología?", "¿Carga viral?", "¿CD4?"],
+                             {"¿Serología?": "", "¿Carga viral?": "indetectable", "¿CD4?": ""})
+    done = app.invoke(Command(resume=reply), context=BASELINE, config=cfg)
+
+    assert "__interrupt__" not in done
+    assert "indetectable" in graph_env.llm.last_user_prompt
+    # The two left blank stay pending, so the refined answer keeps laying out their branches.
+    assert app.get_state(cfg).values["pending_clarifications"] == ["¿Serología?", "¿CD4?"]
+
+
+# --- the stream contract the CLI depends on --------------------------------
+# The CLI reads the run as a stream so the doctor sees the work instead of ~20 s of silence.
+# Everything above drives the graph with `invoke`, and tests/test_cli.py drives a FAKE graph —
+# so without these, the contract between the two is asserted by nobody.
+def _stream(app, payload, cfg):
+    return list(app.stream(payload, context=BASELINE, config=cfg,
+                           stream_mode=["updates", "custom"]))
+
+
+def _outputs(chunks):
+    """(node, output) for every update that put text on screen, in arrival order."""
+    return [(node, (update or {}).get("output"))
+            for channel, chunk in chunks if channel == "updates"
+            for node, update in chunk.items()
+            if node != "__interrupt__" and (update or {}).get("output")]
+
+
+def test_the_answer_arrives_as_the_update_of_the_node_that_wrote_it(app, graph_env):
+    """The CLI prints the last non-empty `output` of the stream instead of reading a final
+    state. That is only equivalent because exactly ONE node writes a visible output per run."""
+    chunks = _stream(app, {"question": "¿Qué TAR en coinfección por VHB?"}, thread())
+    written = _outputs(chunks)
+
+    assert [node for node, _ in written] == ["evidence"]
+    assert "RESPUESTA" in written[0][1]
+
+
+def test_the_pause_arrives_as_its_own_chunk(app, graph_env):
+    """`__interrupt__` is a key in an updates chunk, not a returned value — if it stopped
+    arriving that way the refinement would never be offered, silently."""
+    graph_env.assess_questions = [["¿Hay coinfección por VHB?"]]
+    chunks = _stream(app, {"question": "¿Qué pauta inicio?"}, thread())
+
+    pauses = [update for channel, chunk in chunks if channel == "updates"
+              for node, update in chunk.items() if node == "__interrupt__"]
+    assert pauses and pauses[0][0].value["questions"] == ["¿Hay coinfección por VHB?"]
+
+
+def test_a_paused_run_resumes_through_the_stream(app, graph_env):
+    graph_env.assess_questions = [["¿Hay coinfección por VHB?"], []]
+    cfg = thread()
+    _stream(app, {"question": "¿Qué pauta inicio?"}, cfg)
+    resumed = _stream(app, Command(resume="sí, VHB positivo"), cfg)
+
+    assert [node for node, _ in _outputs(resumed)] == ["evidence"]
+    assert "VHB positivo" in graph_env.llm.last_user_prompt
+
+
+def test_a_no_op_node_streams_an_empty_update(app, graph_env):
+    """re_retrieve does nothing on the first pass. The CLI must survive reading `output` off
+    whatever it yields — an AttributeError here would swallow the whole answer."""
+    chunks = _stream(app, {"question": "¿Qué TAR en coinfección por VHB?"}, thread())
+    updates = {node: update for channel, chunk in chunks if channel == "updates"
+               for node, update in chunk.items()}
+
+    assert "re_retrieve" in updates and not updates["re_retrieve"]
+
+
+def test_the_sections_read_reach_the_stream_before_the_answer(app, graph_env):
+    """The one piece of progress worth keeping on screen. It has to arrive EARLY — its whole
+    point is filling the wait — and it has to be real: these are the sections the answer is
+    being written from, which is why showing them can never have to be taken back."""
+    chunks = _stream(app, {"question": "¿Qué TAR en coinfección por VHB?"}, thread())
+    kinds = [chunk.get("kind") for channel, chunk in chunks if channel == "custom"]
+    sources = [chunk for channel, chunk in chunks
+               if channel == "custom" and chunk.get("kind") == "sources"]
+
+    assert sources and any("7.4.4" in item for item in sources[0]["items"])
+    assert kinds.index("sources") == 0
+    answered = [i for i, (channel, chunk) in enumerate(chunks)
+                if channel == "updates" and (chunk.get("evidence") or {}).get("output")]
+    seen_at = [i for i, (channel, chunk) in enumerate(chunks)
+               if channel == "custom" and chunk.get("kind") == "sources"]
+    assert seen_at[0] < answered[0]
+
+
+def test_the_same_contract_holds_through_the_async_api(app, graph_env):
+    """The web frontend consumes `astream`, so the sync nodes run in LangGraph's executor and the
+    event loop stays free to paint. Nothing else exercises that path, and the failure would not
+    be subtle: no answer at all, or a pause that can never be resumed."""
+    cfg = thread()
+    graph_env.assess_questions = [["¿Hay coinfección por VHB?"], []]
+
+    async def collect(payload):
+        out = []
+        async for chunk in app.astream(payload, context=BASELINE, config=cfg,
+                                       stream_mode=["updates", "custom"]):
+            out.append(chunk)
+        return out
+
+    paused = asyncio.run(collect({"question": "¿Qué pauta inicio?"}))
+    assert [node for node, _ in _outputs(paused)] == ["evidence"]
+    assert any(channel == "updates" and "__interrupt__" in chunk for channel, chunk in paused)
+    assert any(channel == "custom" and chunk.get("kind") == "sources"
+               for channel, chunk in paused)
+
+    resumed = asyncio.run(collect(Command(resume="sí, VHB positivo")))
+    assert [node for node, _ in _outputs(resumed)] == ["evidence"]
+    assert "VHB positivo" in graph_env.llm.last_user_prompt
+
+
+def test_the_answer_and_its_chunks_arrive_before_the_text(app, graph_env):
+    """The web renders sources from `answer` + `chunk_index` collected FROM THE STREAM rather
+    than asking the checkpointer mid-run. That only works if both are already in hand when
+    `evidence` emits its text."""
+    chunks = _stream(app, {"question": "¿Qué TAR en coinfección por VHB?"}, thread())
+    seen = {}
+    for channel, chunk in chunks:
+        if channel != "updates":
+            continue
+        for node, update in chunk.items():
+            if node == "__interrupt__" or not update:
+                continue
+            for key in ("answer", "chunk_index"):
+                if update.get(key) and key not in seen:
+                    seen[key] = node
+            if update.get("output"):
+                assert set(seen) == {"answer", "chunk_index"}, f"missing {seen} at {node}"
+                return
+    raise AssertionError("no visible output in the stream")
+
+
+def test_every_progress_label_names_a_real_node(app):
+    """MSG_STEP_LABELS is keyed by node name. A renamed node would not fail anything — the
+    progress line would just go quiet for that step, which is invisible in a passing suite."""
+    nodes = set(app.get_graph().nodes)
+    unknown = sorted(set(MSG_STEP_LABELS) - nodes)
+    assert not unknown, f"labels for nodes that do not exist: {unknown}"
 
 
 # --- the blocking patient-switch gate --------------------------------------

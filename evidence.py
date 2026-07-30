@@ -1,9 +1,21 @@
 """
-evidence.py — answer formatting + SOURCES panel for the HIV RAG.
+evidence.py — answer resolution (citation integrity) + SOURCES panel for the HIV RAG.
+
+Two responsibilities, deliberately split:
+
+  1. `resolve_answer` turns the model's raw answer plus the numbered chunks into an `AnswerView`
+     — the answer AS DATA. Every integrity decision lives here (`attribute`), so no frontend can
+     bypass it or reach a different verdict about what may be shown as a citation.
+  2. `format_answer` RENDERS that view as the 72-column terminal panels.
+
+The split exists because the module claimed to emit data and did not: it returned one string of
+boxes and fixed-width wrapping, which a web view cannot turn back into collapsible sources or
+clickable follow-ups. The terminal output is unchanged, byte for byte.
 """
 import re
 import textwrap
 import difflib
+from dataclasses import dataclass
 
 from abbreviations import ABBREVIATIONS
 
@@ -26,6 +38,15 @@ FUZZY_THRESHOLD = 0.72
 # API), not just the terminal — so no ANSI codes are embedded. Color is a print-time concern.
 class C:
     RESET = BOLD = DIM = BLUE = GREEN = GRAY = YELLOW = ""
+
+# Panel labels, in Spanish because the doctor reads them. Shared by every rendering of an
+# AnswerView so the terminal and the web cannot drift into calling the same thing two names.
+LBL_ANSWER       = "RESPUESTA"
+LBL_INSUFFICIENT = "INFORMACIÓN INSUFICIENTE"
+LBL_SOURCES      = "FUENTES"
+LBL_FOLLOW_UPS   = "PREGUNTAS DE SEGUIMIENTO"
+LBL_PER_GUIDE    = "(según la guía)"
+LBL_CONSULTED    = "(sección consultada · sin cita literal localizable)"
 
 # ───────────────────────────────────────────────────────── normalization
 _EMPH = re.compile(r"[_*`]+")
@@ -231,16 +252,21 @@ def section_label(chunk: dict) -> str:
     return f"{chain} › {leaf}" if chain else leaf
 
 # ─────────────────────────────────────────── follow-up questions
-def _followup_lines(answer) -> list:
-    """'PREGUNTAS DE SEGUIMIENTO' block from answer['follow_up_questions']. Returns []
-    if there are no questions, so the empty panel is not drawn."""
-    qs = answer.get("follow_up_questions") or []
-    qs = [q.strip() for q in qs if isinstance(q, str) and q.strip()]
+def _followups(answer) -> list:
+    """The follow-up questions, cleaned. A frontend that can make them CLICKABLE needs the list
+    itself, not a rendered block — which is why this is separate from the panel below."""
+    return [q.strip() for q in (answer.get("follow_up_questions") or [])
+            if isinstance(q, str) and q.strip()]
+
+
+def _followup_lines(qs: list) -> list:
+    """'PREGUNTAS DE SEGUIMIENTO' block. Returns [] if there are no questions, so the empty
+    panel is not drawn."""
     if not qs:
         return []
     out = [
         f"{C.GRAY}{'─'*WIDTH}{C.RESET}",
-        f"{C.BOLD}  PREGUNTAS DE SEGUIMIENTO{C.RESET} {C.DIM}({len(qs)}){C.RESET}",
+        f"{C.BOLD}  {LBL_FOLLOW_UPS}{C.RESET} {C.DIM}({len(qs)}){C.RESET}",
         f"{C.GRAY}{'─'*WIDTH}{C.RESET}\n",
     ]
     for i, q in enumerate(qs, 1):
@@ -263,78 +289,166 @@ def _disclaimer() -> str:
     return f"\n{C.GRAY}{'─'*WIDTH}{C.RESET}\n{C.DIM}{wrapped}{C.RESET}\n"
 
 
-# ─────────────────────────────────────────── final formatting
-def format_answer(answer, index):
+# ─────────────────────────────────────────── the answer as DATA
+INSUFFICIENT_TEXT = "La información no está disponible en las guías proporcionadas."
+
+
+@dataclass(frozen=True)
+class Citation:
+    """One quote that survived the integrity check. `sentence` is the model's own words when
+    `status` is 'exact' and the GUIDELINE's sentence when it is 'fuzzy' — which is why the
+    renderer marks the two differently."""
+    status: str          # "exact" | "fuzzy"
+    sentence: str
+    grades: list
+
+
+@dataclass(frozen=True)
+class Source:
+    """One guideline section behind the answer, with whatever could be certified from it."""
+    title: str
+    year: object
+    organization: str
+    section: str
+    citations: list
+    consulted_only: bool   # used, but nothing literal could be located in it
+
+
+@dataclass(frozen=True)
+class AnswerView:
+    """The answer as data: what a frontend needs, and nothing about how to paint it."""
+    sufficient: bool
+    text: str
+    sources: list
+    follow_ups: list
+
+
+def resolve_answer(answer, index) -> AnswerView:
+    """Model answer + numbered chunks -> AnswerView, applying the citation integrity rules.
+
+    Sources are grouped by SECTION identity (document + section number/heading), because several
+    chunks of one section supporting the same claim are one source to a reader, not three. A
+    quote that `attribute` rejects does not disappear: its section still shows as consulted,
+    marked as having no locatable literal citation — saying less is the safe failure here."""
     if not answer.get("sufficient_information", False):
-        # With no answer there are no follow-up questions: they must always relate to
-        # a given answer.
-        return (
-            f"\n{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n"
-            f"{C.BOLD}{C.BLUE}  INFORMACIÓN INSUFICIENTE{C.RESET}\n"
-            f"{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n\n"
-            f"  {answer.get('answer','La información no está disponible en las guías proporcionadas.')}\n"
-        )
+        # With no answer there are no follow-up questions: they must always relate to a
+        # given answer.
+        return AnswerView(False, answer.get("answer", INSUFFICIENT_TEXT), [], [])
 
-    lines = []
-    lines.append(f"\n{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}")
-    lines.append(f"{C.BOLD}{C.BLUE}  RESPUESTA{C.RESET}")
-    lines.append(f"{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n")
-    for para in answer["answer"].split("\n"):
-        if para.strip():
-            lines.append(textwrap.fill(para.strip(), width=WIDTH-2,
-                                       initial_indent="  ", subsequent_indent="  "))
-            lines.append("")
-
-    # group by section identity (doc + section_number/heading)
     groups, order = {}, []
     for f in answer["sources_used"]:
         chunk = index.get(f["ref"])
         if chunk is None:
             continue
-        key = (chunk.get("doc_title",""),
-               chunk.get("section_number") or chunk.get("heading",""))
+        key = (chunk.get("doc_title", ""),
+               chunk.get("section_number") or chunk.get("heading", ""))
         if key not in groups:
             order.append(key)
-            groups[key] = {"chunk": chunk, "evidence": [], "considered": False}
-        status, sentence, grades = attribute(f.get("quote",""), chunk)
+            groups[key] = {"chunk": chunk, "citations": [], "considered": False}
+        status, sentence, grades = attribute(f.get("quote", ""), chunk)
         if status == "miss":
             groups[key]["considered"] = True
         else:
-            groups[key]["evidence"].append(
-                {"status": status, "sentence": sentence, "grades": grades})
+            groups[key]["citations"].append(Citation(status, sentence, grades))
 
-    if not order:
-        return "\n".join(lines + _followup_lines(answer)) + _disclaimer()
+    sources = []
+    for key in order:
+        g = groups[key]
+        chunk = g["chunk"]
+        sources.append(Source(
+            title=chunk.get("doc_title", ""), year=chunk.get("year", ""),
+            organization=chunk.get("organization", ""), section=section_label(chunk),
+            citations=g["citations"],
+            consulted_only=bool(g["considered"] and not g["citations"])))
+
+    return AnswerView(True, answer["answer"], sources, _followups(answer))
+
+
+# ─────────────────────────────────────────── terminal rendering
+def format_answer(answer, index):
+    """The AnswerView rendered as the terminal panels. One of several possible renderings of the
+    same view — a web frontend consumes `resolve_answer` directly instead."""
+    view = resolve_answer(answer, index)
+    if not view.sufficient:
+        return (
+            f"\n{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n"
+            f"{C.BOLD}{C.BLUE}  {LBL_INSUFFICIENT}{C.RESET}\n"
+            f"{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n\n"
+            f"  {view.text}\n"
+        )
+
+    lines = []
+    lines.append(f"\n{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}")
+    lines.append(f"{C.BOLD}{C.BLUE}  {LBL_ANSWER}{C.RESET}")
+    lines.append(f"{C.BOLD}{C.BLUE}{'═'*WIDTH}{C.RESET}\n")
+    for para in view.text.split("\n"):
+        if para.strip():
+            lines.append(textwrap.fill(para.strip(), width=WIDTH-2,
+                                       initial_indent="  ", subsequent_indent="  "))
+            lines.append("")
+
+    if not view.sources:
+        return "\n".join(lines + _followup_lines(view.follow_ups)) + _disclaimer()
 
     lines.append(f"{C.GRAY}{'─'*WIDTH}{C.RESET}")
-    lines.append(f"{C.BOLD}  FUENTES{C.RESET} {C.DIM}({len(order)}){C.RESET}")
+    lines.append(f"{C.BOLD}  {LBL_SOURCES}{C.RESET} {C.DIM}({len(view.sources)}){C.RESET}")
     lines.append(f"{C.GRAY}{'─'*WIDTH}{C.RESET}\n")
 
-    for n, key in enumerate(order, start=1):
-        g = groups[key]; chunk = g["chunk"]
-        title = textwrap.fill(f"{chunk.get('doc_title','')} ({chunk.get('year','')})",
+    for n, src in enumerate(view.sources, start=1):
+        title = textwrap.fill(f"{src.title} ({src.year})",
                               width=WIDTH-6, subsequent_indent="      ")
         lines.append(f"  {C.BOLD}{C.GREEN}[{n}]{C.RESET} {C.BOLD}{title}{C.RESET}")
-        if chunk.get("organization"):
-            lines.append(f"      {C.DIM}{chunk['organization']}{C.RESET}")
-        sec = section_label(chunk)
-        if sec:
-            lines.append(f"      {sec}")
+        if src.organization:
+            lines.append(f"      {C.DIM}{src.organization}{C.RESET}")
+        if src.section:
+            lines.append(f"      {src.section}")
 
-        for ev in g["evidence"]:
-            grade_tag = f"  {C.DIM}[{', '.join(ev['grades'])}]{C.RESET}" if ev["grades"] else ""
-            if ev["status"] == "exact":
+        for cite in src.citations:
+            grade_tag = f"  {C.DIM}[{', '.join(cite.grades)}]{C.RESET}" if cite.grades else ""
+            if cite.status == "exact":
                 prefix, close, colour, tail = "      « ", " »", C.BLUE, ""
             else:
                 prefix, close, colour = "      ‹ ", " ›", C.YELLOW
-                tail = f" {C.DIM}(según la guía){C.RESET}"
-            cite = textwrap.fill(ev["sentence"], width=WIDTH-8,
+                tail = f" {C.DIM}{LBL_PER_GUIDE}{C.RESET}"
+            text = textwrap.fill(cite.sentence, width=WIDTH-8,
                                  initial_indent=prefix, subsequent_indent="        ")
-            lines.append(f"{colour}{cite}{close}{C.RESET}{grade_tag}{tail}")
+            lines.append(f"{colour}{text}{close}{C.RESET}{grade_tag}{tail}")
 
-        if g["considered"] and not g["evidence"]:
-            lines.append(f"      {C.DIM}(sección consultada · sin cita literal localizable){C.RESET}")
+        if src.consulted_only:
+            lines.append(f"      {C.DIM}{LBL_CONSULTED}{C.RESET}")
         lines.append("")
 
-    lines += _followup_lines(answer)
+    lines += _followup_lines(view.follow_ups)
     return "\n".join(lines) + _disclaimer()
+
+
+# ─────────────────────────────────────────── markdown rendering (web)
+def format_answer_markdown(view: AnswerView) -> str:
+    """The same AnswerView as Markdown, for a frontend that lays out its own width.
+
+    Deliberately WITHOUT the follow-up questions: a web view turns them into buttons, and the
+    terminal's numbered list would be dead text beside them. Everything else is the same
+    account with the same labels, so what a doctor is told cannot depend on the frontend —
+    including the disclaimer, which rides with every visible answer."""
+    if not view.sufficient:
+        return f"**{LBL_INSUFFICIENT}**\n\n{view.text}\n\n---\n_{_DISCLAIMER_TXT}_"
+
+    out = [view.text]
+    if view.sources:
+        out.append(f"---\n\n**{LBL_SOURCES} ({len(view.sources)})**")
+        for n, src in enumerate(view.sources, start=1):
+            head = f"**[{n}] {src.title} ({src.year})**"
+            if src.organization:
+                head += f" · {src.organization}"
+            block = [head]
+            if src.section:
+                block.append(f"{src.section}")
+            for cite in src.citations:
+                grades = f" `{', '.join(cite.grades)}`" if cite.grades else ""
+                tail = "" if cite.status == "exact" else f" _{LBL_PER_GUIDE}_"
+                block.append(f"> {cite.sentence}{grades}{tail}")
+            if src.consulted_only:
+                block.append(f"_{LBL_CONSULTED}_")
+            out.append("  \n".join(block))
+    out.append(f"---\n_{_DISCLAIMER_TXT}_")
+    return "\n\n".join(out)

@@ -15,7 +15,8 @@ from rag import (refine, retrieve_hybrid, rerank, build_context, validate, asses
                  SYS_PROMPT, build_user_prompt)
 from retrieval import merge_dedup
 from retrieval.registry import MODES
-from evidence import format_answer
+from evidence import format_answer, section_label
+from progress import STEP_RETRIEVAL as PROGRESS_RETRIEVAL, emit
 
 from .config import (MAX_ITER, CLARIFY_MAX_ROUNDS, CLARIFY_QUESTIONS_PER_ROUND,
                      RETRIEVAL_MODE, VALID_MODES, ConfigSchema,
@@ -184,6 +185,34 @@ def node_confirm_patient(state: RAGState) -> dict:
 
 
 # --- Collapsed retrieval nodes (combined graph) ----------------------------
+def _sections_read(contexts: list) -> list[str]:
+    """The guideline sections a retrieval actually read, labelled the way the sources panel
+    labels them (`evidence.section_label`) so what the doctor sees while waiting cannot
+    disagree with what they see once the answer lands. Deduplicated: one section usually
+    contributes several chunks."""
+    labels = []
+    for chunk in contexts:
+        label = section_label(chunk)
+        year = chunk.get("year")
+        text = f"{label} ({year})" if label and year else label
+        if text and text not in labels:
+            labels.append(text)
+    return labels
+
+
+def _retrieved(contexts: list, **extra) -> dict:
+    """The state update EVERY retrieval path produces — plus the announcement of what it read.
+
+    Factored out for both reasons at once. Four nodes were building this same dict by hand; and
+    this is the single place that can tell the doctor which sections are behind the answer being
+    written, which is the one kind of progress worth showing mid-run: real, recognisable, and
+    impossible to retract (the answer text is not — `validate` may still reject it)."""
+    emit(kind="sources", step=PROGRESS_RETRIEVAL, items=_sections_read(contexts))
+    chunk_index, formatted_context = build_context(contexts)
+    return {"contexts": contexts, "chunk_index": chunk_index,
+            "formatted_context": formatted_context, **extra}
+
+
 @guarded(STEP_RETRIEVAL)
 def node_retrieve(state: RAGState) -> dict:
     """search_query (+ carried-over patient facts) -> ~20 candidates via hybrid (dense + BM25)."""
@@ -196,9 +225,7 @@ def node_retrieve(state: RAGState) -> dict:
 def node_rerank(state: RAGState) -> dict:
     """candidates -> top 5 reordered by the cross-encoder + numbered context."""
     contexts = rerank(_with_facts(state["search_query"], state), state["candidates"], top_k=5)
-    chunk_index, formatted_context = build_context(contexts)
-    return {"contexts": contexts, "chunk_index": chunk_index,
-            "formatted_context": formatted_context}
+    return _retrieved(contexts)
 
 
 def _retrieve_with(mode: str, question: str, rewritten_query: str | None) -> tuple[list, str]:
@@ -223,10 +250,7 @@ def _make_retrieval_node(mode: str):
     def node(state: RAGState) -> dict:
         rewritten = _with_facts(state.get("search_query") or state["question"], state)
         contexts, concept_map = _retrieve_with(mode, state["question"], rewritten)
-        chunk_index, formatted_context = build_context(contexts)
-        return {"contexts": contexts, "chunk_index": chunk_index,
-                "formatted_context": formatted_context, "concept_map": concept_map,
-                "retrieval_mode": mode}
+        return _retrieved(contexts, concept_map=concept_map, retrieval_mode=mode)
     node.__name__ = f"node_{mode}_retrieve"
     return node
 
@@ -311,6 +335,27 @@ def route_refinement(state: RAGState) -> str:
     return "re_retrieve" if state.get("refining") else "end"
 
 
+def refinement_reply(questions: list, answers: dict):
+    """Shape a frontend's collected answers into the value `Command(resume=…)` must carry.
+
+    This lives next to the node that consumes it because it is a CONTRACT, not a presentation
+    detail: the CLI and the web must not each invent their own encoding of "the doctor answered
+    this much". Two rules, both of which cost a real bug:
+
+      - A LONE question is answered with plain text, because `_fold_answers` keys it by the
+        question it answers.
+      - An EMPTY DICT is never sent. LangGraph does not accept `{}` as a resume value — the
+        interrupt simply fires again, with the round budget never spent — so an offer whose
+        questions were ALL left blank would be re-asked forever, and Enter-to-decline (the
+        documented way out, and the common one with three questions per offer) could not work.
+        `""` is what "nothing supplied" has to look like; `_fold_answers` reads it the same way.
+    """
+    replies = {q: (a or "").strip() for q, a in (answers or {}).items()}
+    if len(questions) == 1:
+        return next(iter(replies.values()), "")
+    return {q: a for q, a in replies.items() if a} or ""
+
+
 def _retrieve_for_mode(mode: str, question: str, query: str) -> tuple[list, str]:
     """Run `mode`'s retrieval over an already-enriched query, returning (payloads, concept_map).
 
@@ -352,9 +397,7 @@ def node_re_retrieve(state: RAGState, config) -> dict:
     mode = state.get("retrieval_mode") or _resolve_mode(config)
     rewritten = _with_facts(state.get("search_query") or state["question"], state)
     contexts, concept_map = _retrieve_for_mode(mode, state["question"], rewritten)
-    chunk_index, formatted_context = build_context(contexts)
-    return {"contexts": contexts, "chunk_index": chunk_index,
-            "formatted_context": formatted_context, "concept_map": concept_map}
+    return _retrieved(contexts, concept_map=concept_map)
 
 
 # --- Tail: generate <-> validate -> evidence/fallback ----------------------
@@ -420,10 +463,8 @@ def node_refocus_retrieve(state: RAGState, config) -> dict:
         f"{_with_facts(state.get('search_query') or state['question'], state)}\n{focus}")
     contexts = rerank(state["question"], merge_dedup(found, previous),
                       top_k=len(previous) or 8)
-    chunk_index, formatted_context = build_context(contexts)
-    return {"contexts": contexts, "chunk_index": chunk_index,
-            "formatted_context": formatted_context, "refocus_query": focus,
-            "concept_map": concept_map or state.get("concept_map", "")}
+    return _retrieved(contexts, refocus_query=focus,
+                      concept_map=concept_map or state.get("concept_map", ""))
 
 
 @guarded(STEP_FORMATTING)
