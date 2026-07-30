@@ -6,8 +6,10 @@ as does main.py's graph. LLM calls are isolated so they can be swapped to Azure 
 (private EU model) the day GDPR requires it.
 """
 import os
+import re
 import sys
 import json
+import unicodedata
 from openai import OpenAI
 
 # The Windows console defaults to cp1252 and breaks accents / the '═'/'─' boxes. Force UTF-8.
@@ -208,15 +210,67 @@ def warmup() -> None:
 # priority #1. The real fix for the latency is the GPU (see RERANK_DEVICE).
 RERANK_SCORE_CHARS = int(os.environ.get("RERANK_SCORE_CHARS", "512"))
 
+def strip_accents(text: str) -> str:
+    """Accent-folded text, for matching Spanish written either way."""
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+_WORD = re.compile(r"[0-9a-z]+")
+
+# Spanish function words, dropped when choosing which slice of a chunk to score. A stopword list
+# is needed rather than a length floor because THE MOST DISCRIMINATIVE TOKENS IN THIS CORPUS ARE
+# THREE CHARACTERS LONG — TDF, TAF, FTC, 3TC, DTG, BIC, VHB, TAR. Filtering by length threw them
+# away and left the window to be chosen by «paciente» and «recomienda», which say nothing about
+# where in a section the recommendation is.
+_STOPWORDS = frozenset("""
+con que los las del por para una uno unos unas como desde este esta estos estas ese esa esos
+esas sus sin son ser han hay mas muy cual cuales cuando donde quien segun entre sobre tras ante
+bajo cada todo toda todos todas otro otra otros otras pero porque aunque tambien asi ademas
+debe deben puede pueden tiene tienen debera deberan haber sido cuyo cuya ello esto eso
+""".split())
+
+
+def score_window(text: str, query: str, chars: int = RERANK_SCORE_CHARS) -> str:
+    """The slice of `text` the cross-encoder should actually judge.
+
+    It used to be the PREFIX, and that quietly lost answers. 89% of our chunks are longer than
+    the window (median 1616 chars, up to 25 329), and a guideline section opens with context
+    before it recommends anything — so the reranker was often scoring a preamble. Measured on
+    «TAR en coinfección por VHB»: the section that literally holds the recommendation
+    (TAR_2022 §7.4.4, with «iniciar precozmente un TAR que incluya TDF o TAF y FTC o 3TC» at
+    char 1802 of 2508) scored **-0.900** on its prefix and ranked 10th of 25, so top_k=8 dropped
+    it and the doctor got «información insuficiente». The same chunk scores **+0.880** in full.
+
+    Widening the window is not the fix: 2048 chars found it but took 9.4 s instead of 0.55 s
+    (the batch pads to the longest item, so cost is superlinear). Choosing WHERE the window
+    goes is: pick the slice with the most distinct query terms. Same budget, same latency
+    (467 ms vs 556 ms measured), and the answer above comes back at rank 1."""
+    if len(text) <= chars:
+        return text
+    terms = {t for t in _WORD.findall(strip_accents(query.lower()))
+             if len(t) >= 3 and t not in _STOPWORDS}
+    if not terms:
+        return text[:chars]
+    step = max(chars // 4, 1)
+    best, best_hits = text[:chars], -1
+    for start in range(0, len(text) - chars + step, step):
+        window = text[start:start + chars]
+        hits = sum(1 for t in terms if t in strip_accents(window.lower()))
+        if hits > best_hits:                 # ties keep the earliest window
+            best, best_hits = window, hits
+    return best
+
+
 def rerank(query: str, payloads: list, top_k: int = 5) -> list:
     """Reorder the chunks with a cross-encoder that looks at the question and the
     text TOGETHER (far more precise than the retriever's cosine) and return the top_k.
     Unlike the bi-encoder, it usually understands abbreviations (e.g. DTG=dolutegravir).
-    Scores only the first RERANK_SCORE_CHARS of each chunk (latency fix); returns the
-    full payloads untouched."""
+    Scores RERANK_SCORE_CHARS of each chunk — the slice `score_window` judges most relevant,
+    not the prefix — and returns the full payloads untouched."""
     if not payloads:
         return []
-    docs = [p["text"][:RERANK_SCORE_CHARS] for p in payloads]
+    docs = [score_window(p["text"], query) for p in payloads]
     scores = list(_get_reranker().rerank(query, docs))
     ordered = sorted(zip(scores, payloads), key=lambda x: x[0], reverse=True)
     return [p for _, p in ordered[:top_k]]

@@ -22,10 +22,17 @@ _DIRECT_CLIENT = re.compile(r"\b(ChatOpenAI|OpenAIEmbeddings|AsyncOpenAI|OpenAI)
 
 
 def _project_sources():
+    """Every module the guard applies to: the whole tree minus the factory itself, the
+    standalone ingestion scripts and the tests.
+
+    Dot-directories are skipped wholesale, not just `.venv`. They hold COPIES of this repo —
+    `.claude/worktrees/` when a task runs in its own worktree, `.langgraph_api/` caches — and a
+    copy carries a legitimate `rag.py`, which made the guard report the factory as its own
+    offender. A guard that cries wolf gets disabled, which is worse than not having it."""
     for path in ROOT.rglob("*.py"):
-        if ".venv" in path.parts or path == FACTORY or INGESTION in path.parents:
+        if any(part.startswith(".") for part in path.relative_to(ROOT).parts):
             continue
-        if path.parent.name == "tests":
+        if path == FACTORY or INGESTION in path.parents or path.parent.name == "tests":
             continue
         yield path
 

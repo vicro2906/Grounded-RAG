@@ -15,10 +15,18 @@ Everything here answers one of two questions that every graph-based mode faces:
 import json
 import os
 import re
-import unicodedata
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable
 
 from abbreviations import ABBREVIATIONS
-from rag import _get_bm25, _get_reranker, rephrase, rerank, retrieve_hybrid
+from progress import STEP_RETRIEVAL, emit
+from rag import (_get_bm25, _get_reranker, rephrase, rerank, retrieve_hybrid,
+                 strip_accents)
+
+# Spanish, because it reaches the doctor verbatim as a progress line. It lives here rather than
+# in pipeline/config.py for the one reason that module could not serve: `retrieval/` sits below
+# the pipeline and importing from it would close a cycle.
+MSG_RANKING = "Valorando {n} fragmentos de las guías"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHUNKS_PATH = os.path.join(ROOT, "data", "chunks", "chunks.jsonl")
@@ -102,7 +110,8 @@ def merge_dedup(*lists) -> list:
     return out
 
 
-def house_tail(query: str, primary: list, rewritten_query: str | None = None,
+def house_tail(query: str, primary: list | Callable[[], list],
+               rewritten_query: str | None = None,
                top_k: int = 8, hybrid_k: int = 10) -> list:
     """The tail EVERY graph-based mode shares: merge its selection with our dense+BM25 hybrid
     complement (dedup, the mode's own chunks first) and rerank the union to top_k.
@@ -112,12 +121,32 @@ def house_tail(query: str, primary: list, rewritten_query: str | None = None,
     confounded. Quality: BM25 covers the guides' heavy abbreviation/dose lexical cases that a
     pure graph walk misses, and the final cross-encoder pass is the precision guardrail that
     `validate` depends on. Pass `rewritten_query` when the caller already rephrased the question
-    (the pipeline does) to skip a duplicate LLM call."""
+    (the pipeline does) to skip a duplicate LLM call.
+
+    `primary` is either the selection itself or a CALLABLE producing it. The callable form runs
+    the mode's selection and the hybrid complement IN PARALLEL, which is worth it when the two
+    hit different resources (a local graph walk vs Qdrant+OpenAI over the network) — that is
+    the graph mode's case, and the reason it used to keep its own copy of this tail."""
     _get_reranker(); _get_bm25()  # pre-warm the local models before any parallel branch
-    hybrid = retrieve_hybrid(rewritten_query or rephrase(query), top_k=hybrid_k, prefetch_limit=30)
+
+    def fetch_hybrid() -> list:
+        return retrieve_hybrid(rewritten_query or rephrase(query),
+                               top_k=hybrid_k, prefetch_limit=30)
+
+    if callable(primary):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            selection, hybrid = pool.submit(primary), pool.submit(fetch_hybrid)
+            primary, hybrid = selection.result(), hybrid.result()
+    else:
+        hybrid = fetch_hybrid()
+
     merged = merge_dedup(primary, hybrid)
     if not merged:
         return []
+    # The graph modes collapse all of this into ONE graph node, so nothing else reports from
+    # here: without this the progress line sits frozen through the whole 5-10 s.
+    emit(kind="detail", step=STEP_RETRIEVAL,
+         detail=MSG_RANKING.format(n=len(merged)))
     return rerank(query, merged, top_k=top_k)
 
 
@@ -138,14 +167,9 @@ def expand_abbrevs(text: str) -> str:
     return out
 
 
-def _strip_accents(text: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in decomposed if not unicodedata.combining(c))
-
-
 # Longest NAME first, so «tenofovir alafenamida» contracts before «tenofovir».
 _NAME_TO_ABBR = sorted(
-    ((_strip_accents(name.lower()), abbr.lower()) for abbr, name in ABBREVIATIONS.items()),
+    ((strip_accents(name.lower()), abbr.lower()) for abbr, name in ABBREVIATIONS.items()),
     key=lambda kv: -len(kv[0]),
 )
 
@@ -159,7 +183,7 @@ def canonical_key(text: str) -> str:
     a slice of the edges, so ranking by similarity returns six spellings of one concept
     instead of six concepts. Contracting names to their abbreviation and dropping case,
     accents, punctuation and repeated tokens maps all four to «dtg»."""
-    key = _strip_accents((text or "").lower())
+    key = strip_accents((text or "").lower())
     for name, abbr in _NAME_TO_ABBR:
         key = key.replace(name, abbr)
     tokens = []

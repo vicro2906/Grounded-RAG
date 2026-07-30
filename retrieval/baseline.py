@@ -16,5 +16,11 @@ def retrieve_rerank(query: str, top_k: int = 5, candidates: int = 20) -> list:
 
 def search(query: str, top_k: int = 5) -> list:
     """Full baseline retriever: rephrase -> hybrid -> reranker. Used directly by the
-    evaluation; the graph runs the same steps as separate nodes (retrieve -> rerank)."""
+    evaluation; the graph runs the same steps as separate nodes (retrieve -> rerank).
+
+    NOTE for the A/B: this default of 5 is smaller than the graph modes' 8, matching what the
+    baseline pipeline actually ships (pipeline.nodes._retrieve_for_mode reranks to 5). So a
+    run comparing modes varies context SIZE as well as the selection mechanism — pass an
+    explicit top_k to control for it. The default is deliberately left alone: changing it would
+    silently move the numbers in results/ that were measured at 5."""
     return retrieve_rerank(rephrase(query), top_k=top_k)

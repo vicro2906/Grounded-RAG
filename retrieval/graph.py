@@ -36,12 +36,9 @@ from lightrag.utils import EmbeddingFunc
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.openai import openai_embed, gpt_4o_mini_complete
 
-from concurrent.futures import ThreadPoolExecutor
+from rag import EMBEDDING_MODEL, OPENAI_BASE_URL
 
-from rag import (rerank, retrieve_hybrid, rephrase, EMBEDDING_MODEL, OPENAI_BASE_URL,
-                 _get_reranker, _get_bm25)
-
-from ._common import load_chunks, map_to_payloads, merge_dedup
+from ._common import house_tail, load_chunks, map_to_payloads
 
 # --- Config ---------------------------------------------------------------
 WORKING_DIR = os.path.join(ROOT, "data", "lightrag_store")  # file-based graph + vector store
@@ -207,26 +204,13 @@ def graph_select(query: str, hl_keywords: list, ll_keywords: list,
 def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: int = 10,
                  rewritten_query: str | None = None) -> list:
     """Track B retriever (collapsed single-call API, used by the eval and the combined graph).
-    Two complementary chunk sources, merged (dedup by chunk_id) and reranked to top_k:
-      1. GRAPH traversal (graph_traverse) — the multi-hop signal.
-      2. our HYBRID search (dense + BM25 RRF) on the rephrased query — replaces LightRAG's
-         dense-only complement (BM25 helps with the guides' heavy abbreviation use).
-    The two are independent, so they run IN PARALLEL (graph on LightRAG's loop, hybrid on a
-    thread hitting Qdrant/OpenAI)."""
-    _get_reranker(); _get_bm25()  # pre-warm local models before the parallel branches
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        fut_graph = ex.submit(graph_traverse, query, chunk_top_k)
-        # reuse the caller's rephrased query when available; else rephrase inside the thread
-        fut_hybrid = ex.submit(
-            lambda: retrieve_hybrid(rewritten_query or rephrase(query),
-                                    top_k=hybrid_k, prefetch_limit=30))
-        graph_payloads = fut_graph.result()
-        hybrid_payloads = fut_hybrid.result()
-
-    merged = merge_dedup(graph_payloads, hybrid_payloads)
-    if not merged:
-        return []
-    return rerank(query, merged, top_k=top_k)
+    The GRAPH traversal is this mode's selection — the multi-hop signal — and `house_tail`
+    adds the shared dense+BM25 complement and reranks to top_k, exactly as the other graph
+    modes do (that sameness is what keeps the A/B measuring selection and nothing else).
+    The traversal is handed over as a CALLABLE so the tail runs it in parallel with the hybrid:
+    they are independent and hit different resources (LightRAG's loop vs Qdrant/OpenAI)."""
+    return house_tail(query, lambda: graph_traverse(query, chunk_top_k),
+                      rewritten_query, top_k=top_k, hybrid_k=hybrid_k)
 
 
 if __name__ == "__main__":
