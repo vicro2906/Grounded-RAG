@@ -61,21 +61,47 @@ def get_chunks_by_id() -> dict:
     return _chunks_by_id
 
 
+PREFIX_CHARS = 120
+_AMBIGUOUS = object()   # more than one chunk opens this way -> the prefix identifies nobody
+
+_prefix_lookup: dict | None = None
+def get_prefix_lookup() -> dict:
+    """Map a chunk's opening `PREFIX_CHARS` -> its payload, EXCLUDING every prefix that more
+    than one chunk shares.
+
+    Our chunks open with their `A > B > C` breadcrumb, so siblings split out of the same
+    section are identical for far longer than this window: 176 of the 517 share their prefix
+    with another chunk (42 groups, the largest being an entire guideline whose title alone
+    outruns the window — all 45 of its chunks collide). Keeping one payload per prefix would
+    silently hand back A DIFFERENT CHUNK, and the sources panel would quote the wrong section.
+
+    Dropping the ambiguous ones is the same call `evidence.attribute` makes: a miss costs the
+    answer one chunk, a wrong hit costs it a mis-citation, so every doubt resolves to a miss."""
+    global _prefix_lookup
+    if _prefix_lookup is None:
+        index: dict = {}
+        for key, payload in get_chunk_lookup().items():
+            prefix = key[:PREFIX_CHARS]
+            index[prefix] = _AMBIGUOUS if prefix in index else payload
+        _prefix_lookup = {k: v for k, v in index.items() if v is not _AMBIGUOUS}
+    return _prefix_lookup
+
+
 def map_to_payloads(chunks: list[dict]) -> list[dict]:
     """Map an index's selected chunks (by exact content) back to our payloads. Content is
     stored and returned verbatim, so an exact normalized match is expected; a prefix fallback
-    covers any edge truncation."""
+    covers any edge truncation, and only answers when the prefix names ONE chunk."""
     lookup = get_chunk_lookup()
-    prefix_index = None
     out, seen = [], set()
     for ch in chunks:
         content = ch.get("content", "")
         payload = lookup.get(norm(content))
         if payload is None:
-            # prefix fallback (build the prefix index lazily, only if needed)
-            if prefix_index is None:
-                prefix_index = {k[:120]: v for k, v in lookup.items()}
-            payload = prefix_index.get(norm(content)[:120])
+            # Prefix fallback, built lazily (see get_prefix_lookup: an ambiguous opening is
+            # dropped rather than guessed). The exact match carries every lookup while
+            # chunks.jsonl and an index hold the same bytes; editing a chunk without
+            # rebuilding the index is what starts routing traffic through here.
+            payload = get_prefix_lookup().get(norm(content)[:PREFIX_CHARS])
         if payload is not None:
             key = payload["chunk_id"]
             if key not in seen:

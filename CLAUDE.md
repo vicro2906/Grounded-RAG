@@ -289,7 +289,8 @@ Query (`graph_search`, `hybrid` mode): (1) LightRAG extracts high/low-level keyw
 question; (2) low-level → vdb_entities → entities; high-level → vdb_relationships →
 relations; (3) it walks the graph (neighbours) and, via `source_id`, gathers the **source
 chunks** (up to `chunk_top_k=20`), mapped to `chunks.jsonl` with `_map_to_payloads` (exact
-match + prefix fallback; 20/20 in a test). (4) **Complement (replaces LightRAG's internal
+match + prefix fallback, the latter only when the opening names ONE chunk — see the finding
+below; 20/20 in a test). (4) **Complement (replaces LightRAG's internal
 dense search):** the chunks from OUR `retrieve_hybrid` (dense + BM25 RRF) over the rewritten
 query are added — BM25 helps with abbreviations/doses. (5) It is **merged** (dedup by
 `chunk_id`, graph first) and the **reranker** refines to top 8.
@@ -828,6 +829,23 @@ the full A/B — read them as such (n=3 per tier).
   encoding), and pinned against the REAL graph in `tests/test_pipeline_flow.py` — the fake graph
   in `test_cli.py` resumes on anything, which is exactly why it never caught this.
 
+- **THE BRIDGE BACK TO CITABLE PAYLOADS COULD RETURN THE WRONG CHUNK (found and fixed
+  2026-07-30).** `_common.map_to_payloads` resolves an index's selected chunks by exact
+  normalized text, with a fallback keyed on the first 120 characters — built as a dict
+  comprehension, so the LAST chunk per key won. But our chunks open with their `A > B > C`
+  breadcrumb, and **176 of the 517 share that opening with a sibling** (42 groups; the largest
+  is a whole guideline whose TITLE alone outruns 120 chars, so **all 45 of its chunks collide**).
+  A fallback lookup for any of them returned a DIFFERENT chunk — the sources panel would quote
+  the wrong section under the right claim, which is exactly the harm `evidence.py` spends its
+  fuzzy-matching to prevent. **It was dormant, not harmless:** chunks.jsonl and the LightRAG
+  store hold byte-identical text today, so the exact match takes every lookup and the fallback
+  never fires. Editing a chunk without rebuilding the store wakes it — demonstrated by patching
+  4 chunk texts and replaying the lookup against the store's old text: **4 of 4 resolved to the
+  wrong `chunk_id`**. **Fix: an ambiguous opening is dropped from the fallback index**
+  (`get_prefix_lookup`), so it answers only when the prefix names one chunk. Same reasoning as
+  `evidence.attribute` resolving every doubt to `miss` — a miss costs the answer one chunk, a
+  wrong hit costs it a mis-citation. Pinned in `tests/test_retrieval_common.py` (the old code
+  returns the sibling on that test; the new one returns nothing).
 - **Abbreviations (largely resolved):** the corpus mostly uses abbreviations (DTG 144 vs
   "dolutegravir" 23, BIC 54 vs 8...) but also full names. That is why the rephrase includes
   BOTH forms and the glossary is also in SYS_PROMPT (they are part of the guides, not external

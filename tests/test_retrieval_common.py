@@ -4,13 +4,14 @@
 ways; when they stop collapsing a variant nothing crashes — the graph modes just quietly rank
 six spellings of one concept instead of six concepts.
 """
+import collections
 import threading
 
 import pytest
 
 from retrieval import _common
 from retrieval._common import (canonical_key, expand_abbrevs, house_tail, load_chunks,
-                               map_chunk_ids_to_payloads, map_to_payloads, merge_dedup)
+                               map_chunk_ids_to_payloads, map_to_payloads, merge_dedup, norm)
 from retrieval.registry import MODES, VALID_MODES, get_search
 from rag import score_window
 
@@ -248,6 +249,56 @@ def test_unknown_or_repeated_ids_are_skipped():
     real = load_chunks()[0]["chunk_id"]
     mapped = map_chunk_ids_to_payloads([real, "no-existe", real])
     assert [p["chunk_id"] for p in mapped] == [real]
+
+
+# --- the prefix fallback: a miss is safe, a wrong hit is a mis-citation -----
+# The fallback keys on the chunk's opening characters, and our chunks open with their
+# `A > B > C` breadcrumb — 176 of the 517 are identical to a sibling for far longer than the
+# window. Answering on a shared prefix returns SOMEONE ELSE's payload, and the sources panel
+# then quotes the wrong section under the right claim. It stays dormant only while chunks.jsonl
+# and an index hold the same bytes, because the exact match takes every lookup.
+@pytest.fixture
+def two_chunks_of_one_section(monkeypatch):
+    """A corpus reduced to the two chunks that matter: same breadcrumb, different content."""
+    breadcrumb = ("Documento de consenso sobre profilaxis posexposición > "
+                  "7. SITUACIONES ESPECIALES > 7.4. COINFECCIONES > contexto compartido. ")
+    assert len(breadcrumb) > _common.PREFIX_CHARS
+    first = {"chunk_id": "a", "text": breadcrumb + "Primera recomendación."}
+    sibling = {"chunk_id": "b", "text": breadcrumb + "Segunda recomendación, otra sección."}
+    monkeypatch.setattr(_common, "load_chunks", lambda: [first, sibling])
+    monkeypatch.setattr(_common, "_chunk_lookup", None)
+    monkeypatch.setattr(_common, "_prefix_lookup", None)
+    return first, sibling
+
+
+def test_an_opening_two_chunks_share_never_answers_the_fallback(two_chunks_of_one_section):
+    """The waking scenario, reproduced: a chunk was edited and the index still holds the old
+    text, so the exact match misses and the lookup falls through to the prefix."""
+    first, _ = two_chunks_of_one_section
+    stale = first["text"] + " Frase que el índice todavía no tiene."
+    mapped = [p["chunk_id"] for p in map_to_payloads([{"content": stale}])]
+    assert "b" not in mapped, "the fallback cited a different chunk of the same section"
+    assert mapped == []      # ambiguous opening -> dropped, never guessed
+
+
+def test_a_unique_opening_still_rescues_a_clipped_chunk():
+    """The fallback is disambiguated, not deleted: a chunk nothing else opens like is still
+    recovered when an index stored a truncated copy of it."""
+    openings = collections.Counter(norm(c["text"])[:_common.PREFIX_CHARS] for c in load_chunks())
+    chunk = next(c for c in load_chunks()
+                 if openings[norm(c["text"])[:_common.PREFIX_CHARS]] == 1
+                 and len(norm(c["text"])) > 300)
+    clipped = norm(chunk["text"])[:200]
+    assert [p["chunk_id"] for p in map_to_payloads([{"content": clipped}])] == [chunk["chunk_id"]]
+
+
+def test_the_real_corpus_still_has_the_openings_that_make_this_necessary():
+    """Guards the rule against being read as theoretical and quietly relaxed. If a re-chunk ever
+    makes every opening unique this fails, and the fallback's constraint can be revisited."""
+    openings = collections.Counter(norm(c["text"])[:_common.PREFIX_CHARS] for c in load_chunks())
+    shared = [n for n in openings.values() if n > 1]
+    assert shared, "no chunk shares its opening any more"
+    assert sum(shared) > 100 and max(shared) > 5
 
 
 # --- the mode catalogue ----------------------------------------------------
