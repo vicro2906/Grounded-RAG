@@ -5,8 +5,19 @@ multihop / adversarial) so the full RAGAS suite can be sliced by question type. 
 A/B, pick a retriever with PIPELINE; only retrieval varies (generation is shared), which is
 what makes the comparison fair.
 
-    PIPELINE=graph python evaluation.py     # any mode in retrieval/registry.py
-    -> results/ragas_results_<pipeline>.csv (per-question detail) + per-tier means.
+TWO things can be measured, chosen with EVAL_TARGET:
+
+  retrieval (default) — retriever + a bare generation call. Isolates the SELECTION mechanism,
+      which is what an A/B between modes needs.
+  product             — the COMPILED GRAPH, i.e. the system as deployed: rephrase, the domain
+      guardrail, assess, re_retrieve, the validate loop and evidence. Nothing else measures
+      those, and they hold the two failures that are invisible from the retrieval side — an
+      answer the validator rejected, and an answer the model declared insufficient. Both reach
+      the doctor as "no puedo responderte" over guidelines that do cover the question.
+
+    PIPELINE=graph python evaluation.py                    # retrieval A/B
+    EVAL_TARGET=product PIPELINE=graph python evaluation.py  # the shipped system
+    -> results/ragas_results_<pipeline>[_product].csv + per-tier means.
 """
 
 import os
@@ -27,6 +38,8 @@ warnings.filterwarnings(
 )
 
 # --- Existing pipeline ---
+from pydantic import BaseModel
+
 from rag import build_context, generate_answer, chat_model, embeddings_model, COLLECTION_HYBRID
 from retrieval.registry import VALID_MODES, get_search
 
@@ -42,6 +55,18 @@ from retrieval.registry import VALID_MODES, get_search
 PIPELINE = os.environ.get("PIPELINE", "baseline")
 if PIPELINE not in VALID_MODES:   # fail before building the dataset, not after
     raise SystemExit(f"Unknown PIPELINE: {PIPELINE!r} (use {' | '.join(VALID_MODES)})")
+
+# What gets measured: the retrieval mechanism, or the system the doctor actually talks to.
+EVAL_TARGET = os.environ.get("EVAL_TARGET", "retrieval")
+if EVAL_TARGET not in ("retrieval", "product"):
+    raise SystemExit(f"Unknown EVAL_TARGET: {EVAL_TARGET!r} (use retrieval | product)")
+
+# EVAL_RAGAS=0 skips the scoring half. The product metrics — coverage by cause, false
+# rejections, the validator retry — need no judge at all, and RAGAS is both the slow part (it
+# barely parallelizes; a judge call per chunk for precision) and the fragile one (timeouts turn
+# into NaN). Turning it off is what makes running the shipped system over all 151 questions
+# affordable, which is the point of measuring it in the first place.
+RUN_RAGAS = os.environ.get("EVAL_RAGAS", "1") not in ("0", "false", "no")
 
 
 def get_pipeline(name: str):
@@ -570,12 +595,190 @@ def build_dataset(dataset: list[dict], retriever) -> tuple[EvaluationDataset, li
     return EvaluationDataset.from_list(rows), latencies
 
 
-def main():
-    retriever = get_pipeline(PIPELINE)
-    print(f"Pipeline: {PIPELINE} | mode: full RAGAS | dataset: {len(DATASET)} preguntas "
-          f"| coleccion Qdrant: {COLLECTION_HYBRID}\n")
-    dataset, latencies = build_dataset(DATASET, retriever)
+# ===========================================================================
+# MEASURING THE PRODUCT — the compiled graph, not just retrieval.
+# ===========================================================================
+# What the retrieval path cannot see: every way a run ends WITHOUT clinical content. The
+# guidelines cover the question (it has a reference), retrieval may even have found the right
+# section, and the doctor still gets a message. Three distinct causes, and they need different
+# fixes, so they are counted apart rather than lumped into "it failed".
+OUTCOMES = ("answered",           # an answer with sources reached the doctor
+            "insufficient",       # the model said the context does not answer it
+            "not_validated",      # an answer existed and the validator rejected it
+            "validation_error",   # the judge could not be reached; nothing is shown unverified
+            "technical_error")    # a service was down
 
+
+def _outcome(state: dict) -> str:
+    """How the run ended, from the state the graph left behind."""
+    if state.get("technical_error"):
+        return "technical_error"
+    if (state.get("validation") or {}).get("error"):
+        return "validation_error"
+    answer = state.get("answer") or {}
+    if not answer:
+        return "technical_error"
+    if not (state.get("validation") or {}).get("is_valid", False):
+        return "not_validated"
+    return "answered" if answer.get("sufficient_information") else "insufficient"
+
+
+def run_product(dataset: list[dict]):
+    """Run every question through the COMPILED GRAPH and record how each one ended.
+
+    A FRESH thread per question: the graph remembers the patient across a conversation, so
+    reusing one thread would leak the previous question's facts into the next and measure a
+    conversation nobody had. Any pause is DECLINED (the doctor supplying data mid-run is a
+    different experiment), which also exercises the decline path end to end.
+    """
+    from uuid import uuid4
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.types import Command
+    from pipeline import build_combined_graph, refinement_reply
+
+    app = build_combined_graph(checkpointer=InMemorySaver())
+    rows, records, latencies = [], [], []
+
+    for i, case in enumerate(dataset, 1):
+        question = case["question"].strip()
+        reference = case.get("reference", "").strip()
+        if not reference:
+            continue
+
+        config = {"configurable": {"thread_id": uuid4().hex}}
+        t0 = time.perf_counter()
+        result = app.invoke({"question": question},
+                            context={"retrieval_mode": PIPELINE}, config=config)
+        while result.get("__interrupt__"):
+            value = result["__interrupt__"][0].value or {}
+            # "" keeps the patient at the switch gate and declines the refinement; an empty
+            # DICT would not resume at all (see pipeline.refinement_reply).
+            reply = "" if value.get("confirm_new_patient") else \
+                refinement_reply(list(value.get("questions", [])), {})
+            result = app.invoke(Command(resume=reply),
+                                context={"retrieval_mode": PIPELINE}, config=config)
+        dt = time.perf_counter() - t0
+        latencies.append(dt)
+
+        state = app.get_state(config).values
+        outcome = _outcome(state)
+        answer = state.get("answer") or {}
+        contexts = [c["text"] for c in (state.get("contexts") or []) if c]
+
+        records.append({
+            "question": question, "tier": case.get("tier"), "outcome": outcome,
+            "attempts": state.get("attempts", 0),
+            "refocused": bool(state.get("refocus_query")),
+            "rejected_answer": answer.get("answer", "") if outcome == "not_validated" else "",
+            "reason": (state.get("validation") or {}).get("reason", ""),
+            # The graph keeps the failing step and the exception apart on purpose (one reaches
+            # the doctor, the other only the trace). Both belong here: an outage counted without
+            # saying WHAT broke is a number nobody can act on.
+            "failed_step": state.get("technical_error", ""),
+            "technical_detail": state.get("technical_detail", ""),
+            "reference": reference, "latency": dt,
+        })
+        # RAGAS scores the ANSWERS: faithfulness of «no he podido responderte» is meaningless.
+        # Coverage is reported separately, and neither number substitutes for the other.
+        if outcome == "answered":
+            rows.append({"user_input": question, "retrieved_contexts": contexts,
+                         "response": answer.get("answer", ""), "reference": reference})
+        print(f"[{i}/{len(dataset)}] {outcome} ({dt:.1f}s)")
+
+    # An empty `rows` is NOT a broken harness, it is the loudest possible result: the system
+    # answered nothing. Aborting here would throw away the very records that say so.
+    print(f"\n{len(rows)} answered of {len(records)} asked.\n")
+    return (EvaluationDataset.from_list(rows) if rows else None), records, latencies
+
+
+class _RejectionVerdict(BaseModel):
+    """Was the rejected answer actually saying what the reference says?"""
+    agrees_with_reference: bool
+    reason: str
+
+
+_FALSE_REJECTION_SYS = """
+Eres un evaluador clínico. Te doy una respuesta que un sistema RAG generó y luego DESCARTÓ, y
+la respuesta de referencia para esa misma pregunta. Decide si la respuesta descartada dice
+sustancialmente LO MISMO que la referencia en cuanto al contenido clínico (recomendación,
+fármacos, condiciones). Ignora diferencias de estilo, extensión o de qué se cita.
+Responde SOLO con el JSON pedido.
+"""
+
+
+def false_rejection_rate(records: list[dict]) -> tuple[int, int, list]:
+    """Of the answers `validate` threw away, how many were right?
+
+    This is the pipeline's most dangerous failure and the only one with NO visible symptom: a
+    wrong «not valid» replaces a correct answer with MSG_NOT_VALIDATED, and the doctor reads it
+    as "the guidelines do not cover this". Re-running the same judge would only measure its own
+    flakiness, so the rejected text is compared against the REFERENCE instead — which is what a
+    clinician would do. Caveat that applies to every number here: the references were drafted by
+    a model and have not been reviewed clinically."""
+    rejected = [r for r in records if r["outcome"] == "not_validated" and r["rejected_answer"]]
+    if not rejected:
+        return 0, 0, []
+    judge = chat_model(STRONG_MODEL, temperature=0).with_structured_output(
+        _RejectionVerdict, method="json_schema", strict=True)
+    false_ones = []
+    for r in rejected:
+        try:
+            verdict = judge.invoke([
+                ("system", _FALSE_REJECTION_SYS),
+                ("human", f"PREGUNTA:\n{r['question']}\n\nRESPUESTA DESCARTADA:\n"
+                          f"{r['rejected_answer']}\n\nREFERENCIA:\n{r['reference']}"),
+            ])
+        except Exception as exc:      # a judge outage must not sink the whole run's report
+            print(f"  (judge failed on «{r['question'][:50]}…»: {exc})")
+            continue
+        if verdict.agrees_with_reference:
+            false_ones.append({**r, "judge_reason": verdict.reason})
+    return len(false_ones), len(rejected), false_ones
+
+
+def report_product(records: list[dict]) -> pd.DataFrame:
+    """Coverage first: how often the doctor gets clinical content at all."""
+    df = pd.DataFrame(records)
+    print("\n=== Outcome of every run ===")
+    counts = df["outcome"].value_counts()
+    for outcome in OUTCOMES:
+        n = int(counts.get(outcome, 0))
+        print(f"  {outcome:<18} {n:>4}  ({100 * n / len(df):.0f}%)")
+    silent = df[df["outcome"] != "answered"]
+    print(f"\nNO CLINICAL ANSWER on {len(silent)}/{len(df)} questions the guidelines DO cover "
+          f"({100 * len(silent) / len(df):.0f}%).")
+
+    outages = df[df["technical_detail"].astype(bool)]
+    if len(outages):
+        print("\n=== What actually broke ===")
+        for _, row in outages.iterrows():
+            print(f"  [{row['failed_step']}] {row['technical_detail'][:120]}")
+
+    if "tier" in df.columns:
+        print("\n=== Answered rate per tier ===")
+        print(df.assign(answered=df["outcome"].eq("answered")).groupby("tier")["answered"].mean())
+
+    # The self-correcting retry has never been measured, only reasoned about.
+    retried = df[df["attempts"] > 1]
+    if len(retried):
+        rescued = retried["outcome"].eq("answered").mean()
+        print(f"\n=== Validator retry ===\n  {len(retried)} runs regenerated; "
+              f"{100 * rescued:.0f}% ended answered. "
+              f"{int(retried['refocused'].sum())} of them re-retrieved (refocus_retrieve).")
+
+    n_false, n_rejected, false_ones = false_rejection_rate(records)
+    if n_rejected:
+        print(f"\n=== False rejections ===\n  {n_false}/{n_rejected} rejected answers actually "
+              f"agreed with the reference ({100 * n_false / n_rejected:.0f}%).")
+        for r in false_ones[:5]:
+            print(f"    - {r['question'][:70]}…\n      motivo del validador: {r['reason'][:90]}")
+    df["false_rejection"] = df["question"].isin({r["question"] for r in false_ones})
+    return df
+
+
+def score_with_ragas(dataset) -> pd.DataFrame:
+    """The RAGAS half: faithfulness / precision / recall over the answers that were delivered,
+    sliced by tier and dumped per pipeline."""
     print(f"Evaluating with judge: {JUDGE_MODEL}\n")
     evaluator_llm = LangchainLLMWrapper(chat_model(JUDGE_MODEL))
     evaluator_embeddings = LangchainEmbeddingsWrapper(embeddings_model())
@@ -606,7 +809,8 @@ def main():
         df["tier"] = df["user_input"].map(tier_by_q)
 
     os.makedirs("results", exist_ok=True)
-    out_csv = os.path.join("results", f"ragas_results_{PIPELINE}.csv")  # per-pipeline file
+    suffix = "_product" if EVAL_TARGET == "product" else ""
+    out_csv = os.path.join("results", f"ragas_results_{PIPELINE}{suffix}.csv")
     df.to_csv(out_csv, index=False)
     print(f"\nDetail saved to {out_csv}")
 
@@ -620,12 +824,44 @@ def main():
         print("\n=== Means per tier (n per tier) ===")
         print(df.groupby("tier")[num_cols].mean())
         print(df["tier"].value_counts().rename("n"))
+    return df
 
-    # Velocity axis of the A/B: latency per query (retrieval + generation).
+
+def main():
+    print(f"Pipeline: {PIPELINE} | target: {EVAL_TARGET} | dataset: {len(DATASET)} preguntas "
+          f"| coleccion Qdrant: {COLLECTION_HYBRID}\n")
+
+    records = None
+    if EVAL_TARGET == "product":
+        dataset, records, latencies = run_product(DATASET)
+    else:
+        dataset, latencies = build_dataset(DATASET, get_pipeline(PIPELINE))
+
+    # Velocity: latency per query. On the product target this is what the doctor actually waits,
+    # rephrase and assess and validate included — not just retrieval + one generation.
     if latencies:
         print("\n=== Latency (s/query) ===")
         print(f"mean={statistics.mean(latencies):.1f}  median={statistics.median(latencies):.1f}  "
               f"max={max(latencies):.1f}  total={sum(latencies):.0f}")
+
+    # The product report comes BEFORE the RAGAS scoring, and writes its CSV as soon as it can.
+    # RAGAS is the slow, fragile half (it barely parallelizes and times out into NaN), while the
+    # graph runs above are the ones that cost minutes and money — losing them to a hung judge is
+    # not acceptable. Reading order works out too: the coverage is the denominator of every
+    # score that follows.
+    if records is not None:
+        os.makedirs("results", exist_ok=True)
+        runs = report_product(records)
+        runs_csv = os.path.join("results", f"product_runs_{PIPELINE}.csv")
+        runs.to_csv(runs_csv, index=False)
+        print(f"\nPer-run detail saved to {runs_csv}")
+
+    if not RUN_RAGAS:
+        print("\nSkipping RAGAS (EVAL_RAGAS=0).")
+    elif dataset is None:
+        print("\nNothing to score with RAGAS: no question produced an answer.")
+    else:
+        score_with_ragas(dataset)
 
 
 if __name__ == "__main__":
