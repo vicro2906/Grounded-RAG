@@ -26,3 +26,8 @@ _probe_store/
 
 # PDFs originales de GeSIDA: se conservan en local pero NO se redistribuyen (© GeSIDA)
 data/pdfs/
+
+# Chainlit: config.toml and chainlit.md ARE ours and are committed; the rest is regenerated
+# boilerplate (24 UI translation files) and per-session state.
+.chainlit/translations/
+.files/

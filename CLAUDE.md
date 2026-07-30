@@ -157,7 +157,9 @@ module plus one registry line.
     the caller's rewritten query instead of re-rephrasing.
   - **graph** (Track B, DEFAULT) = `retrieval.graph.graph_search`
     (entity+relation graph `mode="hybrid"` + `retrieve_hybrid` dense+BM25 complement →
-    dedup fusion → rerank → top 8).
+    dedup fusion → rerank → top 8). It hands its traversal to `house_tail` as a CALLABLE, which
+    is how it keeps running traversal ∥ hybrid in parallel without keeping a second copy of the
+    tail (it had one until 2026-07-29 — same logic, two places to drift).
   - **pathrag** = `retrieval.pathrag.pathrag_search` (arXiv 2502.14902). Reads the EXISTING
     LightRAG store (no new index): LLM keywords → cosine vs entity embeddings → top-40
     distinct CONCEPTS → flow-based pruning (resource 1.0 decayed by α=0.7/degree, early stop
@@ -236,6 +238,43 @@ module plus one registry line.
 
 `retrieval.baseline.search()` = rephrase → hybrid → rerank (used by the evaluation).
 
+### Visible work: how a run reports itself (2026-07-29)
+
+A clinical question spends 12-25 s in refine → retrieval → assess → generate → validate, and
+the CLI used to print **nothing at all** until the answer was ready. It now reads the run as a
+STREAM (`app.stream(stream_mode=["updates", "custom"])`) and paints a self-erasing status line.
+
+- **`updates` is the free half.** LangGraph emits one chunk per node AS IT COMPLETES, covering
+  every step including the three the `guarded` decorator does not wrap (`rephrase`,
+  `assess_context`, `validate` — ~10 s of the wait). `MSG_STEP_LABELS` in `pipeline/config.py`
+  maps a node to what runs NEXT, because a chunk means "that one is done"; the pipeline is
+  linear enough after each node for that to be the useful thing to say. Nothing in the graph
+  changed for this.
+- **`custom` (`progress.py`) is for what `updates` cannot see:** inside a single long node. The
+  graph modes collapse retrieval into ONE node and spend 5-10 s there, so `house_tail` emits a
+  `detail` mid-way, and every retrieval path emits `sources` — the guideline sections it read,
+  labelled with `evidence.section_label` so they cannot disagree with the sources panel later.
+  The sections line is **KEPT** on screen instead of being overwritten: it is a fact about what
+  was consulted, and it is the transparency moment (the doctor recognises the ground the answer
+  stands on before reading a word).
+- **The clinical TEXT is deliberately NOT streamed, and this is a decision, not a TODO.**
+  `validate` runs AFTER `generate` and can reject the answer, so streaming tokens means a doctor
+  can read something that is then retracted — the same category of harm as the cross-patient
+  answer that `confirm_patient` blocks for, and the reason answer-first was allowed everywhere
+  else (a generic answer is safe; an unsupported one is not). There are three lesser costs too:
+  `evidence.format_answer` wraps the text and DROPS uncertifiable citations, so the draft would
+  be printed twice and differently; the draft arrives without the sources panel that is the
+  product's whole differentiator; and on a validator rejection (`MAX_ITER=2`) two contradictory
+  drafts would stream. **The technical path is known if this is ever reconsidered:**
+  `stream_mode="messages"` yields the generation deltas without touching `generation.py` or
+  `node_generate` (LangGraph's message handler flips `_should_stream`, and the final chunk
+  carries `parsed`, so `.invoke()` still returns a validated `ClinicalAnswer`); `answer` is
+  already field 2 of the schema so text starts after a one-token boolean; it would need
+  `disable_streaming=True` by default in `rag.chat_model` so only generation takes that path,
+  and a `metadata["langgraph_node"] == "generate"` filter or the validator's JSON paints itself
+  as the answer. Parsing partials off `structured_llm.stream()` is NOT viable — the parser is a
+  non-generator `RunnableLambda` and emits a single final object.
+
 ### Graph retrieval (LightRAG): what is used and what is NOT
 
 Indexing (once, `retrieval.graph._build_index`): for each chunk, gpt-4o-mini extracts **entities** and
@@ -264,7 +303,24 @@ keeping strict grounding + validate.
 ## Key files
 
 - `main.py` — entry point: compiles the graphs, wires runtime concerns (UTF-8, LangSmith,
-  warm-up) and the CLI. Thin; the graph lives in `pipeline/`.
+  warm-up) and the CLI. Thin; the graph lives in `pipeline/`. It READS THE RUN AS A STREAM
+  (`Status` + `_answer_question`) — see "visible work" below.
+- `progress.py` — the progress side channel (root module ON PURPOSE: `rag.py` and `retrieval/`
+  sit below the pipeline and cannot import from it, yet they are where the long steps are;
+  this is observability, like `logging`). `emit()` is fire-and-forget and a NO-OP outside a
+  graph run, so `evaluation.py` and the smoke scripts, which call the primitives directly,
+  cannot break on it. `read_chunk()` normalizes ONE stream chunk into the events a frontend
+  reacts to — shared by the CLI and the web so neither invents its own reading of the stream.
+- **`web/app.py`** — the Chainlit frontend (`chainlit run web/app.py`). Thin by design: it owns
+  no rule the CLI does not also follow (the stream's rules are `progress.read_chunk`, the resume
+  encoding is `pipeline.refinement_reply`, the citation verdicts and the wording are
+  `evidence.resolve_answer` / `format_answer_markdown`). What it adds is the UI for the moments a
+  chat surface does better than an `input()`: the patient-switch gate is two buttons, declining
+  the refinement is ONE click instead of one Enter per question, and the three follow-up
+  questions are `cl.Action` buttons — the last open item of OPEN D. Progress arrives as
+  collapsible `cl.Step`s and the sections read get their own kept step. Uses `astream` so the
+  sync nodes run in LangGraph's executor. `.chainlit/config.toml` + `chainlit.md` are ours and
+  committed; `.chainlit/translations/` is regenerated boilerplate and gitignored.
 - **`pipeline/`** — the LangGraph app, assembled from `rag.py`'s primitives: `config.py`
   (constants, Studio context schema, `MSG_*`), `state.py` (state schemas + reducers),
   `nodes.py` (combined-pipeline nodes + routing), `nodes_expanded.py` (one-node-per-step
@@ -274,8 +330,14 @@ keeping strict grounding + validate.
   `chat_model`/`embeddings_model` factories (the single endpoint binding, `OPENAI_BASE_URL`),
   embeddings, retrieve/retrieve_hybrid, rerank, refine, validate, assess, generate_answer
   (raw version), SYS_PROMPT, build_user_prompt, model constants.
-- `evidence.py` — answer and sources formatting + citation integrity.
-- **`tests/`** — pytest suite, 137 tests, **no API calls and no network**
+- `evidence.py` — citation integrity, in two halves: **`resolve_answer(answer, chunk_index) ->
+  AnswerView`** (the answer AS DATA: text, sources grouped by section with their certified
+  citations and grades, follow-ups) and **`format_answer`**, which RENDERS that view as the
+  72-column terminal panels. Every integrity verdict lives in the resolver, so no frontend can
+  bypass it. `AnswerView` is deliberately NOT stored in the graph state — `answer` and
+  `chunk_index` already are, both plain data, so a web frontend calls `resolve_answer` itself
+  and no dataclass ever has to survive a checkpointer's serializer.
+- **`tests/`** — pytest suite, 196 tests, **no API calls and no network**
   (`.venv\Scripts\python.exe -m pytest`, ~8 s; most of that is importing `main` in the CLI
   tests, which warms the reranker). The principle: the LLM is replaced ONLY where the
   randomness enters (refine / assess / validate / generation / retrieval, in `conftest.py`), so
@@ -284,20 +346,32 @@ keeping strict grounding + validate.
   exhausted, second question on the same thread).
   - `test_pipeline_flow.py` — the REAL graph end to end: routing, the interrupt/resume contract
     the CLI depends on, answer-before-offer, the refinement loop and its cap, the
-    validator-driven re-retrieval, and both state leaks pinned as regressions.
+    validator-driven re-retrieval, and both state leaks pinned as regressions. **Also the
+    STREAM contract** the CLI now depends on (the pause arriving as a `__interrupt__` chunk, a
+    no-op node yielding an empty update, the `sources` event landing before the answer, and
+    every `MSG_STEP_LABELS` key naming a node that exists) — without it that contract sat
+    between a real graph driven by `invoke` and a fake graph in `test_cli.py`, asserted by
+    nobody.
   - `test_pipeline_routing.py` — the small decisions in isolation, including the one that must
-    never fail open (a judge that errored routes to the safety message), plus fact folding and
-    the `re_retrieve` no-op that keeps the first pass cheap.
+    never fail open (a judge that errored routes to the safety message), plus fact folding,
+    the `re_retrieve` no-op that keeps the first pass cheap, and the progress side channel
+    (emitting outside a run is harmless; the sections are labelled like the sources panel).
   - `test_evidence.py` — citation integrity: what gets certified, what gets rejected, and that
-    a rejected quote never drags the real guideline sentence into view.
+    a rejected quote never drags the real guideline sentence into view — asserted BOTH on the
+    rendered panel and on the `AnswerView`, so a frontend reading the data cannot reach a
+    different verdict from the terminal. The panel tests were left untouched through the
+    resolver/renderer split: that they still pass is the proof the output did not move.
   - `test_rag_contracts.py` — the graceful-degradation contracts around each LLM call (refine
     fails → the question still goes through; validate fails → error, never "valid") and the
     non-citable prompt blocks, including their order.
   - `test_cli.py` — the terminal experience: answer-before-offer, declining never reprints, the
     REPL commands (`/nuevo`/`/paciente`/`/salir`), one thread across questions, EOF ends
-    cleanly. Drives `main_cli` with a scripted graph and a fake `input`.
-  - `test_retrieval_common.py` — concept collapsing, the mapping back to citable payloads, and
-    the mode catalogue.
+    cleanly, Ctrl-C cancels a query without ending the session, and the status line stays
+    SILENT without a tty (which is what keeps every other assertion here describing the real
+    terminal). Drives `main_cli` with a scripted graph and a fake `input`.
+  - `test_retrieval_common.py` — concept collapsing, the mapping back to citable payloads, the
+    mode catalogue, and `house_tail` (the tail four modes share: merge order, reranking against
+    the ORIGINAL question, and the callable form running the selection alongside the hybrid).
   - `test_llm_client.py` — an ARCHITECTURAL guard: it greps the tree and fails if any module
     builds its own OpenAI client instead of going through the factory.
 - `evaluation.py` — RAGAS evaluation. **A SINGLE set `EVAL_SET` (151 questions)** with a
@@ -359,10 +433,16 @@ keeping strict grounding + validate.
   `Command(resume=…)` carries the reply — Enter declines and ends with the answer already shown
   (it only reprints when the text changed). Commands: **`/nuevo`** (forget the patient and start
   fresh — `update_state({patient_facts: {}})`), **`/paciente`** (show the remembered data),
-  `/ayuda`, `/salir`.
-- Tests: `.venv\Scripts\python.exe -m pytest` (137 tests, ~10 s, no API calls). Run them before
+  `/ayuda`, `/salir`. **Ctrl-C** cancels the query in flight and returns to the prompt (safe:
+  the next question restarts from the top on the same thread, the orphaned pause is discarded
+  and `patient_facts` survives); a second one at an idle prompt ends the session.
+- Tests: `.venv\Scripts\python.exe -m pytest` (196 tests, ~12 s, no API calls). Run them before
   committing. They freeze the MECHANICS, not the medicine — whether an answer is clinically
   right is what `evaluation.py` and a clinician are for.
+- **Web (Chainlit): `.venv\Scripts\chainlit.exe run web/app.py`** → http://localhost:8000. Same
+  graph, one `thread_id` per browser session. The patient-switch gate and the refinement offer
+  are dialogs, the follow-up questions are buttons, and progress arrives as collapsible steps.
+  `--headless` skips opening a browser; `--port N` moves it.
 - LangGraph Studio: `.venv\Scripts\langgraph.exe dev` → opens Studio (EU). See steps in the
   **Trace View** tab (not Turn View).
 - **Choosing the retrieval strategy (Phase 4):** `main.py` compiles FOUR graphs (via
@@ -472,7 +552,7 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
     timeouts with many workers → NaN; pending measuring the winner's precision at low
     concurrency); n=16, model-drafted references. The graph's high recall might come with
     slightly less precision (retrieves broader), mitigated by reranker→top8 + validate.
-- **Phase 5 — Claude-style UX:** Streamlit/web, streaming, citations, multi-turn memory.
+- **Phase 5 — Claude-style UX:** web (Chainlit), progress streaming, citations, multi-turn memory.
   - **Clarification questions (slot-filling): DONE, and REDESIGNED to answer-first
     (2026-07-22).** **Hybrid** scheme: screening in `refine`
     (`known_facts`/`candidate_modifiers`) + reasoning in `rag.assess` (structured
@@ -486,9 +566,16 @@ Agreed order: measure → orchestrate → cheap retrieval → refine+validate �
   - **Enriched re-retrieval: DONE** (node `re_retrieve`, increment 1). After clarifying, the
     `clinical_facts` are injected into the query and re-trigger retrieval → the doctor's datum
     pulls the conditional passages before generating (tested: HBV changes the top-5).
-    PENDING: streaming, web, multi-turn conversation memory, and (increment 2) an "implicit
-    knowledge modifiers" path in `assess` (flagged and always followed by re-retrieval +
-    validate) as a safety net against retrieval failures.
+  - **Visible work (progress streaming): DONE (2026-07-29).** The CLI reads the run as a stream
+    and shows the step in flight plus the guideline sections it read; the clinical text stays
+    unstreamed on purpose. See the "Visible work" section in Architecture for the decision and
+    the technical path if it is ever reconsidered.
+    PENDING: the **web frontend (Chainlit)** — the two `interrupt()`s become a yes/no dialog and
+    optional fields, the follow-up questions become clickable (the last open item of OPEN D),
+    and the sources become collapsible elements; the structured `AnswerView` that web needs
+    (`evidence.py` currently returns a 72-column terminal string, not data); and (increment 2)
+    an "implicit knowledge modifiers" path in `assess` (flagged and always followed by
+    re-retrieval + validate) as a safety net against retrieval failures.
 
 ## Pending / next steps (as of 2026-07-22)
 
@@ -647,8 +734,8 @@ the plan, not as a bug list to rediscover.
    **Caveat: all three PathRAG corrections (canonical_key, flow×relevance, rescaling) were
    justified by manual inspection of ONE question, not measured.** They are reasoned, not
    validated — the A/B is what decides whether PathRAG earns its place at all.
-5. **Phase 5 — UX.** Interactive clarification + enriched re-retrieval DONE (validate in
-   Studio); continue with streaming, web (Streamlit/Chainlit), multi-turn memory and concept
+5. **Phase 5 — UX.** Interactive clarification, enriched re-retrieval and **progress streaming**
+   DONE; continue with the **web frontend (Chainlit, decided 2026-07-29)** and concept
    navigation. Increment 2 pending: "implicit knowledge modifiers" path in `assess` (flagged
    and always followed by re-retrieval + validate).
 
@@ -661,6 +748,19 @@ the full A/B — read them as such (n=3 per tier).
 
 ## Important findings (do not lose)
 
+- **`Command(resume={})` DOES NOT RESUME an `interrupt()` (measured 2026-07-29).** Empirical
+  rule on langgraph 1.2.5, tested value by value against the real graph: `""`, `0`, `False` and
+  any NON-empty dict all resume correctly; **an empty dict is the one value LangGraph does not
+  recognise as an answer**, so the interrupt is raised again — with the state never written,
+  which means the round budget is never spent and the pause repeats indefinitely. `None` raises.
+  This shipped as a live bug: `CLARIFY_QUESTIONS_PER_ROUND` is 3, the CLI encoded the answers as
+  `{question: answer}` dropping the blanks, and pressing Enter on all three (the documented way
+  to decline) produced `{}` — so **declining a refinement was impossible**, the same three
+  questions came back forever. Fixed in `pipeline.nodes.refinement_reply`, which is now the ONE
+  place any frontend shapes a resume value (the CLI and the web must not each invent an
+  encoding), and pinned against the REAL graph in `tests/test_pipeline_flow.py` — the fake graph
+  in `test_cli.py` resumes on anything, which is exactly why it never caught this.
+
 - **Abbreviations (largely resolved):** the corpus mostly uses abbreviations (DTG 144 vs
   "dolutegravir" 23, BIC 54 vs 8...) but also full names. That is why the rephrase includes
   BOTH forms and the glossary is also in SYS_PROMPT (they are part of the guides, not external
@@ -671,13 +771,40 @@ the full A/B — read them as such (n=3 per tier).
   is why generation is on gpt-4o.
 - **The reranker improves precision/ordering but did NOT raise recall@5** on the test set
   (6/8 same as the hybrid). Useful but not essential.
+- **THE RERANKER WAS BEING SHOWN THE WRONG 512 CHARACTERS (found and fixed 2026-07-29).** The
+  latency fix below scored `p["text"][:512]`, i.e. the chunk's PREFIX. But **89% of our chunks
+  are longer than that** (median 1616 chars, p90 3456, max 25 329) and a guideline section opens
+  with context before it recommends anything — so the cross-encoder was routinely judging a
+  preamble. Measured on «¿Qué pauta de TAR en coinfección por VHB?»: `TAR_2022 §7.4.4
+  HEPATOPATÍAS`, the section that literally holds the answer («iniciar precozmente un TAR que
+  incluya TDF o TAF y FTC o 3TC (A-I)», at char 1802 of 2508), reached the candidate pool through
+  BOTH branches (graph traversal AND dense+BM25 — both retrievers agreed) and then scored
+  **-0.900** on its prefix, ranking **10th of 25**, below four TUBERCULOSIS chunks. `top_k=8` cut
+  it, and the doctor was told the guidelines did not cover it. The same chunk scores **+0.880**
+  in full. **Widening the window is not the fix:** 2048 chars found it but took **9.4 s** instead
+  of 0.55 s (the batch pads to the longest item, so cost is superlinear), and 1024 did not find
+  it at all. **The fix is choosing WHERE the window goes** — `rag.score_window` picks the slice
+  with the most distinct query terms, same 512-char budget: the answer comes back at **rank 1**
+  in 467 ms (vs 556 ms for the prefix). Across 5 queries latency is unchanged and the top-8
+  shifts by 0-3 chunks. **So the reranker was not the weak component — it was blindfolded.**
+  Two consequences: (a) **every pending A/B number will move**, so measurement (OPEN E) has to
+  run after this, not before; (b) the sub-bug this exposed — filtering query terms by LENGTH
+  (`len > 3`) silently discarded TDF, TAF, FTC, 3TC, DTG, BIC, VHB and TAR, the most
+  discriminative tokens the guides have — is why `score_window` uses a Spanish stopword list
+  instead of a length floor. Pinned in `tests/test_retrieval_common.py`.
+- **A displayed «literal citation» can be ungrammatical because THE CORPUS is (found
+  2026-07-29).** In `TAR_2022.md` some evidence-grade markers landed MID-SENTENCE during the
+  PDF→Markdown transcription: `…se debe evitar la interrupción_ _**(A-II).** de una pauta eficaz
+  frente a VHB_`. `evidence.py` quotes the stored text faithfully, so the defect is upstream, in
+  `data/markdown/`. Scope not yet quantified; do NOT "fix" it in the citation logic.
 
 ## Optimizations / known issues
 
 - **RERANKER LATENCY (RESOLVED, Phase 4):** the rerank took **~128 s** (95% of the total
   time) because the cross-encoder pads the batch to the length of the longest chunk on CPU.
-  **Fix applied in `rag.rerank`: only `p["text"][:512]` is scored (constant
-  `RERANK_SCORE_CHARS`) and the full payloads are returned.** A multi-hop query dropped from
+  **Fix applied in `rag.rerank`: only 512 chars of each chunk are scored (constant
+  `RERANK_SCORE_CHARS`) and the full payloads are returned.** Which 512 matters — it was the
+  prefix until 2026-07-29 and that silently lost answers; see the reranker finding above. A multi-hop query dropped from
   ~145 s to ~23 s (cold). Critical for Track A, which reranks several times. Machine: 12 cores.
   `RERANK_SCORE_CHARS` is now env-configurable (default 512).
 - **THE RERANKER IS STILL THE RETRIEVAL BOTTLENECK (measured):** `retrieve_hybrid`
@@ -740,8 +867,9 @@ the full A/B — read them as such (n=3 per tier).
 - **RAGAS barely parallelizes** (≈serial even if you raise `max_workers`) and
   `context_precision` is the heavy/fragile metric (1 judge call per chunk → with many workers
   it gives TimeoutError → NaN). `context_recall` is the light and robust one. Stable config:
-  `RunConfig(timeout=600, max_workers=8, max_retries=10)`. For a cheap A/B use
-  `RETRIEVAL_ONLY=1` (no gpt-4o generation) or `RECALL_ONLY=1` (recall only) in `evaluation.py`.
+  `RunConfig(timeout=600, max_workers=8, max_retries=10)`. There is no cheap retrieval-only
+  path any more (`RETRIEVAL_ONLY`/`RECALL_ONLY` were removed); every run pays full gpt-4o
+  generation, which is what makes the 5-mode A/B expensive — see OPEN F.
 - **LightRAG graph build:** bottleneck = `max_parallel_insert` (default 2 → raised to 8 in
   `retrieval.graph`; also `llm_model_max_async=16`). Even so ~1.5 h for the ~517
   extractions. Resumable and with an LLM cache (re-running is cheap).
