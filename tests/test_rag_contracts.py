@@ -6,12 +6,14 @@ Two families, and both are about what happens when things are NOT ideal:
      failure blocks the doctor. Those branches are the difference between "the service hiccuped
      and the answer came out a bit generic" and "the service hiccuped and an unverified answer
      reached a clinician". They never run in a happy-path manual test.
-  2. PROMPT ASSEMBLY — the non-citable blocks. Their exact wording is what separates "data that
-     selects a branch" from "data the model will quote as if it were a guideline".
+  2. PROMPT ASSEMBLY — where each fragment comes from, and the non-citable blocks. Their exact
+     wording is what separates "data that selects a branch" from "data the model will quote as
+     if it were a guideline".
 """
 import pytest
 
 import rag
+from conftest import CHUNK
 
 
 class _Boom:
@@ -183,6 +185,50 @@ def test_assess_reasoning_is_kept_for_the_trace(monkeypatch):
     assert out["clinically_relevant"] == ["gestacion"]
     assert out["branches_on"] == ["funcion_renal"]
     assert out["already_covered"] == ["cd4"]
+
+
+# --- prompt assembly: where each fragment comes from ------------------------
+# Seven guides spanning 2013-2025 sit in this corpus, and SYS_PROMPT asks the model to decide
+# which version applies. It could not: the guide and the year reached the doctor (the sources
+# panel renders them) but never the prompt. Nothing failed — the answer just arbitrated blind.
+def test_each_fragment_is_headed_by_its_guide_and_year():
+    _, formatted = rag.build_context([CHUNK])
+
+    assert formatted.startswith(f"[1] {CHUNK['doc_title']} ({CHUNK['year']})\n")
+    assert CHUNK["text"] in formatted
+
+
+def test_the_payload_is_left_untouched_by_the_header():
+    """Only the PROMPT string carries the provenance. If it leaked into the payload,
+    `evidence.attribute` would fuzzy-match quotes against text the guide does not contain."""
+    chunk = dict(CHUNK)
+    index, _ = rag.build_context([chunk])
+
+    assert index[1]["text"] == CHUNK["text"]
+    assert CHUNK["doc_title"] not in index[1]["text"]
+
+
+def test_a_fragment_without_metadata_still_gets_numbered():
+    """Metadata is uneven across the guides; a missing title must not cost the fragment its
+    place in the context, only its provenance line."""
+    _, formatted = rag.build_context([{"text": "texto suelto"}])
+    assert formatted == "[1] texto suelto\n\n"
+
+
+def test_the_conflict_rule_can_actually_be_applied():
+    """Rule 5 tells the model which version prevails. It is only actionable because the year is
+    now in front of it — the pairing is the whole point, so both are asserted together."""
+    _, formatted = rag.build_context([CHUNK, dict(CHUNK, year=2013, doc_title="Guía antigua")])
+
+    assert "(2022)" in formatted and "(2013)" in formatted
+    assert "PREVALECE LA MÁS RECIENTE" in rag.SYS_PROMPT
+    assert "PREVALECE LA ESPECÍFICA" in rag.SYS_PROMPT
+
+
+def test_the_provenance_line_is_declared_non_citable():
+    """It sits inside the numbered fragment, so without this the model could quote it as if it
+    were guideline text."""
+    assert 'no la cites nunca en "cita_textual"' in rag.SYS_PROMPT
 
 
 # --- prompt assembly: the non-citable blocks -------------------------------

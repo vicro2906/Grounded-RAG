@@ -416,11 +416,34 @@ def rephrase(query: str, prev_question: str | None = None) -> str:
     return refine(query, prev_question)["query"]
 
 
+def _provenance(chunk: dict) -> str:
+    """«Guía (año)» — the same shape `evidence.py` shows the doctor in the sources panel, so
+    what steers the model and what justifies the answer cannot describe a chunk differently."""
+    title = (chunk.get("doc_title") or "").strip()
+    year = chunk.get("year")
+    if title and year:
+        return f"{title} ({year})"
+    return title or (str(year) if year else "")
+
+
 def build_context(context: list):
-    """Number the retrieved chunks: return ({n: chunk}, "[1] text\\n\\n[2] …") for the prompt."""
+    """Number the retrieved chunks for the prompt, each headed by the guide it came from.
+
+    Return ({n: chunk}, "[1] Guía (año)\\ntext\\n\\n[2] …").
+
+    The provenance line is what makes SYS_PROMPT's conflict rule possible at all. This corpus
+    spans SEVEN guides from 2013 to 2025, and the model was being asked to arbitrate between
+    contradictory fragments whose dates it could not see: the metadata reached the doctor (the
+    sources panel renders it) but never the prompt. Only the PROMPT string carries it — the
+    payload is untouched, so `evidence.attribute` still fuzzy-matches quotes against the literal
+    guideline text and a quote of this header degrades to a `miss`, not to a false citation."""
     chunk_index = {i: chunk for i, chunk in enumerate(context, 1)}
-    formatted = "".join(f"[{i}] {chunk['text']}\n\n" for i, chunk in chunk_index.items())
-    return chunk_index, formatted
+    parts = []
+    for i, chunk in chunk_index.items():
+        head = _provenance(chunk)
+        parts.append(f"[{i}] {head}\n{chunk['text']}\n\n" if head
+                     else f"[{i}] {chunk['text']}\n\n")
+    return chunk_index, "".join(parts)
 
 
 # System prompt (Spanish: it drives Spanish output over the Spanish guides).
@@ -432,16 +455,16 @@ SYS_PROMPT = """
     2. No inventes recomendaciones, dosis, tratamientos ni criterios clínicos.
     3. Si la respuesta no está en el contexto, marca "informacion_suficiente": false y usa como respuesta: "La información no está disponible en las guías proporcionadas."
     4. Si el contexto es parcial o insuficiente, indícalo explícitamente dentro de la propia respuesta.
-    5. Si hay conflicto entre fragmentos, menciona ambas versiones sin resolverlo por tu cuenta.
+    5. Cada fragmento va encabezado por la guía de la que procede y su año. Si dos fragmentos se CONTRADICEN, resuélvelo así y dilo explícitamente en la respuesta: (a) si una guía es específica de la situación de la pregunta (embarazo, tuberculosis, profilaxis posexposición, alteraciones neurocognitivas) y la otra es general, PREVALECE LA ESPECÍFICA aunque sea más antigua; (b) en igualdad de ámbito, PREVALECE LA MÁS RECIENTE, y menciona la anterior solo para señalar que ha quedado superada (p. ej. «la guía de 2022 recomienda X; la de 2013 indicaba Y»). No presentes dos versiones en conflicto como si fueran alternativas equivalentes. Si los fragmentos no se contradicen sino que se complementan, intégralos sin más.
     6. Lenguaje clínico, preciso y estructurado.
     6 bis. Si el usuario incluye un bloque "DATOS APORTADOS POR EL MÉDICO", úsalos ÚNICAMENTE para seleccionar entre las recomendaciones del contexto la que aplica a ese paciente (p. ej. la rama de gestación, de insuficiencia renal o de coinfección). Esos datos NO son una fuente: no los cites, no los incluyas en "fragmentos_usados" ni en "cita_textual", y toda afirmación clínica debe seguir respaldada por los fragmentos del contexto. Si el contexto no cubre el escenario indicado por esos datos, dilo explícitamente y marca "informacion_suficiente" según corresponda.
 
     REDACCIÓN DE LA RESPUESTA:
     7. Redacta una respuesta completa, cohesionada y bien estructurada en prosa, con los párrafos que requiera la pregunta. No la trocees artificialmente; desarrolla la idea con naturalidad clínica, integrando la justificación dentro de la propia explicación.
-    8. No incluyas en el texto de la respuesta los títulos, secciones, años ni números de fragmento: esos datos los añade el sistema automáticamente como fuentes al final. Escribe la respuesta como prosa limpia, sin marcadores tipo [1] ni "Fuente del contexto".
+    8. No incluyas en el texto de la respuesta los números de fragmento ni los títulos o secciones de las guías: esos datos los añade el sistema automáticamente como fuentes al final. Escribe la respuesta como prosa limpia, sin marcadores tipo [1] ni "Fuente del contexto". ÚNICA excepción: nombrar una guía o su año cuando la regla 5 lo exija para dejar claro qué versión aplica.
 
     REGLAS DE CITACIÓN (críticas):
-    9. Cada fragmento del contexto viene numerado: [1], [2], etc.
+    9. Cada fragmento del contexto viene numerado ([1], [2], etc.) y encabezado por una línea con la guía y el año de los que procede. Esa línea es metadato del sistema, NO es contenido de la guía: no la cites nunca en "cita_textual".
     10. En "fragmentos_usados" incluye ÚNICAMENTE los fragmentos que realmente sustentan tu respuesta. Si solo usaste 2 de los 5, devuelve solo esos 2. No incluyas fragmentos irrelevantes ni "por si acaso".
     11. Para cada fragmento usado, copia en "cita_textual" la frase EXACTA Y LITERAL del fragmento que respalda tu afirmación, carácter por carácter, sin reescribirla, resumirla ni corregirla. Debe poder encontrarse tal cual dentro del texto del fragmento.
 
