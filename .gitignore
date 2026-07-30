@@ -31,3 +31,7 @@ data/pdfs/
 # boilerplate (24 UI translation files) and per-session state.
 .chainlit/translations/
 .files/
+# Chainlit regenerates a DEFAULT config next to the app when launched from elsewhere. Ours is
+# the one at the repo root (run `chainlit run web/app.py` from there); this duplicate would
+# silently shadow it.
+web/.chainlit/

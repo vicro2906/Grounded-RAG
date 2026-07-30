@@ -240,8 +240,10 @@ module plus one registry line.
 
 ### Visible work: how a run reports itself (2026-07-29)
 
-A clinical question spends 12-25 s in refine → retrieval → assess → generate → validate, and
-the CLI used to print **nothing at all** until the answer was ready. It now reads the run as a
+A clinical question spends **~35 s** in refine → retrieval → assess → generate → validate
+(measured over 20 questions in graph mode: mean 34.4 s, median 34.6, max 50.8 — the "12-25 s"
+figure that circulated came from the retrieval-only eval path, which pays neither assess nor
+validate), and the CLI used to print **nothing at all** until the answer was ready. It now reads the run as a
 STREAM (`app.stream(stream_mode=["updates", "custom"])`) and paints a self-erasing status line.
 
 - **`updates` is the free half.** LangGraph emits one chunk per node AS IT COMPLETES, covering
@@ -337,7 +339,7 @@ keeping strict grounding + validate.
   bypass it. `AnswerView` is deliberately NOT stored in the graph state — `answer` and
   `chunk_index` already are, both plain data, so a web frontend calls `resolve_answer` itself
   and no dataclass ever has to survive a checkpointer's serializer.
-- **`tests/`** — pytest suite, 196 tests, **no API calls and no network**
+- **`tests/`** — pytest suite, 217 tests, **no API calls and no network**
   (`.venv\Scripts\python.exe -m pytest`, ~8 s; most of that is importing `main` in the CLI
   tests, which warms the reranker). The principle: the LLM is replaced ONLY where the
   randomness enters (refine / assess / validate / generation / retrieval, in `conftest.py`), so
@@ -374,6 +376,11 @@ keeping strict grounding + validate.
     the ORIGINAL question, and the callable form running the selection alongside the hybrid).
   - `test_llm_client.py` — an ARCHITECTURAL guard: it greps the tree and fails if any module
     builds its own OpenAI client instead of going through the factory.
+  - `test_evaluation.py` — the product-measurement path: how each run is CLASSIFIED (three
+    causes of "no answer", each needing a different fix), that every question gets its own
+    thread (one thread would leak the previous patient and measure a conversation nobody had),
+    that a run answering NOTHING is reported rather than aborted, that an outage records what
+    broke, and that a failed judge does not sink a report the run already paid for.
 - `evaluation.py` — RAGAS evaluation. **A SINGLE set `EVAL_SET` (151 questions)** with a
   `tier` field per question (**simple / single_hop / multihop / adversarial**) → measures
   performance BY QUESTION TYPE. It is built by folding the old pools (golden + multihop, now
@@ -436,10 +443,13 @@ keeping strict grounding + validate.
   `/ayuda`, `/salir`. **Ctrl-C** cancels the query in flight and returns to the prompt (safe:
   the next question restarts from the top on the same thread, the orphaned pause is discarded
   and `patient_facts` survives); a second one at an idle prompt ends the session.
-- Tests: `.venv\Scripts\python.exe -m pytest` (196 tests, ~12 s, no API calls). Run them before
+- Tests: `.venv\Scripts\python.exe -m pytest` (217 tests, ~16 s, no API calls). Run them before
   committing. They freeze the MECHANICS, not the medicine — whether an answer is clinically
   right is what `evaluation.py` and a clinician are for.
-- **Web (Chainlit): `.venv\Scripts\chainlit.exe run web/app.py`** → http://localhost:8000. Same
+- **Web (Chainlit): `.venv\Scripts\chainlit.exe run web/app.py`** → http://localhost:8000.
+  **Launch it FROM THE REPO ROOT:** the config it must pick up is `.chainlit/config.toml` there
+  (Spanish UI, app name); launched from elsewhere Chainlit silently regenerates a DEFAULT one
+  next to the app, which is why `web/.chainlit/` is gitignored. Same
   graph, one `thread_id` per browser session. The patient-switch gate and the refinement offer
   are dialogs, the follow-up questions are buttons, and progress arrives as collapsible steps.
   `--headless` skips opening a browser; `--port N` moves it.
@@ -507,6 +517,12 @@ keeping strict grounding + validate.
 - RAGAS evaluation / A/B: `PIPELINE=<mode> .venv\Scripts\python.exe evaluation.py`. **Probe
   first with `EVAL_SAMPLE=3`** (stratified, 3 per tier = 12 questions, cents) to check wiring
   and latency before spending on the full 151.
+- **Measuring the SHIPPED system: `EVAL_TARGET=product PIPELINE=<mode> … evaluation.py`.** Runs
+  the compiled graph instead of retriever+generate, and reports what only it can see: the
+  no-answer rate by cause, the false-rejection rate of `validate` and the validator retry (see
+  OPEN E). Dumps `results/ragas_results_<mode>_product.csv` (the answered rows, as usual) plus
+  `results/product_runs_<mode>.csv` (one row per question, with its outcome). Slower than the
+  retrieval path — it pays rephrase + assess + validate per question — so probe it the same way.
 - **Dependencies: ALWAYS `uv add` (never pip).** `uv` is not on PATH:
   `& "$env:USERPROFILE\.local\bin\uv.exe" add <package>`.
   **WARNING (bitten 2026-07-21):** any `uv add` re-resolves the lock and reinstalls the CPU
@@ -610,20 +626,71 @@ the plan, not as a bug list to rediscover.
   exception to answer-first — a cross-patient recommendation is the harm; a generic answer is
   not). Only an explicit «sí» clears the data; Enter keeps the patient. **Still pending:** the 3
   follow-up questions the system emits are not clickable.
-- **OPEN E — the evaluation does not measure the shipped system.** `build_dataset` calls
-  retriever + `generate_answer` directly, skipping `refine`, `assess`/`clarify`, `re_retrieve`,
-  the `validate` loop and `evidence`. So no number covers the riskiest component: the FALSE
-  REJECTION rate of `validate` (a correct answer silently replaced by `MSG_NOT_VALIDATED`).
-  There is also no ABSTENTION metric, though the `adversarial` tier exists to measure it.
+- **OPEN E — measuring the shipped system: the PATH exists now (2026-07-30), the full numbers
+  do not.** `build_dataset` still calls retriever + `generate_answer` directly, skipping
+  `refine`, `assess`, `re_retrieve`, the `validate` loop and `evidence` — that path stays,
+  because isolating retrieval is what an A/B between modes needs. Alongside it,
+  **`EVAL_TARGET=product`** runs the COMPILED GRAPH (`run_product`), one FRESH thread per
+  question (reusing one would leak the previous patient's facts and measure a conversation
+  nobody had) and declining every pause. What it reports that nothing did before:
+  - **the no-answer rate** — how often a question the guidelines DO cover ends with no clinical
+    content, split by cause because each needs a different fix: `insufficient` (the model said
+    the context does not answer it), `not_validated` (an answer existed and the judge threw it
+    away), `validation_error`, `technical_error`. This is the failure the VHB question hit.
+  - **the false-rejection rate** — of the answers `validate` discarded, how many actually agreed
+    with the reference. Judged against the REFERENCE, not by re-running the same judge, which
+    would only measure its own flakiness. It is the pipeline's most dangerous failure and the
+    only one with no visible symptom.
+  - **the validator retry**, measured at last: how many regenerations ended answered, and how
+    many of them went back for evidence (`refocus_retrieve`). Reasoned about since 2026-07-22,
+    never measured.
+  RAGAS scores only the ANSWERED rows and the coverage is reported apart, on purpose: a high
+  faithfulness over a third of the questions is not a good system. A run that answers NOTHING is
+  reported, not aborted — that is the loudest possible result, and the records are what say so.
+  **Correction to a long-standing assumption: the `adversarial` tier does NOT measure
+  abstention.** Its 30 questions ARE answerable from the guidelines; they are negation,
+  over-generalization and distractor traps («¿está indicada la PEP siempre que hay un
+  pinchazo?» → «no siempre, cuando…»). The right answer is the nuance, not «no está en las
+  guías», so an abstention metric over that tier would have scored the correct behaviour as
+  failure.
+  **First numbers (stratified probe, 5 per tier = 20 questions, graph mode, 2026-07-30):**
+  18/20 answered (90%); 1 `insufficient` and 1 `technical_error`, BOTH in the `adversarial`
+  tier — every other tier answered 1.0. Re-running the technical one answered fine in 25 s, so
+  it was a transient service blip, not a systematic failure; that is exactly why the record
+  carries `failed_step`/`technical_detail` now. 0 rejections, so the false-rejection rate has
+  no data yet — it needs the full run.
+  **Latency is the surprise: mean 34.4 s, median 34.6 s, max 50.8 s** — the "12-25 s" quoted
+  elsewhere in this file measured retrieval + one generation, not the shipped path, which also
+  pays rephrase, assess (gpt-4o) and validate (gpt-4o). Per tier the ordering is not the
+  expected one either: `simple` is the SLOWEST (44.3 s mean) and `single_hop` the fastest
+  (24.5 s). Unexplained; worth a look before optimizing anything.
+  **Pending:** the full 151-question run, which must happen AFTER the reranker window fix —
+  every number moved. Use `EVAL_RAGAS=0` for it: the product metrics need no judge, and that is
+  what makes running the shipped system over the whole set affordable.
 - **OPEN F — the A/B is confounded and more expensive than it needs to be.** `house_tail` mixes
   every graph mode's selection with the same dense+BM25 complement, so the four modes share a
   good part of their final context and the measured deltas are compressed; an ablation WITHOUT
   the complement is what isolates the selection mechanism. And since only retrieval varies,
   restoring a retrieval-only path (recall/precision, no gpt-4o generation) would run all five
   modes over the 151 questions for a fraction of the current cost.
-- **OPEN G — rich metadata unused.** `topic` / `year` / `section_number` / `evidence_grades` are
-  in every payload and filter nothing in Qdrant. With guidelines from 2020 and 2022 coexisting,
-  `SYS_PROMPT` rule 5 ("state both versions") is unhelpful when one is simply older.
+- **OPEN G — rich metadata: the PROMPT half is DONE (2026-07-30), the FILTERING half is not.**
+  The concrete defect was worse than "unused metadata": `build_context` emitted `[1] {text}` and
+  nothing else, so **the guide and the year never reached the model at all**, while `SYS_PROMPT`
+  rule 5 asked it to arbitrate between contradictory fragments — across SEVEN guides spanning
+  2013 to 2025 — whose dates it could not see. Rule 8 even forbade mentioning years. The
+  metadata did reach the doctor, but only afterwards, in the sources panel.
+  Fixed: each fragment is now headed by «Guía (año)», in the SAME shape `evidence.py` renders,
+  and only in the prompt string (the payload is untouched, so `evidence.attribute` still matches
+  quotes against the literal text and a quote of the header degrades to a `miss`). Rule 5 now
+  RESOLVES the conflict instead of shrugging: a guide **specific** to the situation prevails over
+  a general one even if older (the pregnancy and TB guides are 2018, TAR is 2022 — "most recent
+  wins" alone would have been clinically wrong), and at equal scope the most recent wins and the
+  older one is named as superseded. Rule 8 gained the matching exception; rule 9 declares the
+  header non-citable. Pinned in `tests/test_rag_contracts.py`.
+  **Still open:** nothing filters or boosts by `year`/`topic` in Qdrant, though the payload
+  indexes exist. Deliberately not done — some topics only exist in the older guides and a filter
+  would erase them; disambiguating at generation is visible and reversible. Revisit if the
+  measurement (OPEN E) shows the model mis-picking versions.
 - **OPEN H — GDPR: the code is ready, the account is not (decided 2026-07-22).** It is a
   PROTOTYPE with no real users, so running on OpenAI US is accepted **for now**; the move to
   Europe is wanted in the near future. What was done: `OPENAI_BASE_URL` (in `rag.py`, mirrored
@@ -792,6 +859,29 @@ the full A/B — read them as such (n=3 per tier).
   (`len > 3`) silently discarded TDF, TAF, FTC, 3TC, DTG, BIC, VHB and TAR, the most
   discriminative tokens the guides have — is why `score_window` uses a Spanish stopword list
   instead of a length floor. Pinned in `tests/test_retrieval_common.py`.
+- **ABSTAINING ON A LOW RERANKER SCORE: MEASURED AND REJECTED (2026-07-30).** The idea was a
+  safety net for priority #1: if the best chunk scores low, the guides probably do not cover the
+  question, so say so instead of generating. It does not survive contact with the data.
+  Measured over 40 questions (10 per tier) that the guides DEMONSTRABLY answer — every EVAL_SET
+  question has a reference — the top-1 score spans **-0.828 to +2.060**, median +0.520. So even
+  the most permissive threshold tried, -0.5, would silence **10% of answerable questions**; 0.0
+  silences 25%; +0.2 silences 38%. Per tier the floor is low everywhere (`single_hop` -0.828,
+  `adversarial` -0.664, `multihop` -0.511) — this is not one outlier.
+  Worse, the benefit cannot be measured at all: **the eval set has no negative class**. Every
+  question is covered, so there is no way to know how many genuinely uncovered ones a threshold
+  would catch. A known cost against an unmeasurable benefit is not a trade, and shipping the
+  threshold would have converted a safety net into a generator of false «no está en las guías» —
+  the same invisible failure the whole system is built to avoid.
+  Third argument, from the reranker finding above: the score is not stable enough to carry a
+  decision. The SAME chunk scored -0.900 and +0.880 depending only on which 512-char window it
+  was shown. A signal that swings 1.8 points on a windowing detail cannot gate an answer.
+  **What would unblock it:** a labelled set of IN-DOMAIN questions this corpus does not cover
+  (out-of-domain ones are already stopped by the `refine` guardrail). That is a dataset task
+  needing clinical input, not a code task. Until it exists, abstention stays where it already
+  works on CONTENT rather than on a scalar: the generator's `sufficient_information` (which
+  correctly declined the VIH-2/efavirenz trap in the probe) and `validate`.
+  `rag.rerank` was deliberately NOT changed to expose its scores: there is nothing to consume
+  them.
 - **A displayed «literal citation» can be ungrammatical because THE CORPUS is (found
   2026-07-29).** In `TAR_2022.md` some evidence-grade markers landed MID-SENTENCE during the
   PDF→Markdown transcription: `…se debe evitar la interrupción_ _**(A-II).** de una pauta eficaz
