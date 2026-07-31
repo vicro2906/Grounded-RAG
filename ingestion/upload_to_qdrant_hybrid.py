@@ -15,11 +15,11 @@ The hybrid search is done at query time with Qdrant's Query API
 (dense prefetch + sparse prefetch, fused with RRF). See rag.py.
 
 Usage:
-    python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks.jsonl
-    python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks.jsonl --recreate
-    python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks.jsonl --dry-run
+    python -m ingestion.upload_to_qdrant_hybrid data/chunks/chunks.jsonl
+    python -m ingestion.upload_to_qdrant_hybrid data/chunks/chunks.jsonl --recreate
+    python -m ingestion.upload_to_qdrant_hybrid data/chunks/chunks.jsonl --dry-run
     # Contextual Retrieval to a NEW collection (does not touch the current one; allows A/B and rollback):
-    python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
+    python -m ingestion.upload_to_qdrant_hybrid data/chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
 """
 
 import argparse
@@ -38,6 +38,8 @@ from fastembed import SparseTextEmbedding
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(usecwd=True))
 
+import corpus
+
 QDRANT_URL     = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -46,7 +48,11 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 # standalone (it must not drag in the retrieval stack).
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL") or None
 
-COLLECTION = "guias_vih_hibrida"     # NEW collection; the original stays intact
+# The collection the APP reads for the active corpus generation. It used to be spelled out here
+# as a different name than rag.py queried, so uploading without --collection filled a collection
+# nobody searched. corpus.py imports nothing from the project, so depending on it does not
+# compromise this script's standalone-ness (it must not drag in the retrieval stack).
+COLLECTION = corpus.qdrant_collection()
 
 EMBED_MODEL = "text-embedding-3-large"
 EMBED_DIM   = 3072
@@ -128,9 +134,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("jsonl", help="chunks.jsonl file")
     ap.add_argument("--collection", default=COLLECTION,
-                    help=f"Target collection name (default '{COLLECTION}'). "
-                         "Use another name (e.g. guias_vih_hibrida_ctx) to NOT overwrite "
-                         "the current one and be able to A/B or roll back.")
+                    help=f"Target collection name (default '{COLLECTION}', the one the app "
+                         "reads for this corpus generation). Use another name to upload a "
+                         "variant build without overwriting it, for an A/B or a rollback.")
     ap.add_argument("--recreate", action="store_true", help="Delete the collection before uploading")
     ap.add_argument("--dry-run", action="store_true", help="No upload; validate and estimate cost")
     args = ap.parse_args()

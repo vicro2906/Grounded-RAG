@@ -39,12 +39,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+import corpus
 from rag import REPHRASE_MODEL, _ABBREV_LIST, chat_model, client, get_embedding, rephrase
 
 from ._common import canonical_key, expand_abbrevs, house_tail, map_chunk_ids_to_payloads
 
 # --- Config ---------------------------------------------------------------
-STORE_DIR = os.path.join(ROOT, "data", "lightrag_store")
+# The SAME store retrieval.graph builds — PathRAG adds no index of its own.
+STORE_DIR = corpus.lightrag_dir()
 GRAPHML = os.path.join(STORE_DIR, "graph_chunk_entity_relation.graphml")
 VDB_ENTITIES = os.path.join(STORE_DIR, "vdb_entities.json")
 TEXT_CHUNKS = os.path.join(STORE_DIR, "kv_store_text_chunks.json")

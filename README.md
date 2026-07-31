@@ -144,8 +144,8 @@ python main.py iterative        # baseline | iterative | graph
 Corpus indexing (once):
 
 ```bash
-python ingestion/contextualize.py                                   # enriches the chunks
-python ingestion/upload_to_qdrant_hybrid.py data/chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
+python -m ingestion.contextualize                                   # enriches the chunks
+python -m ingestion.upload_to_qdrant_hybrid data/chunks/chunks_contextual.jsonl --collection guias_vih_hibrida_ctx
 python -m retrieval.graph                                           # builds the graph
 ```
 

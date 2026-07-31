@@ -1,0 +1,341 @@
+"""Quality gates over the corpus artifacts (Markdown sources and the chunks built from them).
+
+WHY THIS EXISTS. Every defect this module checks was found by reading the corpus by hand, long
+after it had been indexed, embedded and answered from. None of them announced itself: the
+guideline chapter holding the recommended first-line regimens was retrieved and cited while
+containing zero table rows, the reranker was fed chunks 8x over their stated budget, and a drug
+name lost a letter (`fluconazol` -> `fuconazol`) so no lexical search could ever find it. A
+corpus can be silently wrong in ways an end-to-end evaluation scores as merely mediocre.
+
+So the gates are the contract, not the audit: each one states an invariant the corpus must hold,
+fails the build when it does not, and carries the number measured on the day it was written so a
+regression is visible as a number going up rather than as a vague sense that answers got worse.
+
+WHAT A GATE IS ALLOWED TO BE. A gate must be deterministic, offline and cheap (the whole suite
+runs in ~2 s over 517 chunks). It never calls a model — a gate judged by an LLM would have the
+same failure mode as the thing it is checking.
+
+Gates land in two waves. The ones here need only the chunks and their Markdown sources. Two more
+(G5b, the token-level oracle against the PDF's own text layer, and G9, manifest coverage) need
+the document manifest to know which reference text belongs to which Markdown, and arrive with it.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from ingestion.chunk_guidelines import (MAX_TOKENS, RE_GRADE, RE_TABLE_ROW, count_tokens,
+                                        is_mostly_table)
+
+# ---------------------------------------------------------------------------
+# Shared vocabulary
+# ---------------------------------------------------------------------------
+
+# Window in which a chunk's opening must identify it uniquely. MIRRORS
+# retrieval/_common.py:PREFIX_CHARS, which is the consumer that breaks when this is violated:
+# it maps an index's stored text back to our citable payload by prefix, so two chunks sharing an
+# opening make it hand back the WRONG section under the right claim. The two constants are
+# asserted equal in tests/test_corpus_quality.py rather than imported, because `retrieval/`
+# drags in the whole retrieval stack and ingestion must stay standalone.
+PREFIX_CHARS = 120
+
+# Typographic ligatures. The PDFs contain these as single glyphs; they must be expanded on
+# extraction, never dropped. Dropping them is what produced `fuconazol` for `fluconazol`.
+LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl"}
+
+# The ONE shape an omission marker may take. Spanish because the doctor reads it in the corpus.
+# The page number is what makes it actionable (the doctor can open the PDF at that page) and the
+# cause is what lets G4 accept an unrecoverable figure while rejecting a lost table.
+OMISSION_CANONICAL = re.compile(
+    r"> _\[(?P<cause>Figura|Algoritmo|Tabla) omitid[ao] — p\. (?P<page>\d+) — "
+    r"consultar PDF original\]_")
+# Anything that *looks* like an omission marker, so non-canonical ones are caught rather than
+# ignored. The corpus built by the ad-hoc scripts holds 27 distinct spellings.
+OMISSION_ANY = re.compile(r"\[[^\]]*omitid[ao][^\]]*\]")
+# A table that could not be extracted is a BUG, not an accepted omission: its text is in the
+# PDF's text layer and the extractor is expected to recover it.
+OMISSION_ACCEPTED = {"Figura", "Algoritmo"}
+
+# A table caption, as a heading or as a bold-only line. Both forms occur; the bold-only ones are
+# why four separate tables ended up inside a single chunk.
+RE_TABLE_CAPTION = re.compile(
+    r"^(?:#{1,6}\s+|\*\*)\s*(?P<caption>(?:TABLA|Tabla)\s*\d+[.:]?[^\n*]*)", re.MULTILINE)
+# Wide matrices are serialised as one record per entity-row instead of an unreadable 19-column
+# Markdown table, so "this table has data" must accept both shapes.
+RE_RECORD_ROW = re.compile(r"^\s*[-*]\s+\S.*?:\s+\S", re.MULTILINE)
+
+# An emphasis run closed and immediately reopened. Well-formed Markdown never contains this; the
+# PDF converter produced it whenever it met a span drawn out of flow, and the damage is not
+# cosmetic: it splits words across the break (`c_ _on` for `con`) and strands evidence grades
+# mid-sentence.
+RE_BROKEN_EMPHASIS = re.compile(r"_\s+_")
+# An evidence grade whose sentence continues after it in lowercase: a full stop followed by a
+# lowercase word is never a sentence end, so the marker was injected into the middle of a clause.
+# Only emphasis markup and at most ONE newline may sit in between — otherwise `(A-II)** .\n\n
+# ##### b. Título` (a grade correctly closing its sentence, followed by a lettered heading) reads
+# as a violation, and a gate that cries wolf gets switched off.
+RE_GRADE_MID_SENTENCE = re.compile(
+    r"\(\s*\*{0,2}\s*[ABC]\s*-?\s*I{1,3}\s*\*{0,2}\s*\)"   # the grade
+    r"[*_ \t]{0,6}\.[*_ \t]{0,4}\n?[*_ \t]{0,4}"            # a full stop, maybe wrapped in markup
+    r"[a-záéíóúñü]")                                        # ... and the clause carries on
+# Grade-shaped text the canonical regex does NOT capture, so a grade lost to stray markup
+# (`(_ _**A-I).**_`) or an unsupported range (`(AI-AII)`) is reported instead of vanishing.
+RE_GRADE_LOOSE = re.compile(
+    r"\([_*\s]*[ABC][_*\s]*-?[_*\s]*I{1,3}[_*\s.]*\)"       # a grade with markup anywhere inside
+    r"|\([ABC]I{1,3}\s*-\s*[ABC]I{1,3}\)")                  # a range, e.g. (AI-AII)
+
+# Fraction of the source Markdown that must survive into the chunks.
+MIN_COVERAGE = 0.995
+# Paragraphs shorter than this are not worth tracking for coverage (captions, stray fragments).
+COVERAGE_MIN_PARAGRAPH = 40
+
+
+# ---------------------------------------------------------------------------
+# Results
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Finding:
+    """One violation. `subject` locates it (chunk id, file, caption) so it can be fixed."""
+    subject: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class Gate:
+    code: str                    # "G1"
+    title: str                   # the invariant, stated positively
+    findings: tuple[Finding, ...]
+
+    @property
+    def passed(self) -> bool:
+        return not self.findings
+
+
+def _gate(code: str, title: str, findings: list[Finding]) -> Gate:
+    return Gate(code=code, title=title, findings=tuple(findings))
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def _norm(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def body_of(chunk: dict) -> str:
+    """The chunk's own content, without the `A > B > C` breadcrumb it is prefixed with.
+
+    The chunker prepends the breadcrumb to `text` so the embedding sees the section context.
+    That makes `text` a poor proxy for "does this chunk say anything", which is exactly what G2
+    asks: one chunk in the corpus is 100% breadcrumb and 0% body. Note that such a chunk has no
+    blank line at all — it is the breadcrumb and nothing else — so the split has to treat a
+    missing separator as an EMPTY body rather than as "no breadcrumb here"."""
+    text = chunk.get("text") or ""
+    head, sep, rest = text.partition("\n\n")
+    if " > " in head and len(head) < 300:
+        return rest.strip()
+    return text
+
+
+def has_tabular_content(text: str) -> bool:
+    """True if the text carries table data in either supported shape (Markdown rows, or the
+    one-record-per-row form wide matrices are serialised into)."""
+    return (any(RE_TABLE_ROW.match(line) for line in text.splitlines())
+            or bool(RE_RECORD_ROW.search(text)))
+
+
+def _paragraphs(md: str) -> list[str]:
+    """Source paragraphs worth tracking for coverage: prose, not headings or short fragments."""
+    out = []
+    for block in re.split(r"\n\s*\n", md):
+        block = block.strip()
+        if block and not block.startswith("#") and len(block) >= COVERAGE_MIN_PARAGRAPH:
+            out.append(block)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Gates over the CHUNKS
+# ---------------------------------------------------------------------------
+def g01_size_budget(chunks: list[dict]) -> Gate:
+    findings = [
+        Finding(c.get("chunk_id", "?"),
+                f"{count_tokens(c.get('text', ''))} tokens > {MAX_TOKENS} "
+                f"({c.get('source_file')} · {c.get('heading')})")
+        for c in chunks if count_tokens(c.get("text", "")) > MAX_TOKENS
+    ]
+    return _gate("G1", f"No chunk exceeds {MAX_TOKENS} tokens", findings)
+
+
+def g02_non_empty_body(chunks: list[dict]) -> Gate:
+    findings = [
+        Finding(c.get("chunk_id", "?"),
+                f"body is empty, only the breadcrumb ({c.get('source_file')} · {c.get('heading')})")
+        for c in chunks if not body_of(c).strip()
+    ]
+    return _gate("G2", "Every chunk carries content of its own", findings)
+
+
+def g03_unique_openings(chunks: list[dict]) -> Gate:
+    groups: dict[str, list[str]] = {}
+    for c in chunks:
+        groups.setdefault(_norm(c.get("text", ""))[:PREFIX_CHARS], []).append(
+            c.get("chunk_id", "?"))
+    findings = [
+        Finding(prefix[:60] + "…", f"{len(ids)} chunks share this opening: {', '.join(ids[:5])}"
+                                   + ("…" if len(ids) > 5 else ""))
+        for prefix, ids in groups.items() if len(ids) > 1
+    ]
+    return _gate("G3", f"A chunk's first {PREFIX_CHARS} characters identify it uniquely", findings)
+
+
+def g10_content_type_matches_body(chunks: list[dict]) -> Gate:
+    """Both directions of the label, but not symmetrically.
+
+    A chunk typed `table` with no table in it is always a bug — that is the shape of the
+    `9. TABLAS` chapter whose 13 captions carry zero rows. The converse is weaker: an
+    `abbreviations` section is legitimately a table, and a `recommendations` one may end with a
+    small one. Only `text` is a real mislabel, and only when the body is DOMINATED by rows,
+    which is the classifier's own rule (`is_mostly_table`)."""
+    findings = []
+    for c in chunks:
+        body, ctype = body_of(c), c.get("content_type")
+        if ctype == "table" and not has_tabular_content(body):
+            findings.append(Finding(c.get("chunk_id", "?"),
+                                    f"typed 'table' but holds no table data ({c.get('heading')})"))
+        elif ctype == "text" and is_mostly_table(body):
+            findings.append(Finding(c.get("chunk_id", "?"),
+                                    f"typed 'text' but the body is a table ({c.get('heading')})"))
+    return _gate("G10", "A chunk typed 'table' holds table data, and a table is never typed 'text'",
+                 findings)
+
+
+def g11_declared_token_count(chunks: list[dict]) -> Gate:
+    findings = [
+        Finding(c.get("chunk_id", "?"),
+                f"n_tokens={c.get('n_tokens')} but the tokenizer says "
+                f"{count_tokens(c.get('text', ''))}")
+        for c in chunks if c.get("n_tokens") != count_tokens(c.get("text", ""))
+    ]
+    return _gate("G11", "n_tokens is the real tokenizer count, not an estimate", findings)
+
+
+# ---------------------------------------------------------------------------
+# Gates over the MARKDOWN sources
+# ---------------------------------------------------------------------------
+def g04_omission_markers(sources: dict[str, str]) -> Gate:
+    findings = []
+    for name, md in sources.items():
+        canonical = [m.span() for m in OMISSION_CANONICAL.finditer(md)]
+        for m in OMISSION_ANY.finditer(md):
+            if not any(lo <= m.start() and m.end() <= hi for lo, hi in canonical):
+                findings.append(Finding(name, f"non-canonical omission marker: {m.group(0)[:90]}"))
+        for m in OMISSION_CANONICAL.finditer(md):
+            if m.group("cause") not in OMISSION_ACCEPTED:
+                findings.append(Finding(
+                    name, f"a {m.group('cause').lower()} was omitted (p. {m.group('page')}); its "
+                          "text is in the PDF and must be recovered, not skipped"))
+    return _gate("G4", "Every omission is a figure or an algorithm, marked with cause and page",
+                 findings)
+
+
+def g05_ligatures_expanded(sources: dict[str, str]) -> Gate:
+    findings = [
+        Finding(name, f"raw ligature {glyph!r} ({md.count(glyph)}x) — expand it to {repl!r}")
+        for name, md in sources.items()
+        for glyph, repl in LIGATURES.items() if glyph in md
+    ]
+    return _gate("G5", "Typographic ligatures are expanded, never dropped", findings)
+
+
+def g06_evidence_grades(sources: dict[str, str]) -> Gate:
+    findings = []
+    for name, md in sources.items():
+        for m in RE_GRADE_MID_SENTENCE.finditer(md):
+            findings.append(Finding(name, f"grade injected mid-sentence: …{md[m.start():m.end()]}…"))
+        broken = len(RE_BROKEN_EMPHASIS.findall(md))
+        if broken:
+            findings.append(Finding(name, f"{broken} broken emphasis runs ('_ _'), which split "
+                                          "words and strand grades"))
+        for m in RE_GRADE_LOOSE.finditer(md):
+            if not RE_GRADE.fullmatch(m.group(0)):
+                findings.append(Finding(name, f"grade not captured by the scheme: {m.group(0)!r}"))
+    return _gate("G6", "Evidence grades close their sentence and match the grading scheme",
+                 findings)
+
+
+def g07_tables_have_data(sources: dict[str, str]) -> Gate:
+    findings = []
+    for name, md in sources.items():
+        captions = list(RE_TABLE_CAPTION.finditer(md))
+        for i, m in enumerate(captions):
+            end = captions[i + 1].start() if i + 1 < len(captions) else len(md)
+            # Stop at the next heading too: a caption's data cannot live past its own section.
+            nxt = re.search(r"^#{1,6}\s", md[m.end():end], re.MULTILINE)
+            span = md[m.end():m.end() + nxt.start()] if nxt else md[m.end():end]
+            if not has_tabular_content(span):
+                findings.append(Finding(name, f"{m.group('caption').strip()[:70]} — caption with "
+                                              "no table rows beneath it"))
+    return _gate("G7", "Every table caption is followed by actual table data", findings)
+
+
+# ---------------------------------------------------------------------------
+# Gate across BOTH
+# ---------------------------------------------------------------------------
+def g08_coverage(chunks: list[dict], sources: dict[str, str]) -> Gate:
+    findings = []
+    for name, md in sources.items():
+        haystack = "\n".join(_norm(c.get("text", "")) for c in chunks
+                             if c.get("source_file") == name)
+        paragraphs = _paragraphs(md)
+        missing = [p for p in paragraphs if _norm(p) not in haystack]
+        if not paragraphs:
+            continue
+        covered = 1 - len(missing) / len(paragraphs)
+        if covered < MIN_COVERAGE:
+            findings.append(Finding(
+                name, f"{covered:.1%} of paragraphs reached the chunks (min {MIN_COVERAGE:.1%}); "
+                      f"{len(missing)} lost, e.g. {_norm(missing[0])[:70]!r}"))
+    return _gate("G8", f"At least {MIN_COVERAGE:.1%} of each source reaches the chunks", findings)
+
+
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
+def audit(chunks: list[dict], sources: dict[str, str] | None = None) -> list[Gate]:
+    """Run every gate that the given inputs support, in code order.
+
+    `sources` maps a chunk's `source_file` to its Markdown text; without it only the chunk-level
+    gates run, which is what lets the chunker check its own output before anything is written."""
+    gates = [g01_size_budget(chunks), g02_non_empty_body(chunks), g03_unique_openings(chunks)]
+    if sources:
+        gates += [g04_omission_markers(sources), g05_ligatures_expanded(sources),
+                  g06_evidence_grades(sources), g07_tables_have_data(sources),
+                  g08_coverage(chunks, sources)]
+    gates += [g10_content_type_matches_body(chunks), g11_declared_token_count(chunks)]
+    return sorted(gates, key=lambda g: g.code)
+
+
+def load_sources(md_files: list[Path]) -> dict[str, str]:
+    """Read the Markdown sources keyed the way chunks refer to them (`source_file`)."""
+    return {p.name: p.read_text(encoding="utf-8") for p in md_files}
+
+
+def format_report(gates: list[Gate], max_findings: int = 5) -> str:
+    """A report meant to be READ: the failures first, each with a handful of examples, because a
+    gate reporting '178 violations' without naming one is not actionable."""
+    lines = []
+    for g in gates:
+        mark = "PASS" if g.passed else "FAIL"
+        count = "" if g.passed else f"  ({len(g.findings)} findings)"
+        lines.append(f"[{mark}] {g.code}  {g.title}{count}")
+        for f in g.findings[:max_findings]:
+            lines.append(f"         · {f.subject}: {f.detail}")
+        if len(g.findings) > max_findings:
+            lines.append(f"         · … and {len(g.findings) - max_findings} more")
+    failed = [g.code for g in gates if not g.passed]
+    lines.append("")
+    lines.append(f"{len(gates) - len(failed)}/{len(gates)} gates passed"
+                 + (f"; failing: {', '.join(failed)}" if failed else ""))
+    return "\n".join(lines)

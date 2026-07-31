@@ -340,13 +340,21 @@ keeping strict grounding + validate.
   bypass it. `AnswerView` is deliberately NOT stored in the graph state — `answer` and
   `chunk_index` already are, both plain data, so a web frontend calls `resolve_answer` itself
   and no dataclass ever has to survive a checkpointer's serializer.
-- **`tests/`** — pytest suite, 217 tests, **no API calls and no network**
-  (`.venv\Scripts\python.exe -m pytest`, ~8 s; most of that is importing `main` in the CLI
+- **`tests/`** — pytest suite, 242 tests + 8 xfail, **no API calls and no network**
+  (`.venv\Scripts\python.exe -m pytest`, ~18 s; most of that is importing `main` in the CLI
   tests, which warms the reranker). The principle: the LLM is replaced ONLY where the
   randomness enters (refine / assess / validate / generation / retrieval, in `conftest.py`), so
   everything the pipeline DECIDES stays real and every branch can be visited on demand —
   including the ones a manual run almost never reaches (judge rejects, judge errors, budget
   exhausted, second question on the same thread).
+  - **`test_corpus_quality.py`** — the quality gates over the corpus THAT SHIPS, plus the corpus
+    generation switch. Two kinds of test, and the split is the point. The gates run against the
+    committed `chunks.jsonl` and `data/markdown/`, and the eight that currently FAIL are marked
+    `xfail(strict=True)` carrying the number measured on 2026-07-31 — strict, so when the
+    extractor/chunker rewrite fixes one the test **fails because it passed** and the debt entry
+    has to be deleted by hand. The debt can be neither paid nor re-incurred silently. Alongside
+    them, every gate is fed a hand-made violation, because a gate that stopped detecting anything
+    would otherwise show up as a row of green ticks.
   - `test_pipeline_flow.py` — the REAL graph end to end: routing, the interrupt/resume contract
     the CLI depends on, answer-before-offer, the refinement loop and its cap, the
     validator-driven re-retrieval, and both state leaks pinned as regressions. **Also the
@@ -404,9 +412,32 @@ keeping strict grounding + validate.
   index build + traversal; store in `data/lightrag_store/`), `pathrag.py` (flow-pruned paths
   over that same store — no index of its own) and `hipporag.py` (HippoRAG 2; own store in
   `data/hipporag_store/`, built with `python -m retrieval.hipporag`).
-- `ingestion/` — corpus→index scripts (run once per corpus change): `chunk_guidelines.py`
-  (structural chunking), `contextualize.py` (Contextual Retrieval), `upload_to_qdrant.py`
-  (dense) and `upload_to_qdrant_hybrid.py` (dense+BM25).
+- **`corpus.py`** — **the corpus GENERATION switch**, and a root module for the same reason
+  `progress.py` is one (`rag.py`, `retrieval/` and `ingestion/` all need it, and `ingestion/`
+  must not import the retrieval stack). The corpus fans out into FOUR artifacts that must always
+  describe the same text — `chunks.jsonl`, the Qdrant collection, the LightRAG store (PathRAG
+  reads it too) and the HippoRAG store — and rebuilding them takes ~2 h, so a chunking rewrite
+  cannot be atomic. `CORPUS_VERSION` (env, default `v1`) picks a `Layout` and every location is
+  derived from it, which makes the half-migrated state UNREPRESENTABLE: chunks v2 next to a v1
+  graph store is exactly what wakes `map_to_payloads`' prefix fallback and mis-cites sections
+  (measured: 4 of 4 lookups resolved to the wrong chunk). `v1`'s names are spelled out because
+  they are already live in Qdrant and on disk; the cutover to `v2` is one line, and reversible.
+  Pinned by `tests/test_corpus_quality.py`, including a source-level guard that fails if any
+  module names an artifact instead of deriving it — which immediately caught
+  `upload_to_qdrant_hybrid.py` defaulting to `guias_vih_hibrida` while the app queried
+  `guias_vih_hibrida_ctx`, i.e. uploading to a collection nobody searched.
+- `ingestion/` — corpus→index steps, a PACKAGE (run them with `python -m ingestion.<step>`, like
+  `retrieval/`): `chunk_guidelines.py` (structural chunking), **`quality.py`** (the quality
+  gates), `contextualize.py` (Contextual Retrieval), `upload_to_qdrant.py` (dense) and
+  `upload_to_qdrant_hybrid.py` (dense+BM25).
+- **`ingestion/quality.py`** — the corpus quality GATES, and the reason they are code rather than
+  a checklist: every defect they check was found by reading the corpus by hand long after it had
+  been indexed and answered from, and none announced itself. `python -m ingestion.chunk_guidelines
+  data/markdown --check` runs them and **writes nothing** on failure. Each gate is deterministic,
+  offline and calls no model (a gate judged by an LLM shares the failure mode of what it checks).
+  `count_tokens` is now STRICT — no characters/4 fallback — because the shipped corpus was built
+  with that fallback and 89 of its 517 chunks silently exceed the budget the chunker claims to
+  enforce.
 - `data/chunks/` — the chunked corpus: `chunks.jsonl` (517 chunks) and
   `chunks_contextual.jsonl` (with the Contextual-Retrieval sentence). `data/lightrag_store/` —
   the generated LightRAG graph index (gitignored, rebuilt with `python -m retrieval.graph`).
@@ -444,7 +475,7 @@ keeping strict grounding + validate.
   `/ayuda`, `/salir`. **Ctrl-C** cancels the query in flight and returns to the prompt (safe:
   the next question restarts from the top on the same thread, the orphaned pause is discarded
   and `patient_facts` survives); a second one at an idle prompt ends the session.
-- Tests: `.venv\Scripts\python.exe -m pytest` (217 tests, ~16 s, no API calls). Run them before
+- Tests: `.venv\Scripts\python.exe -m pytest` (242 tests + 8 xfail, ~18 s, no API calls). Run them before
   committing. They freeze the MECHANICS, not the medicine — whether an answer is clinically
   right is what `evaluation.py` and a clinician are for.
 - **Web (Chainlit): `.venv\Scripts\chainlit.exe run web/app.py`** → http://localhost:8000.
@@ -503,6 +534,10 @@ keeping strict grounding + validate.
     as a tag `mode:<x>` and metadata → filterable in LangSmith. LightRAG's internal keyword
     LLM call IS traced now (wrapped with `traceable` in `_make_rag(trace_llm=True)`, only at
     query time, not at index build).
+- **Corpus (run per corpus change, in this order; `python -m ingestion.<step>`):**
+  `chunk_guidelines data/markdown -o <chunks>` → `contextualize` → `upload_to_qdrant_hybrid`.
+  **Check before spending anything:** `python -m ingestion.chunk_guidelines data/markdown --check`
+  runs the quality gates, writes nothing and exits non-zero if the corpus is not fit to index.
 - **Build the graph indexes (once each, both resumable and gitignored):**
   - `.venv\Scripts\python.exe -m retrieval.graph` — LightRAG entity graph over the 517 chunks
     (~1.5 h, uses the LLM cache). **Also required by pathrag**, which reads the same store.
@@ -710,6 +745,32 @@ the plan, not as a bug list to rediscover.
 - **OPEN I — minor.** `rapidfuzz` is a declared dependency and is used nowhere (`evidence.py`
   matches with `difflib`); either use it there or drop it.
 
+0 bis. **CORPUS REWRITE — IN PROGRESS (started 2026-07-31). Read this before running any A/B.**
+   An audit of the corpus found the damage is mostly UPSTREAM of everything measured so far, in
+   the PDF→Markdown conversion, which does not exist as versioned code (each of the 7 PDFs was
+   converted by an ad-hoc script, guided by `data/prompt.txt` and then discarded). Measured:
+   **114 omission markers** in 27 spellings; TAR_2022's `9. TABLAS` chapter (20% of the document)
+   holds **0 table rows across 13 tables**, including TABLA 3 (first-line regimens) and TABLA 9
+   (the interaction matrix); **91 lost fi/fl ligatures**, among them `fuconazol` for
+   `fluconazol` in dosing text, which no lexical search can find; **212 evidence grades injected
+   mid-sentence**, splitting 34 words and, in one case in the NC guide, inverting the clinical
+   meaning; **1443 `<br>`** standing in for table structure. And `chunks.jsonl` is stale against
+   its own chunker (517 vs 559; only 198 ids match) and was built with a characters/4 estimate,
+   so **89 chunks (17%) exceed the token budget** the chunker claims to enforce.
+   **The finding that made this tractable: none of it needs a VLM.** The lost content is IN THE
+   PDF's TEXT LAYER — verified in `data/textos/TAR_2022/TAR_2022.txt`, which holds TABLA 3 and
+   TABLA 9 in full. They are VECTOR grids, not raster images; `ignore_graphics=True` masked them
+   as pictures, and VIH_embarazo's tables were rejected by a heuristic reading a ROWSPAN
+   ("primera columna vacía en 71% de las filas") as a broken layout.
+   **Decided with the user (2026-07-31):** re-extract all 7 now (the A/B numbers were already
+   invalidated by the reranker-window fix, so this is the cheapest moment); **`pdfplumber`
+   (MIT)**, not PyMuPDF (AGPL-3.0, and this repo is MIT and public); the ~35 graphical figures
+   and decision algorithms stay OMITTED with a normalized marker, because **no LLM may ever touch
+   the extraction path** — that is what keeps everything citable a verifiable transcription.
+   **Status:** Phase 0 DONE (quality gates + the `corpus.py` generation switch — see Key files).
+   Next: manifest + specialty profile, then the extractor, then the chunker. The migration
+   sequence, the per-table safety gates and the three sites that assume the breadcrumb lives
+   inside `text` are in the approved plan.
 0. **THE FULL A/B IS THE BLOCKER.** Five modes are implemented and wired
    (baseline / iterative / graph / pathrag / hipporag). A **stratified probe
    (`EVAL_SAMPLE=3` = 12 questions, gpt-4o-mini judge, 0 NaN) ran on 2026-07-22** over the

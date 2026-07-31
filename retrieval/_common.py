@@ -18,6 +18,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
+import corpus
 from abbreviations import ABBREVIATIONS
 from progress import STEP_RETRIEVAL, emit
 from rag import (_get_bm25, _get_reranker, rephrase, rerank, retrieve_hybrid,
@@ -29,11 +30,14 @@ from rag import (_get_bm25, _get_reranker, rephrase, rerank, retrieve_hybrid,
 MSG_RANKING = "Valorando {n} fragmentos de las guías"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHUNKS_PATH = os.path.join(ROOT, "data", "chunks", "chunks.jsonl")
+# Derived from the active corpus generation, never spelled out: the chunk file and the graph
+# stores must describe the SAME text or this module's prefix fallback starts resolving lookups
+# to the wrong section (see corpus.py).
+CHUNKS_PATH = corpus.chunks_path()
 
 
 def load_chunks() -> list[dict]:
-    """The corpus every index is built from (517 chunks)."""
+    """The corpus every index is built from."""
     with open(CHUNKS_PATH, encoding="utf-8") as fh:
         return [json.loads(line) for line in fh if line.strip()]
 

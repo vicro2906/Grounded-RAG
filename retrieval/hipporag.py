@@ -47,13 +47,14 @@ except (AttributeError, ValueError):
 from dotenv import load_dotenv
 load_dotenv(os.path.join(ROOT, ".env"))
 
+import corpus
 from rag import (EMBEDDING_MODEL, REPHRASE_MODEL, _ABBREV_LIST, chat_model, client,
                  get_embedding)
 
 from ._common import canonical_key, house_tail, load_chunks, map_chunk_ids_to_payloads
 
 # --- Config ---------------------------------------------------------------
-STORE_DIR = os.path.join(ROOT, "data", "hipporag_store")
+STORE_DIR = corpus.hipporag_dir()
 OPENIE_PATH = os.path.join(STORE_DIR, "openie.jsonl")        # resumability unit (append-only)
 GRAPH_PATH = os.path.join(STORE_DIR, "graph.graphml")
 PHRASES_PATH = os.path.join(STORE_DIR, "phrases.json")

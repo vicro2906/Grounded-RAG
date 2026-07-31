@@ -27,8 +27,9 @@ No mandatory dependencies (standard library only). If 'tiktoken' is installed it
 used to count tokens; otherwise a character-based estimate is used.
 
 Usage:
-    python ingestion/chunk_guidelines.py data/markdown -o data/chunks/chunks.jsonl
-    python ingestion/chunk_guidelines.py file1.md file2.md -o output.jsonl
+    python -m ingestion.chunk_guidelines data/markdown -o data/chunks/chunks.jsonl
+    python -m ingestion.chunk_guidelines file1.md file2.md -o output.jsonl
+    python -m ingestion.chunk_guidelines data/markdown --check     # gates only, writes nothing
 """
 
 import argparse
@@ -124,15 +125,24 @@ def lookup_meta(filename: str) -> dict:
 # ---------------------------------------------------------------------------
 # 1. TOKEN COUNTING
 # ---------------------------------------------------------------------------
-try:
-    import tiktoken
-    _ENC = tiktoken.get_encoding("cl100k_base")
-    def count_tokens(text: str) -> int:
-        return len(_ENC.encode(text))
-except Exception:
-    # Estimate: ~4 characters per token (reasonable for Spanish).
-    def count_tokens(text: str) -> int:
-        return max(1, round(len(text) / 4))
+# `cl100k_base` is the tokenizer of the EMBEDDER (text-embedding-3-large), which is what
+# actually imposes a limit (8191 tokens per input). gpt-4o uses o200k_base and does not decide
+# here: a chunk is sized to be embedded, not to be generated from.
+#
+# There is NO character-based fallback, and that is the point. This module used to degrade to
+# `len(text)/4` when tiktoken was missing, and the corpus was in fact built that way: every
+# chunk in data/chunks/chunks.jsonl has n_tokens == round(n_chars/4). That estimate
+# underquotes real Spanish clinical prose by 14% at the median and by 2.16x at worst, so 89 of
+# the 517 chunks (17%) silently exceeded the MAX_TOKENS this module claims to enforce. A
+# sizing unit that can quietly become a different unit is worse than a missing dependency,
+# and tiktoken is a declared one (pyproject.toml).
+import tiktoken
+
+_ENC = tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text: str) -> int:
+    return len(_ENC.encode(text))
 
 # ---------------------------------------------------------------------------
 # 2. REGULAR EXPRESSIONS
@@ -292,13 +302,22 @@ def classify(sec: Section) -> str:
         return "appendix"
     if RE_METODO.search(h):
         return "methodology"
-    # "embedded" table: body mostly made of table rows
-    body_lines = [l for l in sec.body.splitlines() if l.strip()]
-    if body_lines:
-        table_lines = sum(1 for l in body_lines if RE_TABLE_ROW.match(l))
-        if table_lines >= 3 and table_lines / len(body_lines) > 0.6:
-            return "table"
+    if is_mostly_table(sec.body):
+        return "table"
     return "text"
+
+
+def is_mostly_table(body: str) -> bool:
+    """True when the body is an 'embedded' table: enough rows, and dominated by them.
+
+    Shared with the quality gates so the classifier and its auditor cannot disagree about what
+    counts as a table — a gate calibrated to a different threshold than the code it checks
+    reports failures nobody can act on."""
+    lines = [l for l in body.splitlines() if l.strip()]
+    if not lines:
+        return False
+    rows = sum(1 for l in lines if RE_TABLE_ROW.match(l))
+    return rows >= 3 and rows / len(lines) > 0.6
 
 
 def extract_grades(text: str) -> List[str]:
@@ -524,10 +543,13 @@ def gather_md_files(inputs: List[str]) -> List[Path]:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Split HIV guidelines (Markdown) into chunks with metadata.")
+    ap = argparse.ArgumentParser(description="Split clinical guidelines (Markdown) into chunks with metadata.")
     ap.add_argument("inputs", nargs="+", help=".md files or a folder with .md files")
     ap.add_argument("-o", "--output", default="data/chunks/chunks.jsonl", help="Output JSONL file")
     ap.add_argument("--stats", action="store_true", help="Print statistics")
+    ap.add_argument("--check", action="store_true",
+                    help="Run the quality gates and exit non-zero if any fails. Writes nothing: "
+                         "a corpus that does not pass must not reach an index.")
     args = ap.parse_args()
 
     files = gather_md_files(args.inputs)
@@ -540,6 +562,16 @@ def main():
         cs = build_chunks(f)
         all_chunks.extend(cs)
         print(f"  {f.name:38s} -> {len(cs):4d} chunks", file=sys.stderr)
+
+    if args.check:
+        # Imported here so the chunker does not depend on its auditor: quality.py imports THIS
+        # module for the size budget and the grade regex, and a module-level import would close
+        # the cycle.
+        from ingestion.quality import audit, format_report, load_sources
+        gates = audit([asdict(c) for c in all_chunks], load_sources(files))
+        print("\n--- QUALITY GATES ---", file=sys.stderr)
+        print(format_report(gates), file=sys.stderr)
+        sys.exit(0 if all(g.passed for g in gates) else 1)
 
     with open(args.output, "w", encoding="utf-8") as fh:
         for c in all_chunks:

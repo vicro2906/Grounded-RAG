@@ -12,9 +12,9 @@ Output: chunks_contextual.jsonl = the chunks + "context" and "text_for_retrieval
 it to upload_to_qdrant_hybrid.py. Resumable (already-done chunk_ids in --out are skipped).
 
 Usage:
-    python ingestion/contextualize.py --dry-run     # estimate cost, no LLM call
-    python ingestion/contextualize.py --limit 10    # probe: only 10 (measures real cost)
-    python ingestion/contextualize.py               # all (resumable)
+    python -m ingestion.contextualize --dry-run     # estimate cost, no LLM call
+    python -m ingestion.contextualize --limit 10    # probe: only 10 (measures real cost)
+    python -m ingestion.contextualize               # all (resumable)
 """
 
 import argparse
@@ -208,7 +208,7 @@ def main():
 
     print(f"Done: {n_ok} chunks contextualized -> {out_path}")
     print("Next (upload to a NEW collection, does not overwrite the current one):")
-    print(f"  python ingestion/upload_to_qdrant_hybrid.py {args.out} "
+    print(f"  python -m ingestion.upload_to_qdrant_hybrid {args.out} "
           "--collection guias_vih_hibrida_ctx")
 
 

@@ -36,12 +36,13 @@ from lightrag.utils import EmbeddingFunc
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.openai import openai_embed, gpt_4o_mini_complete
 
+import corpus
 from rag import EMBEDDING_MODEL, OPENAI_BASE_URL
 
 from ._common import house_tail, load_chunks, map_to_payloads
 
 # --- Config ---------------------------------------------------------------
-WORKING_DIR = os.path.join(ROOT, "data", "lightrag_store")  # file-based graph + vector store
+WORKING_DIR = corpus.lightrag_dir()          # file-based graph + vector store, per corpus generation
 EMBEDDING_DIM = 3072                                        # text-embedding-3-large (rag.py)
 
 

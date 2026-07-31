@@ -84,11 +84,15 @@ if os.environ.get("RERANK_DEVICE", "cpu").lower() in ("cuda", "auto"):
 # --- Hybrid search (dense semantic + sparse lexical BM25) ---
 from fastembed import SparseTextEmbedding
 
+import corpus
+
 COLLECTION_DENSE  = "guias_vih"            # original collection (dense only, backup)
-# Active hybrid collection (dense + sparse BM25); DEFAULT = the Contextual-Retrieval build.
-# retrieve_hybrid is the single point every retriever goes through, so this one constant
-# repoints them all. Override via QDRANT_COLLECTION to A/B against the non-contextual build.
-COLLECTION_HYBRID = os.environ.get("QDRANT_COLLECTION", "guias_vih_hibrida_ctx")
+# Active hybrid collection (dense + sparse BM25). retrieve_hybrid is the single point every
+# retriever goes through, so this one constant repoints them all. It comes from the active
+# corpus generation rather than being spelled out here, so the collection can never describe a
+# different chunk file than the graph stores do (see corpus.py); QDRANT_COLLECTION still
+# overrides it to A/B two builds of the SAME generation.
+COLLECTION_HYBRID = corpus.qdrant_collection()
 
 # Centralized LLM models. Query rephrasing is the only step left on the cheap model: it is
 # mechanical (rewrite + normalize + screen) and its mistakes are visible downstream.
