@@ -41,6 +41,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Optional
 
+import corpus
+
 # ---------------------------------------------------------------------------
 # 0. CONFIGURATION
 # ---------------------------------------------------------------------------
@@ -52,75 +54,11 @@ MAX_TOKENS    = 900     # above this a section is split
 MIN_TOKENS    = 200     # below this we try to merge
 OVERLAP_TOKENS = 80     # overlap when splitting large sections
 
-# Document registry: file-level metadata. It is more reliable to set it here than
-# to try to parse it from the text. Edit it when you add docs.
-DOC_REGISTRY = {
-    "TAR_2022.md": {
-        "doc_title": "Documento de consenso de GeSIDA/PNS sobre TAR en adultos con VIH",
-        "topic": "tratamiento_antirretroviral",
-        "organization": "GeSIDA/PNS",
-        "year": 2022,
-    },
-    "VIH_TB.md": {
-        "doc_title": "Tratamiento de la tuberculosis en personas con infección por VIH",
-        "topic": "vih_tuberculosis",
-        "organization": "GeSIDA/PNS",
-        "year": 2018,
-    },
-    "VIH_embarazo.md": {
-        "doc_title": "Infección por VIH y reproducción, embarazo, parto y profilaxis de la transmisión vertical",
-        "topic": "vih_embarazo",
-        "organization": "SPNS/GeSIDA/SEGO/SEIP",
-        "year": 2018,
-    },
-    "adherencia.md": {
-        "doc_title": "Recomendaciones GeSIDA/SEFH/PNS para mejorar la adherencia al tratamiento",
-        "topic": "adherencia",
-        "organization": "PNS/GeSIDA/SEFH",
-        "year": 2020,
-    },
-    "medicina_preventiva.md": {
-        "doc_title": "Vacunación e inmunización en personas con VIH (medicina preventiva)",
-        "topic": "medicina_preventiva_vacunas",
-        "organization": "GeSIDA/SEMPSPGS",
-        "year": 2024,
-    },
-    "profilaxis.md": {
-        "doc_title": "Profilaxis posexposición ocupacional y no ocupacional al VIH, VHB y VHC",
-        "topic": "profilaxis_postexposicion",
-        "organization": "GeSIDA/GEHEP/SEIP/SEMPSPGS",
-        "year": 2025,
-    },
-    "ManejoclinicodelasalteracionesNC.md": {
-        "doc_title": "Manejo clínico de las alteraciones neurocognitivas asociadas al VIH",
-        "topic": "alteraciones_neurocognitivas",
-        "organization": "GeSIDA/PNS",
-        "year": 2013,
-    },
-}
-
-DEFAULT_META = {
-    "doc_title": None, "topic": "vih_general",
-    "organization": "GeSIDA", "year": None,
-}
-
-
-def _norm_name(name: str) -> str:
-    """Normalize a filename to look it up in the registry: lowercase and
-    spaces/hyphens -> underscore. So 'medicina preventiva.md' and
-    'medicina_preventiva.md' point to the same entry."""
-    return re.sub(r"[\s\-]+", "_", name.strip().lower())
-
-
-# Registry indexed by normalized name (built once).
-_NORMALIZED_REGISTRY = {_norm_name(k): v for k, v in DOC_REGISTRY.items()}
-
-
-def lookup_meta(filename: str) -> dict:
-    meta = _NORMALIZED_REGISTRY.get(_norm_name(filename))
-    if meta is None:
-        return {**DEFAULT_META, "doc_title": Path(filename).stem}
-    return meta
+# Document identity comes from `data/corpus.toml` (see corpus.documents). It used to be a
+# DOC_REGISTRY dict right here, with a DEFAULT_META fallback that let an unregistered .md into
+# the corpus SILENTLY, tagged `topic = "vih_general"` — a document whose year and scope the
+# generation prompt then could not see, while that same prompt is asked to arbitrate between
+# guidelines spanning 2013 to 2025. `corpus.document_for_markdown` raises instead.
 
 # ---------------------------------------------------------------------------
 # 1. TOKEN COUNTING
@@ -183,8 +121,10 @@ class Section:
 class Chunk:
     chunk_id: str
     source_file: str
+    doc_id: str                    # manifest identity, stable across renames of the .md
     doc_title: Optional[str]
-    topic: str
+    specialty: str                 # what scopes a search to one medical area (Qdrant filter)
+    topics: List[str]              # clinical scopes; feeds SYS_PROMPT's specific-vs-general rule
     organization: str
     year: Optional[int]
     section_path: List[str]        # heading breadcrumb
@@ -479,7 +419,7 @@ def normalize(sections: List[Section]) -> List[dict]:
 # ---------------------------------------------------------------------------
 def build_chunks(path: Path) -> List[Chunk]:
     md = path.read_text(encoding="utf-8")
-    meta = lookup_meta(path.name)
+    doc = corpus.document_for_markdown(path.name)
     sections = parse_sections(md)
     units = normalize(sections)
 
@@ -490,7 +430,7 @@ def build_chunks(path: Path) -> List[Chunk]:
         # The preamble (text before the first heading) has no path:
         # we give it the document title as context.
         if not breadcrumb:
-            breadcrumb = [meta.get("doc_title") or "Preámbulo"]
+            breadcrumb = [doc.title or "Preámbulo"]
         # Prepending the breadcrumb to the text greatly improves retrieval:
         # the embedding "sees" the section's hierarchical context.
         context_prefix = " > ".join(breadcrumb)
@@ -510,10 +450,12 @@ def build_chunks(path: Path) -> List[Chunk]:
         chunks.append(Chunk(
             chunk_id=cid,
             source_file=path.name,
-            doc_title=meta.get("doc_title"),
-            topic=meta.get("topic", "vih_general"),
-            organization=meta.get("organization", "GeSIDA"),
-            year=meta.get("year"),
+            doc_id=doc.doc_id,
+            doc_title=doc.title,
+            specialty=doc.specialty,
+            topics=list(doc.topics),
+            organization=doc.organization,
+            year=doc.year,
             section_path=breadcrumb,
             section_number=u["section_number"],
             heading=u["heading"],

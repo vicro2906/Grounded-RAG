@@ -1,0 +1,113 @@
+# Document manifest: the identity of every document in the corpus.
+#
+# This replaces the DOC_REGISTRY that used to live inside ingestion/chunk_guidelines.py, and it
+# fixes two things beyond moving data out of code.
+#
+#  1. A Markdown file with no entry used to enter the corpus SILENTLY, tagged `topic =
+#     "vih_general"`. Now it is an error: an unidentified document is one whose year and scope
+#     the generation prompt cannot see, and the prompt is asked to arbitrate between guidelines
+#     spanning 2013 to 2025.
+#  2. It is the only place that knows which reference text belongs to which Markdown. The names
+#     do not match by any rule (`VIH_TB.md` vs `textos/TB_VIH/`, `ManejoclinicodelasalteracionesNC.md`
+#     vs `textos/alteraciones_NC/`), and that pairing is what lets the quality gates use the
+#     PDF's own text layer as an oracle for extraction damage.
+#
+# NOT LISTED, on purpose: `Documento-de-consenso-...-alteraciones-metabolicas-y-riesgo-
+# cardiovascular-...pdf`. It is the eighth PDF in data/pdfs/ and has never been part of the
+# corpus; its text layer decodes to mojibake ('!"#$%&(((((' plus control characters) because the
+# font's ToUnicode CMap is broken. Only PART of it decodes, which is worse than none: a naive
+# "is there text?" check passes it. It is the test case for the extractor's triage step.
+#
+# `markdown` records the file as it is named TODAY. The extractor writes `<doc_id>.md`, so these
+# converge when a document is re-extracted.
+
+version = "v1"
+
+# Which specialty answers when nobody picked one (CLI without --specialty, a bare app.invoke).
+# Stated as data rather than inferred: with one profile any rule works, and with several a
+# silent "first one alphabetically" would decide which guidelines a doctor is answered from.
+default_specialty = "vih"
+
+[[document]]
+doc_id       = "TAR_2022"
+title        = "Documento de consenso de GeSIDA/PNS sobre TAR en adultos con VIH"
+specialty    = "vih"
+topics       = ["tratamiento antirretroviral"]
+organization = "GeSIDA/PNS"
+year         = 2022
+language     = "es"
+markdown     = "TAR_2022.md"
+reference    = "TAR_2022/TAR_2022.txt"
+source_pdf   = "GuiaGeSIDAPlanNacionalSobreElSidaRespectoAlTratamientoAntirretroviralEnAdultosInfectadosPorElVirusDeLaInmunodeficienciaHumanaActualizacionEnero2022.pdf"
+
+[[document]]
+doc_id       = "VIH_TB"
+title        = "Tratamiento de la tuberculosis en personas con infección por VIH"
+specialty    = "vih"
+topics       = ["tuberculosis"]
+organization = "GeSIDA/PNS"
+year         = 2018
+language     = "es"
+markdown     = "VIH_TB.md"
+reference    = "TB_VIH/TB_VIH.txt"
+source_pdf   = "gesida_TB_en_VIH.pdf"
+
+[[document]]
+doc_id       = "VIH_embarazo"
+title        = "Infección por VIH y reproducción, embarazo, parto y profilaxis de la transmisión vertical"
+specialty    = "vih"
+topics       = ["embarazo"]
+organization = "SPNS/GeSIDA/SEGO/SEIP"
+year         = 2018
+language     = "es"
+markdown     = "VIH_embarazo.md"
+reference    = "VIH_embarazo/VIH_embarazo.txt"
+source_pdf   = "gesida_VIH_embarazo.pdf"
+
+[[document]]
+doc_id       = "adherencia"
+title        = "Recomendaciones GeSIDA/SEFH/PNS para mejorar la adherencia al tratamiento"
+specialty    = "vih"
+topics       = ["adherencia"]
+organization = "PNS/GeSIDA/SEFH"
+year         = 2020
+language     = "es"
+markdown     = "adherencia.md"
+reference    = "adherencia/adherencia.txt"
+source_pdf   = "GUIA_GESIDA_febrero_2020_Adherencia.pdf"
+
+[[document]]
+doc_id       = "medicina_preventiva"
+title        = "Vacunación e inmunización en personas con VIH (medicina preventiva)"
+specialty    = "vih"
+topics       = ["vacunas", "medicina preventiva"]
+organization = "GeSIDA/SEMPSPGS"
+year         = 2024
+language     = "es"
+markdown     = "medicina preventiva.md"
+reference    = "medicina_preventiva/medicina_preventiva.txt"
+source_pdf   = "GESIDA-Documento-de-Consenso-de-GeSIDA-y-la-Sociedad-Espanola-de-Medicina-Preventiva-Salud-Publica-y-Gestion-Sanitaria.pdf"
+
+[[document]]
+doc_id       = "profilaxis"
+title        = "Profilaxis posexposición ocupacional y no ocupacional al VIH, VHB y VHC"
+specialty    = "vih"
+topics       = ["profilaxis posexposición"]
+organization = "GeSIDA/GEHEP/SEIP/SEMPSPGS"
+year         = 2025
+language     = "es"
+markdown     = "profilaxis.md"
+reference    = "profilaxis_posexposicion/profilaxis_posexposicion.txt"
+source_pdf   = "GESIDA-Documento-de-Consenso-sobre-la-Profilaxis-Posexposicion-Ocupacional-y-No-Ocupacional-al-VIH-VHB-y-VHC-en-Adultos-y-Ninos.pdf"
+
+[[document]]
+doc_id       = "alteraciones_NC"
+title        = "Manejo clínico de las alteraciones neurocognitivas asociadas al VIH"
+specialty    = "vih"
+topics       = ["alteraciones neurocognitivas"]
+organization = "GeSIDA/PNS"
+year         = 2013
+language     = "es"
+markdown     = "ManejoclinicodelasalteracionesNC.md"
+reference    = "alteraciones_NC/alteraciones_NC.txt"
+source_pdf   = "gesidadcyrc2013-ManejoclinicodelasalteracionesNC.pdf"

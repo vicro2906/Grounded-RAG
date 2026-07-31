@@ -1,69 +1,51 @@
-"""ABBREVIATION -> full name dictionary from the GeSIDA HIV guidelines.
+"""ABBREVIATION -> full name, loaded from the specialty profiles.
 
-Used to normalize query terms into BOTH forms (the guides use abbreviations and full names
-interchangeably). Values stay in Spanish because they are guideline terms.
+The guidelines use siglas and full names interchangeably («DTG» appears 144 times,
+«dolutegravir» 23), so treating the two as one term is what lets a question written either way
+match a fragment written the other. This dictionary has the widest blast radius in the project:
+seven system prompts embed it, `evidence.py` uses it to catch a citation that swapped one drug
+for another, and the graph modes use it to collapse the six spellings of one concept into a
+single node.
+
+TWO VIEWS, AND THE SPLIT IS A SAFETY DECISION.
+
+`ABBREVIATIONS` is the UNION over every specialty. It is what the integrity checks use, because
+there more patterns can only make the check STRICTER: `evidence` compares the drug tokens of a
+quote against those of the sentence it matched, so an abbreviation it does not know is one it
+cannot notice being swapped.
+
+`for_specialty(id)` is the per-specialty view, and it is what the prompts and query expansion
+use. Two reasons. Size: seven prompts each carrying every specialty's dictionary does not scale
+past the first few. Correctness: `expand_abbrevs` REWRITES the query, so a sigla that means one
+thing in cardiology and another here would inject a wrong drug name into the search.
+
+The values stay in Spanish (they are guideline terms) and now live in
+`data/specialties/<id>.toml` rather than in this file, so adding a specialty is a data change.
 """
+from functools import lru_cache
 
-ABBREVIATIONS = {
-    # --- Antiretroviral drugs ---
-    "3TC": "lamivudina",
-    "ABC": "abacavir",
-    "ATV": "atazanavir",
-    "BIC": "bictegravir",
-    "CAB": "cabotegravir",
-    "COBI": "cobicistat",
-    "DRV": "darunavir",
-    "DTG": "dolutegravir",
-    "DOR": "doravirina",
-    "EFV": "efavirenz",
-    "ETR": "etravirina",
-    "EVG": "elvitegravir",
-    "EVG/c": "elvitegravir potenciado con cobicistat",
-    "FTC": "emtricitabina",
-    "LPV": "lopinavir",
-    "MVC": "maraviroc",
-    "NVP": "nevirapina",
-    "RAL": "raltegravir",
-    "RPV": "rilpivirina",
-    "RTV": "ritonavir",
-    "TAF": "tenofovir alafenamida",
-    "TDF": "tenofovir disoproxil fumarato",
-    "TDx": "tenofovir disoproxil",
-    "TFV": "tenofovir",
-    "XTC": "lamivudina o emtricitabina",
+import corpus
 
-    # --- Drug classes ---
-    "FAR": "fármacos antirretrovirales",
-    "INI": "inhibidor de la integrasa",
-    "IP": "inhibidor de la proteasa",
-    "IP/p": "inhibidor de la proteasa potenciado",
-    "ITIAN": "inhibidor de la transcriptasa inversa análogo de nucleósido/nucleótido",
-    "ITINN": "inhibidor de la transcriptasa inversa no nucleósido",
 
-    # --- Clinical concepts ---
-    "AP": "acción prolongada",
-    "BID": "dos veces al día",
-    "QD": "una vez al día",
-    "CVP": "carga viral plasmática",
-    "FGe": "filtrado glomerular estimado",
-    "FV": "fracaso virológico",
-    "MR": "mutaciones de resistencia",
-    "TAMs": "mutaciones asociadas a resistencia a análogos de la timidina",
-    "PDDI": "potenciales interacciones farmacológicas",
-    "RHS": "reacción de hipersensibilidad",
-    "SIRI": "síndrome inflamatorio de reconstitución inmune",
-    "SNC": "sistema nervioso central",
-    "TAR": "tratamiento antirretroviral",
-    "TO": "tratamiento optimizado",
-    "TB": "tuberculosis",
-    "ITS": "infecciones de transmisión sexual",
-    "NPJ": "neumonía por Pneumocystis jirovecii",
-    "PrEP": "profilaxis preexposición",
+@lru_cache(maxsize=None)
+def for_specialty(specialty_id: str) -> dict:
+    """The abbreviations of ONE specialty: what the prompts and query expansion should see."""
+    return dict(corpus.specialty(specialty_id).abbreviations)
 
-    # --- Viruses ---
-    "VIH-1": "virus de la inmunodeficiencia humana tipo 1",
-    "VIH-2": "virus de la inmunodeficiencia humana tipo 2",
-    "VHA": "virus de la hepatitis A",
-    "VHB": "virus de la hepatitis B",
-    "VHC": "virus de la hepatitis C",
-}
+
+@lru_cache(maxsize=1)
+def _union() -> dict:
+    """Every specialty's abbreviations merged.
+
+    A collision between specialties keeps the FIRST definition and is not an error: the union
+    only ever feeds checks that get stricter with more patterns, so an imperfect merge degrades
+    to "one spelling is not recognised", never to "the wrong drug name was substituted" — that
+    risk lives in `for_specialty`, which is per-specialty precisely to avoid it."""
+    merged: dict = {}
+    for specialty_id in corpus.specialties():
+        for abbr, name in corpus.specialty(specialty_id).abbreviations.items():
+            merged.setdefault(abbr, name)
+    return merged
+
+
+ABBREVIATIONS = _union()

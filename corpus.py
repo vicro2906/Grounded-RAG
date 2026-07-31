@@ -20,14 +20,25 @@ half-migrated state stops being representable, and the cutover is one line rathe
 Qdrant and on disk, spelled out rather than derived so that nothing has to be rebuilt or renamed
 to adopt this module.
 
+It also owns the two descriptions of the corpus, because they answer the same question ("what
+is in here, and where"): the DOCUMENT MANIFEST (`data/corpus.toml`) and the SPECIALTY PROFILES
+(`data/specialties/*.toml`). Keeping them together is what lets a specialty's prompt state which
+clinical scopes it has specific guidance for without anybody maintaining that list by hand.
+
 This module imports nothing from the project on purpose: `rag.py`, `retrieval/` and `ingestion/`
 all need it, and `ingestion/` must stay clear of the retrieval stack.
 """
 import os
+import tomllib
 from dataclasses import dataclass
+from functools import lru_cache
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(ROOT, "data")
+MANIFEST_PATH = os.path.join(DATA_DIR, "corpus.toml")
+SPECIALTIES_DIR = os.path.join(DATA_DIR, "specialties")
+MARKDOWN_DIR = os.path.join(DATA_DIR, "markdown")
+REFERENCE_DIR = os.path.join(DATA_DIR, "textos")
 
 
 @dataclass(frozen=True)
@@ -83,3 +94,180 @@ def qdrant_collection() -> str:
     """The hybrid collection. `QDRANT_COLLECTION` still overrides it, which is how a run A/Bs
     against a differently-built collection of the SAME generation (e.g. contextual vs plain)."""
     return os.environ.get("QDRANT_COLLECTION") or LAYOUT.collection
+
+
+# ---------------------------------------------------------------------------
+# The document manifest
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Document:
+    """One guideline: who wrote it, when, about what, and where its files are."""
+    doc_id: str
+    title: str
+    specialty: str
+    topics: tuple[str, ...]
+    organization: str
+    year: int | None
+    language: str
+    markdown: str          # file name under data/markdown/
+    reference: str         # path under data/textos/ — the PDF's own text layer
+    source_pdf: str        # file name under data/pdfs/
+
+    @property
+    def markdown_path(self) -> str:
+        return os.path.join(MARKDOWN_DIR, self.markdown)
+
+    @property
+    def reference_path(self) -> str:
+        return os.path.join(REFERENCE_DIR, self.reference)
+
+    @property
+    def pdf_path(self) -> str:
+        return os.path.join(DATA_DIR, "pdfs", self.source_pdf)
+
+
+_REQUIRED_DOC_FIELDS = ("doc_id", "title", "specialty", "topics", "organization", "year",
+                        "language", "markdown", "reference", "source_pdf")
+
+
+@lru_cache(maxsize=1)
+def _manifest() -> dict:
+    with open(MANIFEST_PATH, "rb") as fh:
+        return tomllib.load(fh)
+
+
+@lru_cache(maxsize=1)
+def documents() -> tuple[Document, ...]:
+    """Every document in the corpus, in manifest order.
+
+    Validation is strict and happens here rather than at the point of use: a document missing a
+    field would otherwise surface as a chunk whose year the generation prompt cannot see, and
+    the prompt is the thing asked to arbitrate between guidelines spanning 2013 to 2025."""
+    out = []
+    for i, entry in enumerate(_manifest().get("document", []), 1):
+        missing = [f for f in _REQUIRED_DOC_FIELDS if f not in entry]
+        if missing:
+            raise SystemExit(f"data/corpus.toml: document #{i} "
+                             f"({entry.get('doc_id', 'no doc_id')}) is missing {missing}")
+        out.append(Document(topics=tuple(entry["topics"]),
+                            **{f: entry[f] for f in _REQUIRED_DOC_FIELDS if f != "topics"}))
+    ids = [d.doc_id for d in out]
+    if len(ids) != len(set(ids)):
+        raise SystemExit(f"data/corpus.toml: duplicate doc_id in {ids}")
+    return tuple(out)
+
+
+def document_for_markdown(filename: str) -> Document:
+    """The manifest entry for a Markdown file, by name.
+
+    Not finding one is an ERROR. It used to be a shrug: `lookup_meta` returned a default that
+    tagged the document `topic = "vih_general"` and let it into the corpus unannounced."""
+    for doc in documents():
+        if doc.markdown == filename:
+            return doc
+    raise SystemExit(
+        f"{filename} has no entry in data/corpus.toml. Add one (doc_id, title, specialty, "
+        f"topics, organization, year, language, markdown, reference, source_pdf) — a document "
+        f"whose year and scope the prompt cannot see must not enter the corpus.")
+
+
+def topics_for(specialty_id: str) -> tuple[str, ...]:
+    """The clinical scopes this specialty has DEDICATED guidance for, derived from the manifest.
+
+    This is what SYS_PROMPT's conflict rule needs: a guideline specific to the situation beats a
+    general one even when it is older (the pregnancy and TB guides are 2018, the TAR one 2022, so
+    "most recent wins" alone would be clinically wrong). It used to be a hand-written list inside
+    the prompt, which is to say a copy of the corpus index that nobody updated when the corpus
+    changed. Deriving it means adding a document teaches the prompt about it."""
+    seen: list[str] = []
+    for doc in documents():
+        if doc.specialty == specialty_id:
+            seen.extend(t for t in doc.topics if t not in seen)
+    return tuple(seen)
+
+
+# ---------------------------------------------------------------------------
+# Specialty profiles
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Modifier:
+    """A patient dimension that can change a recommendation.
+
+    Two spellings of one thing: `slug` is the closed vocabulary `refine` screens against,
+    `label` is how `assess` names it in prose. They live in one entry because they were two
+    independently maintained lists in two prompts, and had already drifted apart."""
+    slug: str
+    label: str
+
+
+@dataclass(frozen=True)
+class Specialty:
+    id: str
+    display_name: str
+    grade_scheme: str
+    prompts: dict          # Spanish fragments woven into the system prompts
+    modifiers: tuple[Modifier, ...]
+    abbreviations: dict    # ABBREVIATION -> full name
+
+    @property
+    def modifier_slugs(self) -> tuple[str, ...]:
+        return tuple(m.slug for m in self.modifiers)
+
+    @property
+    def modifier_labels(self) -> tuple[str, ...]:
+        return tuple(m.label for m in self.modifiers)
+
+
+_REQUIRED_PROMPT_KEYS = ("subject", "domain", "out_of_domain", "fact_examples",
+                         "switch_examples", "general_question_example")
+
+
+@lru_cache(maxsize=None)
+def specialty(specialty_id: str) -> Specialty:
+    path = os.path.join(SPECIALTIES_DIR, f"{specialty_id}.toml")
+    if not os.path.isfile(path):
+        raise SystemExit(f"Unknown specialty {specialty_id!r}: {path} does not exist. "
+                         f"Available: {', '.join(specialties())}.")
+    with open(path, "rb") as fh:
+        raw = tomllib.load(fh)
+    prompts = raw.get("prompts", {})
+    missing = [k for k in _REQUIRED_PROMPT_KEYS if not prompts.get(k)]
+    if missing:
+        raise SystemExit(f"{path}: [prompts] is missing {missing}. Every one of them is woven "
+                         f"into a system prompt; an empty value would silently blank a rule.")
+    if not raw.get("abbreviations"):
+        raise SystemExit(f"{path}: [abbreviations] is empty. It is what makes a sigla and its "
+                         f"full name the same term to retrieval, generation and the citation check.")
+    return Specialty(
+        id=raw.get("id", specialty_id),
+        display_name=raw.get("display_name", specialty_id),
+        grade_scheme=raw.get("grade_scheme", "gesida"),
+        prompts=prompts,
+        modifiers=tuple(Modifier(slug=m["slug"], label=m["label"])
+                        for m in raw.get("modifier", [])),
+        abbreviations=dict(raw["abbreviations"]),
+    )
+
+
+@lru_cache(maxsize=1)
+def specialties() -> tuple[str, ...]:
+    """Every specialty with a profile on disk, sorted."""
+    if not os.path.isdir(SPECIALTIES_DIR):
+        return ()
+    return tuple(sorted(f[:-5] for f in os.listdir(SPECIALTIES_DIR) if f.endswith(".toml")))
+
+
+def default_specialty() -> str:
+    """The specialty a run answers from when nobody picked one."""
+    return os.environ.get("SPECIALTY") or _manifest().get("default_specialty") or ""
+
+
+def resolve_specialty(specialty_id: str | None) -> str:
+    """Normalize a requested specialty, falling back to the default rather than breaking.
+
+    Same posture as the retrieval-mode resolution in the pipeline: an unknown value must not
+    take the run down, but it must not silently narrow the search either — falling back to the
+    default is the widest safe answer."""
+    if specialty_id and specialty_id in specialties():
+        return specialty_id
+    return default_specialty()

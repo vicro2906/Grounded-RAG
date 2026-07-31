@@ -15,16 +15,21 @@ WHAT A GATE IS ALLOWED TO BE. A gate must be deterministic, offline and cheap (t
 runs in ~2 s over 517 chunks). It never calls a model — a gate judged by an LLM would have the
 same failure mode as the thing it is checking.
 
-Gates land in two waves. The ones here need only the chunks and their Markdown sources. Two more
-(G5b, the token-level oracle against the PDF's own text layer, and G9, manifest coverage) need
-the document manifest to know which reference text belongs to which Markdown, and arrive with it.
+THE ORACLE. The strongest gate here needs no dictionary and no model: `data/textos/` holds the
+PDF's OWN text layer, extracted from the same pages. Every alphabetic token of the Markdown must
+appear in it. That single rule catches a dropped ligature (`fuconazol` for `fluconazol`), a word
+split by markup (`c_ _on` for `con`), a word fused to its neighbour (`dela`), an injected `<br>`
+— and, in principle, any text an extractor invented. The manifest is what makes it possible: the
+file names pair by no rule at all (`VIH_TB.md` against `textos/TB_VIH/`).
 """
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
+import corpus
 from ingestion.chunk_guidelines import (MAX_TOKENS, RE_GRADE, RE_TABLE_ROW, count_tokens,
                                         is_mostly_table)
 
@@ -43,6 +48,11 @@ PREFIX_CHARS = 120
 # Typographic ligatures. The PDFs contain these as single glyphs; they must be expanded on
 # extraction, never dropped. Dropping them is what produced `fuconazol` for `fluconazol`.
 LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl"}
+
+# Words the extractor legitimately ADDS, so they cannot be in the PDF: the vocabulary of the
+# omission marker itself. Deliberately tiny and closed — every other unknown token is damage.
+MARKER_VOCABULARY = frozenset("figura algoritmo tabla omitida omitido p consultar pdf original".split())
+_ALPHA = re.compile(r"[a-zñ]+")
 
 # The ONE shape an omission marker may take. Spanish because the doctor reads it in the corpus.
 # The page number is what makes it actionable (the doctor can open the PDF at that page) and the
@@ -112,6 +122,14 @@ class Gate:
         return not self.findings
 
 
+@dataclass(frozen=True)
+class Source:
+    """A document as the gates see it: what was produced, and what it should have come from."""
+    name: str                    # the chunks' `source_file`
+    markdown: str
+    reference: str | None        # the PDF's own text layer; None when the manifest names none
+
+
 def _gate(code: str, title: str, findings: list[Finding]) -> Gate:
     return Gate(code=code, title=title, findings=tuple(findings))
 
@@ -143,6 +161,12 @@ def has_tabular_content(text: str) -> bool:
     one-record-per-row form wide matrices are serialised into)."""
     return (any(RE_TABLE_ROW.match(line) for line in text.splitlines())
             or bool(RE_RECORD_ROW.search(text)))
+
+
+def _fold(text: str) -> str:
+    """Lowercased and accent-folded, so `función` and `funcion` are one token."""
+    decomposed = unicodedata.normalize("NFKD", (text or "").lower())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
 def _paragraphs(md: str) -> list[str]:
@@ -224,34 +248,56 @@ def g11_declared_token_count(chunks: list[dict]) -> Gate:
 # ---------------------------------------------------------------------------
 # Gates over the MARKDOWN sources
 # ---------------------------------------------------------------------------
-def g04_omission_markers(sources: dict[str, str]) -> Gate:
+def g04_omission_markers(sources: list[Source]) -> Gate:
     findings = []
-    for name, md in sources.items():
+    for src in sources:
+        md = src.markdown
         canonical = [m.span() for m in OMISSION_CANONICAL.finditer(md)]
         for m in OMISSION_ANY.finditer(md):
             if not any(lo <= m.start() and m.end() <= hi for lo, hi in canonical):
-                findings.append(Finding(name, f"non-canonical omission marker: {m.group(0)[:90]}"))
+                findings.append(Finding(src.name,
+                                        f"non-canonical omission marker: {m.group(0)[:90]}"))
         for m in OMISSION_CANONICAL.finditer(md):
             if m.group("cause") not in OMISSION_ACCEPTED:
                 findings.append(Finding(
-                    name, f"a {m.group('cause').lower()} was omitted (p. {m.group('page')}); its "
-                          "text is in the PDF and must be recovered, not skipped"))
+                    src.name, f"a {m.group('cause').lower()} was omitted (p. {m.group('page')}); "
+                              "its text is in the PDF and must be recovered, not skipped"))
     return _gate("G4", "Every omission is a figure or an algorithm, marked with cause and page",
                  findings)
 
 
-def g05_ligatures_expanded(sources: dict[str, str]) -> Gate:
-    findings = [
-        Finding(name, f"raw ligature {glyph!r} ({md.count(glyph)}x) — expand it to {repl!r}")
-        for name, md in sources.items()
-        for glyph, repl in LIGATURES.items() if glyph in md
-    ]
-    return _gate("G5", "Typographic ligatures are expanded, never dropped", findings)
+def g05_faithful_to_the_pdf(sources: list[Source]) -> Gate:
+    """Two checks with one purpose: no character of the source may be invented or lost.
 
-
-def g06_evidence_grades(sources: dict[str, str]) -> Gate:
+    Raw ligature glyphs are a forward guard — they must be EXPANDED, and dropping them is what
+    turned `fluconazol` into `fuconazol` in dosing text. The token oracle is the real one: any
+    word in the Markdown that does not occur anywhere in the PDF's own text layer either was
+    damaged in extraction or was never in the document."""
     findings = []
-    for name, md in sources.items():
+    for src in sources:
+        for glyph, repl in LIGATURES.items():
+            if glyph in src.markdown:
+                findings.append(Finding(
+                    src.name,
+                    f"raw ligature {glyph!r} ({src.markdown.count(glyph)}x) — expand it to {repl!r}"))
+        if src.reference is None:
+            findings.append(Finding(src.name, "no reference text to check against; the manifest "
+                                              "must name one so extraction damage is detectable"))
+            continue
+        known = set(_ALPHA.findall(_fold(src.reference))) | MARKER_VOCABULARY
+        unknown: dict[str, int] = {}
+        for token in _ALPHA.findall(_fold(src.markdown)):
+            if token not in known:
+                unknown[token] = unknown.get(token, 0) + 1
+        for token, n in sorted(unknown.items(), key=lambda kv: -kv[1]):
+            findings.append(Finding(src.name, f"{token!r} ({n}x) does not occur in the PDF text"))
+    return _gate("G5", "Every word of the Markdown occurs in the PDF's own text layer", findings)
+
+
+def g06_evidence_grades(sources: list[Source]) -> Gate:
+    findings = []
+    for src in sources:
+        name, md = src.name, src.markdown
         for m in RE_GRADE_MID_SENTENCE.finditer(md):
             findings.append(Finding(name, f"grade injected mid-sentence: …{md[m.start():m.end()]}…"))
         broken = len(RE_BROKEN_EMPHASIS.findall(md))
@@ -265,9 +311,10 @@ def g06_evidence_grades(sources: dict[str, str]) -> Gate:
                  findings)
 
 
-def g07_tables_have_data(sources: dict[str, str]) -> Gate:
+def g07_tables_have_data(sources: list[Source]) -> Gate:
     findings = []
-    for name, md in sources.items():
+    for src in sources:
+        name, md = src.name, src.markdown
         captions = list(RE_TABLE_CAPTION.finditer(md))
         for i, m in enumerate(captions):
             end = captions[i + 1].start() if i + 1 < len(captions) else len(md)
@@ -283,12 +330,13 @@ def g07_tables_have_data(sources: dict[str, str]) -> Gate:
 # ---------------------------------------------------------------------------
 # Gate across BOTH
 # ---------------------------------------------------------------------------
-def g08_coverage(chunks: list[dict], sources: dict[str, str]) -> Gate:
+def g08_coverage(chunks: list[dict], sources: list[Source]) -> Gate:
     findings = []
-    for name, md in sources.items():
+    for src in sources:
+        name = src.name
         haystack = "\n".join(_norm(c.get("text", "")) for c in chunks
                              if c.get("source_file") == name)
-        paragraphs = _paragraphs(md)
+        paragraphs = _paragraphs(src.markdown)
         missing = [p for p in paragraphs if _norm(p) not in haystack]
         if not paragraphs:
             continue
@@ -303,23 +351,57 @@ def g08_coverage(chunks: list[dict], sources: dict[str, str]) -> Gate:
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
-def audit(chunks: list[dict], sources: dict[str, str] | None = None) -> list[Gate]:
-    """Run every gate that the given inputs support, in code order.
+def g09_manifest_covers_the_corpus(sources: list[Source]) -> Gate:
+    """Manifest and corpus directory must be in BIJECTION.
 
-    `sources` maps a chunk's `source_file` to its Markdown text; without it only the chunk-level
-    gates run, which is what lets the chunker check its own output before anything is written."""
+    One direction is already enforced where it matters (the chunker refuses an unlisted file),
+    but the other is not: a manifest row whose Markdown was renamed or deleted goes unnoticed
+    until a run silently answers from one document fewer."""
+    findings = []
+    listed = {doc.markdown for doc in corpus.documents()}
+    for src in sources:
+        if src.name not in listed:
+            findings.append(Finding(src.name, "no entry in data/corpus.toml"))
+    present = {src.name for src in sources}
+    for doc in corpus.documents():
+        if doc.markdown not in present:
+            findings.append(Finding(doc.doc_id, f"manifest names {doc.markdown!r}, which is not "
+                                                "among the sources being built"))
+    return _gate("G9", "The manifest and the corpus directory describe the same documents",
+                 findings)
+
+
+def audit(chunks: list[dict], sources: list[Source] | None = None) -> list[Gate]:
+    """Run every gate the given inputs support, in code order.
+
+    Without `sources` only the chunk-level gates run, which is what lets the chunker check its
+    own output before anything is written."""
     gates = [g01_size_budget(chunks), g02_non_empty_body(chunks), g03_unique_openings(chunks)]
     if sources:
-        gates += [g04_omission_markers(sources), g05_ligatures_expanded(sources),
+        gates += [g04_omission_markers(sources), g05_faithful_to_the_pdf(sources),
                   g06_evidence_grades(sources), g07_tables_have_data(sources),
-                  g08_coverage(chunks, sources)]
+                  g08_coverage(chunks, sources), g09_manifest_covers_the_corpus(sources)]
     gates += [g10_content_type_matches_body(chunks), g11_declared_token_count(chunks)]
-    return sorted(gates, key=lambda g: g.code)
+    return sorted(gates, key=lambda g: (len(g.code), g.code))
 
 
-def load_sources(md_files: list[Path]) -> dict[str, str]:
-    """Read the Markdown sources keyed the way chunks refer to them (`source_file`)."""
-    return {p.name: p.read_text(encoding="utf-8") for p in md_files}
+def load_sources(md_files: list[Path]) -> list[Source]:
+    """Pair each Markdown with the reference text the manifest says it came from.
+
+    A file with no manifest entry still yields a Source (with no reference) rather than raising,
+    so G9 can REPORT it as a finding. A gate that crashes tells you less than one that fails."""
+    out = []
+    for path in md_files:
+        try:
+            reference_path = Path(corpus.document_for_markdown(path.name).reference_path)
+            reference = (reference_path.read_text(encoding="utf-8", errors="replace")
+                         if reference_path.is_file() else None)
+        except SystemExit:
+            reference = None
+        out.append(Source(name=path.name,
+                          markdown=path.read_text(encoding="utf-8"),
+                          reference=reference))
+    return out
 
 
 def format_report(gates: list[Gate], max_findings: int = 5) -> str:

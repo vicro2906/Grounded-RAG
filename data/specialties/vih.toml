@@ -1,0 +1,165 @@
+# Specialty profile: HIV.
+#
+# Everything here used to be written INSIDE the prompts, in nine places across rag.py,
+# retrieval/ and ingestion/contextualize.py. That made "swap the medical specialty" a
+# search-and-replace across nine files, and it made the prompts silently age: SYS_PROMPT's
+# conflict rule listed «embarazo, tuberculosis, profilaxis posexposición, alteraciones
+# neurocognitivas», which is nothing but the index of the corpus as it stood the day it was
+# written.
+#
+# Values are in SPANISH because they reach the LLM prompts and the doctor verbatim. Keys and
+# structure are in English, like the rest of the code.
+
+id = "vih"
+display_name = "VIH"                 # shown to the doctor
+grade_scheme = "gesida"              # (A-I)…(C-III); see corpus.GRADE_SCHEMES
+
+
+[prompts]
+# How the assistant introduces its own scope (SYS_PROMPT, _VALIDATE_SYS).
+subject = "el manejo del VIH"
+
+# The in-domain test for the `refine` guardrail. Deliberately broad: the guardrail exists to
+# stop chit-chat, not to second-guess the retriever.
+domain = '''VIH o su manejo clínico (tratamiento antirretroviral, fármacos, coinfecciones, profilaxis, embarazo, vacunas, efectos adversos, resistencias, etc.)'''
+out_of_domain = '''cultura general, política, charla, u otros temas médicos sin relación con el VIH'''
+
+# Examples that teach the shape of a patient fact, not the medicine (`refine`, block C.1).
+fact_examples = '''"embarazo: sí", "semana_gestacion: 12", "aclaramiento_renal: 25 ml/min", "coinfeccion_VHB: sí", "CD4: 200", "carga_viral: indetectable", "pauta_actual: BIC/FTC/TAF"'''
+
+# What a CONTRADICTION between the question and the remembered patient looks like
+# (`refine`, block E — the patient-switch flag).
+switch_examples = '''los datos dicen «embarazo: sí» y la pregunta es sobre un varón; «edad_pediatrica» y la pregunta es claramente geriátrica; una pauta o una situación incompatibles con lo acumulado'''
+
+# A question so general that no patient datum could change its answer (`assess`, step 1).
+general_question_example = "¿qué es el VIH?"
+
+
+# Patient dimensions that can change a recommendation.
+#   `slug`  -> the closed list `refine` screens against (machine-readable, stable)
+#   `label` -> how `assess` names the same dimension in prose
+# One entry per dimension so the two prompts cannot drift apart, which they had: rag.py listed
+# twelve slugs in one prompt and a different, longer prose list in the other.
+[[modifier]]
+slug = "gestacion"
+label = "gestación o lactancia"
+
+[[modifier]]
+slug = "lactancia"
+label = "lactancia materna"
+
+[[modifier]]
+slug = "funcion_renal"
+label = "función renal"
+
+[[modifier]]
+slug = "funcion_hepatica"
+label = "función hepática"
+
+[[modifier]]
+slug = "coinfeccion_VHB"
+label = "coinfección por VHB"
+
+[[modifier]]
+slug = "coinfeccion_VHC"
+label = "coinfección por VHC"
+
+[[modifier]]
+slug = "cd4"
+label = "cifra de CD4"
+
+[[modifier]]
+slug = "carga_viral"
+label = "carga viral plasmática"
+
+[[modifier]]
+slug = "resistencias"
+label = "resistencias previas"
+
+[[modifier]]
+slug = "pauta_actual"
+label = "pauta antirretroviral actual"
+
+[[modifier]]
+slug = "interacciones"
+label = "interacciones farmacológicas"
+
+[[modifier]]
+slug = "hla_b5701"
+label = "HLA-B*5701"
+
+[[modifier]]
+slug = "edad_pediatrica"
+label = "edad pediátrica"
+
+[[modifier]]
+slug = "adherencia"
+label = "adherencia"
+
+
+# ABBREVIATION = full name, as the guidelines use them (both forms appear interchangeably).
+# This dictionary has the widest blast radius in the project: seven prompts embed it, the
+# citation integrity check uses it to catch a quote that swapped one drug for another, and the
+# graph modes use it to collapse spellings of one concept into a single node.
+[abbreviations]
+# --- Antiretroviral drugs ---
+"3TC" = "lamivudina"
+"ABC" = "abacavir"
+"ATV" = "atazanavir"
+"BIC" = "bictegravir"
+"CAB" = "cabotegravir"
+"COBI" = "cobicistat"
+"DRV" = "darunavir"
+"DTG" = "dolutegravir"
+"DOR" = "doravirina"
+"EFV" = "efavirenz"
+"ETR" = "etravirina"
+"EVG" = "elvitegravir"
+"EVG/c" = "elvitegravir potenciado con cobicistat"
+"FTC" = "emtricitabina"
+"LPV" = "lopinavir"
+"MVC" = "maraviroc"
+"NVP" = "nevirapina"
+"RAL" = "raltegravir"
+"RPV" = "rilpivirina"
+"RTV" = "ritonavir"
+"TAF" = "tenofovir alafenamida"
+"TDF" = "tenofovir disoproxil fumarato"
+"TDx" = "tenofovir disoproxil"
+"TFV" = "tenofovir"
+"XTC" = "lamivudina o emtricitabina"
+
+# --- Drug classes ---
+"FAR" = "fármacos antirretrovirales"
+"INI" = "inhibidor de la integrasa"
+"IP" = "inhibidor de la proteasa"
+"IP/p" = "inhibidor de la proteasa potenciado"
+"ITIAN" = "inhibidor de la transcriptasa inversa análogo de nucleósido/nucleótido"
+"ITINN" = "inhibidor de la transcriptasa inversa no nucleósido"
+
+# --- Clinical concepts ---
+"AP" = "acción prolongada"
+"BID" = "dos veces al día"
+"QD" = "una vez al día"
+"CVP" = "carga viral plasmática"
+"FGe" = "filtrado glomerular estimado"
+"FV" = "fracaso virológico"
+"MR" = "mutaciones de resistencia"
+"TAMs" = "mutaciones asociadas a resistencia a análogos de la timidina"
+"PDDI" = "potenciales interacciones farmacológicas"
+"RHS" = "reacción de hipersensibilidad"
+"SIRI" = "síndrome inflamatorio de reconstitución inmune"
+"SNC" = "sistema nervioso central"
+"TAR" = "tratamiento antirretroviral"
+"TO" = "tratamiento optimizado"
+"TB" = "tuberculosis"
+"ITS" = "infecciones de transmisión sexual"
+"NPJ" = "neumonía por Pneumocystis jirovecii"
+"PrEP" = "profilaxis preexposición"
+
+# --- Viruses ---
+"VIH-1" = "virus de la inmunodeficiencia humana tipo 1"
+"VIH-2" = "virus de la inmunodeficiencia humana tipo 2"
+"VHA" = "virus de la hepatitis A"
+"VHB" = "virus de la hepatitis B"
+"VHC" = "virus de la hepatitis C"

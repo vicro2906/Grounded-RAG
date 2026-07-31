@@ -26,11 +26,12 @@ from pathlib import Path
 import pytest
 
 import corpus
-from ingestion.quality import (PREFIX_CHARS, Finding, audit, format_report, g01_size_budget,
+from ingestion.quality import (PREFIX_CHARS, Source, audit, format_report, g01_size_budget,
                                g02_non_empty_body, g03_unique_openings, g04_omission_markers,
-                               g05_ligatures_expanded, g06_evidence_grades, g07_tables_have_data,
-                               g08_coverage, g10_content_type_matches_body,
-                               g11_declared_token_count, load_sources)
+                               g05_faithful_to_the_pdf, g06_evidence_grades, g07_tables_have_data,
+                               g08_coverage, g09_manifest_covers_the_corpus,
+                               g10_content_type_matches_body, g11_declared_token_count,
+                               load_sources)
 
 ROOT = Path(__file__).resolve().parent.parent
 CHUNKS = ROOT / "data" / "chunks" / "chunks.jsonl"
@@ -38,7 +39,7 @@ MARKDOWN = ROOT / "data" / "markdown"
 
 # Every gate `audit` is expected to run. Hardcoded rather than derived so that adding a gate
 # without deciding whether it passes today is itself a test failure (see test_audit_runs_every_gate).
-GATE_CODES = ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G10", "G11"]
+GATE_CODES = ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10", "G11"]
 
 # Gates the SHIPPED corpus fails, with what was measured on 2026-07-31. Delete an entry the
 # moment the corpus stops failing it — `strict=True` will insist.
@@ -50,6 +51,9 @@ KNOWN_DEBT = {
           "breadcrumb is prepended to the citable text",
     "G4": "112 omission markers in 27 different spellings, none carrying a page, and most of "
           "them tables whose text is recoverable from the PDF",
+    "G5": "198 tokens in the Markdown do not occur in the PDF's own text layer: 1432 injected "
+          "<br>, 91 words that lost an fi/fl ligature (`fuconazol` for `fluconazol`), and words "
+          "fused to their neighbour (`dela`, `enpacientes`)",
     "G6": "21 findings: evidence grades injected mid-sentence plus 363 broken emphasis runs "
           "that split words ('c_ _on' for 'con')",
     "G7": "33 table captions with no rows beneath them, including TABLA 1-12 of TAR_2022 "
@@ -124,40 +128,66 @@ def test_gate_detects_shared_opening():
     assert g03_unique_openings([twins[0]]).passed
 
 
+def _src(markdown: str, reference: str | None = "") -> list:
+    """One source, named after a document the manifest really lists so G9 stays quiet."""
+    return [Source(name="TAR_2022.md", markdown=markdown, reference=reference)]
+
+
 def test_gate_accepts_only_canonical_figure_omissions():
-    ok = "> _[Figura omitida — p. 42 — consultar PDF original]_"
-    assert g04_omission_markers({"g.md": ok}).passed
+    assert g04_omission_markers(_src("> _[Figura omitida — p. 42 — consultar PDF original]_")).passed
     # A lost TABLE is a bug even in canonical form: its text is in the PDF's text layer.
-    lost_table = "> _[Tabla omitida — p. 42 — consultar PDF original]_"
-    assert not g04_omission_markers({"g.md": lost_table}).passed
+    assert not g04_omission_markers(_src("> _[Tabla omitida — p. 42 — consultar PDF original]_")).passed
     # The 27 free-form spellings the ad-hoc converters produced carry no page and no fixed cause.
-    assert not g04_omission_markers({"g.md": "> _[Tabla omitida — consultar PDF original]_"}).passed
+    assert not g04_omission_markers(_src("> _[Tabla omitida — consultar PDF original]_")).passed
 
 
 def test_gate_detects_raw_ligature():
-    assert not g05_ligatures_expanded({"g.md": "eﬁcacia del TAR"}).passed
-    assert g05_ligatures_expanded({"g.md": "eficacia del TAR"}).passed
+    assert not g05_faithful_to_the_pdf(_src("eﬁcacia del TAR", "eficacia del TAR")).passed
+    assert g05_faithful_to_the_pdf(_src("eficacia del TAR", "eficacia del TAR")).passed
+
+
+def test_gate_detects_a_word_that_lost_a_letter():
+    """The oracle needs no dictionary: `fuconazol` simply does not occur in the PDF, and neither
+    does an injected `<br>` nor a word fused to its neighbour."""
+    reference = "tratamiento con fluconazol en pacientes con eficacia demostrada"
+    assert not g05_faithful_to_the_pdf(_src("tratamiento con fuconazol", reference)).passed
+    assert not g05_faithful_to_the_pdf(_src("eficacia<br>en pacientes", reference)).passed
+    assert not g05_faithful_to_the_pdf(_src("enpacientes con eficacia", reference)).passed
+    assert g05_faithful_to_the_pdf(_src("tratamiento con fluconazol", reference)).passed
+
+
+def test_the_oracle_allows_the_omission_markers_own_words():
+    """The marker is text the extractor legitimately ADDS, so it cannot be in the PDF. The
+    allow-list is closed and tiny on purpose: everything else unknown is damage."""
+    marker = "> _[Figura omitida — p. 42 — consultar PDF original]_"
+    assert g05_faithful_to_the_pdf(_src(marker, "un texto cualquiera")).passed
+
+
+def test_the_oracle_says_so_when_it_has_nothing_to_check_against():
+    """Silently passing a document with no reference would make the strongest gate vanish for
+    exactly the documents nobody paired up."""
+    assert not g05_faithful_to_the_pdf(_src("cualquier cosa", None)).passed
 
 
 def test_gate_detects_grade_defects():
     mid = "se debe evitar la interrupción **(A-II).** de una pauta eficaz frente a VHB"
-    assert not g06_evidence_grades({"g.md": mid}).passed
-    assert not g06_evidence_grades({"g.md": "la CVP c_ _on una técnica"}).passed
-    assert not g06_evidence_grades({"g.md": "El cambio a RAL es adecuado (_ _**A-I).**_"}).passed
-    assert g06_evidence_grades({"g.md": "Se recomienda iniciar TAR precozmente (A-I)."}).passed
+    assert not g06_evidence_grades(_src(mid)).passed
+    assert not g06_evidence_grades(_src("la CVP c_ _on una técnica")).passed
+    assert not g06_evidence_grades(_src("El cambio a RAL es adecuado (_ _**A-I).**_")).passed
+    assert g06_evidence_grades(_src("Se recomienda iniciar TAR precozmente (A-I).")).passed
 
 
 def test_gate_accepts_a_grade_that_closes_its_sentence_before_a_lettered_heading():
     """`(A-II).` followed by `##### b. Título` is correct: the lowercase letter belongs to the
     heading, not to a continuing clause. The first draft of this gate flagged it."""
-    assert g06_evidence_grades({"g.md": "adherencia **(A-II)** .\n\n##### b. Papel del farmacéutico"}).passed
+    assert g06_evidence_grades(_src("adherencia **(A-II)** .\n\n##### b. Papel del farmacéutico")).passed
 
 
 def test_gate_detects_caption_without_table():
     empty = "#### TABLA 3. Combinaciones de TAR de inicio\n\n> _[Imagen omitida]_\n\nNotas: †"
-    assert not g07_tables_have_data({"g.md": empty}).passed
+    assert not g07_tables_have_data(_src(empty)).passed
     rows = "#### TABLA 3. Combinaciones\n\n|3er fármaco|Pauta|\n|---|---|\n|INI|BIC/FTC/TAF|"
-    assert g07_tables_have_data({"g.md": rows}).passed
+    assert g07_tables_have_data(_src(rows)).passed
 
 
 def test_gate_accepts_a_wide_matrix_serialised_as_records():
@@ -166,13 +196,20 @@ def test_gate_accepts_a_wide_matrix_serialised_as_records():
     records = ("#### TABLA 9. Asociaciones contraindicadas\n\n"
                "- abemaciclib: con DTG «X hFCO1»; con BIC «X NR».\n"
                "- abiraterona: con EFV «X NR».")
-    assert g07_tables_have_data({"g.md": records}).passed
+    assert g07_tables_have_data(_src(records)).passed
     assert g10_content_type_matches_body([_chunk(content_type="table", text=records)]).passed
 
 
 def test_gate_detects_lost_paragraph():
     md = "# Guía\n\n" + "Un párrafo clínico suficientemente largo como para contar en cobertura.\n"
-    assert not g08_coverage([_chunk(text="1. TEMA\n\notra cosa")], {"guia.md": md}).passed
+    assert not g08_coverage([_chunk(text="1. TEMA\n\notra cosa")], _src(md)).passed
+
+
+def test_gate_detects_manifest_drift_in_both_directions():
+    unlisted = [Source(name="una_guia_nueva.md", markdown="", reference="")]
+    assert not g09_manifest_covers_the_corpus(unlisted).passed
+    # And the direction nobody notices: a manifest row whose Markdown is no longer being built.
+    assert not g09_manifest_covers_the_corpus(_src("")).passed
 
 
 def test_gate_detects_mislabelled_table():
@@ -233,6 +270,69 @@ def test_consumers_derive_their_locations_from_the_switch():
     import rag
     assert _common.CHUNKS_PATH == corpus.chunks_path()
     assert rag.COLLECTION_HYBRID == corpus.qdrant_collection()
+
+
+# ---------------------------------------------------------------------------
+# The manifest and the specialty profiles: what makes the corpus describable
+# ---------------------------------------------------------------------------
+def test_every_document_names_files_that_exist():
+    """The manifest is the ONLY thing that knows which reference text belongs to which Markdown
+    — the names pair by no rule (`VIH_TB.md` against `textos/TB_VIH/`). A stale path here does
+    not crash anything; it quietly removes a document's extraction damage from view."""
+    for doc in corpus.documents():
+        assert Path(doc.markdown_path).is_file(), f"{doc.doc_id}: {doc.markdown}"
+        assert Path(doc.reference_path).is_file(), f"{doc.doc_id}: {doc.reference}"
+        assert Path(doc.pdf_path).is_file(), f"{doc.doc_id}: {doc.source_pdf}"
+
+
+def test_an_unlisted_document_cannot_enter_the_corpus():
+    """It used to enter silently, tagged `topic = "vih_general"` — a document whose year and
+    scope the generation prompt could not see, while that prompt is what arbitrates between
+    guidelines spanning 2013 to 2025."""
+    with pytest.raises(SystemExit, match="corpus.toml"):
+        corpus.document_for_markdown("una_guia_que_nadie_declaro.md")
+
+
+def test_the_specific_scopes_are_derived_from_the_manifest():
+    """SYS_PROMPT's conflict rule needs to know which situations have DEDICATED guidance, because
+    a specific guideline beats a general one even when older (pregnancy and TB are 2018, TAR is
+    2022, so 'most recent wins' alone would be clinically wrong). That list used to be typed into
+    the prompt, i.e. a copy of the corpus index that nobody updated. Deriving it means adding a
+    document teaches the prompt about it."""
+    scopes = corpus.topics_for("vih")
+    assert "embarazo" in scopes and "tuberculosis" in scopes
+    assert set(scopes) == {t for doc in corpus.documents() for t in doc.topics}
+    assert corpus.topics_for("una_especialidad_sin_documentos") == ()
+
+
+def test_specialty_profile_loads_and_an_unknown_one_fails_loudly():
+    vih = corpus.specialty("vih")
+    assert vih.display_name and vih.grade_scheme and vih.abbreviations
+    # Both spellings of a modifier come from ONE entry, so the two prompts cannot drift apart.
+    assert "gestacion" in vih.modifier_slugs
+    assert any("gestación" in label for label in vih.modifier_labels)
+    with pytest.raises(SystemExit, match="Unknown specialty"):
+        corpus.specialty("traumatologia")
+
+
+def test_an_unknown_specialty_widens_rather_than_narrows():
+    """Same posture as the retrieval-mode resolution: a bad value must not take the run down,
+    but it must not silently restrict which guidelines are searched either."""
+    assert corpus.resolve_specialty("no_existe") == corpus.default_specialty()
+    assert corpus.resolve_specialty(None) in corpus.specialties()
+
+
+def test_abbreviations_are_union_for_integrity_and_scoped_for_prompts():
+    """The split is a safety decision. The union feeds checks that only get STRICTER with more
+    patterns (an abbreviation `evidence` does not know is one it cannot notice being swapped).
+    The scoped view feeds `expand_abbrevs`, which REWRITES the query — there an abbreviation
+    meaning something else in another specialty would inject the wrong drug name."""
+    import abbreviations
+    scoped = abbreviations.for_specialty("vih")
+    assert scoped["TAR"] == "tratamiento antirretroviral"
+    assert set(scoped) <= set(abbreviations.ABBREVIATIONS)
+    for specialty_id in corpus.specialties():
+        assert set(abbreviations.for_specialty(specialty_id)) <= set(abbreviations.ABBREVIATIONS)
 
 
 def test_no_module_hardcodes_an_artifact_location():
