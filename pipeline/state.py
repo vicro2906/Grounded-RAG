@@ -32,6 +32,12 @@ def _merge_pool(existing: list | None, update: list | None) -> list:
 class RAGState(TypedDict):
     question: str            # original user input (used for generation)
     retrieval_mode: str      # which retrieval architecture ran (set by the retrieval node)
+    # Which medical specialty this conversation is about. SESSION-scoped like `patient_facts`:
+    # the doctor picks it once and it must not change under them mid-conversation. It does two
+    # things — it selects the prompt vocabulary (domain guardrail, clinical modifiers,
+    # abbreviations) and it FILTERS retrieval, so a question can never be answered from another
+    # area's guidelines. Empty means "resolve the manifest default".
+    specialty: str
     in_domain: bool          # is the question within the HIV domain? (rephrase)
     search_query: str        # rewritten/normalized query for the retriever (rephrase)
     candidates: list         # retrieved payloads (hybrid, ~20) before reranking

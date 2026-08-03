@@ -44,13 +44,14 @@ import chainlit as cl
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+import corpus
 import rag
 from evidence import format_answer_markdown, resolve_answer
-from pipeline import (build_combined_graph, refinement_reply, RETRIEVAL_MODE,
+from pipeline import (build_combined_graph, refinement_reply, RETRIEVAL_MODE, msg_intro,
                       MSG_CONFIRM_NEW_PATIENT, MSG_CONFIRM_NEW_PATIENT_ASK, MSG_NEW_PATIENT,
                       MSG_NO_PATIENT_DATA, MSG_PATIENT_HEADER,
                       MSG_STEP_INITIAL, MSG_STEP_LABELS, MSG_STEP_RESUMED, MSG_WEB_CONFIRM_NO,
-                      MSG_WEB_CONFIRM_YES, MSG_WEB_INTRO, MSG_WEB_NEW_PATIENT,
+                      MSG_WEB_CONFIRM_YES, MSG_WEB_NEW_PATIENT,
                       MSG_WEB_REFINE_ASK, MSG_WEB_REFINE_NO, MSG_WEB_REFINE_OFFER,
                       MSG_WEB_REFINE_YES, MSG_WEB_SHOW_PATIENT, MSG_WEB_SOURCES_STEP)
 from progress import read_chunk
@@ -67,14 +68,22 @@ threading.Thread(target=rag.warmup, daemon=True).start()
 
 
 # --- session plumbing ------------------------------------------------------
+def _specialty() -> str:
+    """The specialty this chat answers from. Chainlit's chat profile is the picker, and it is
+    chosen BEFORE the first message, which matches how the value behaves everywhere else: it is
+    session-scoped and must not change under the doctor mid-conversation."""
+    return corpus.resolve_specialty(cl.user_session.get("chat_profile"))
+
+
 def _config() -> dict:
     """This browser session's thread: one per chat, so the patient is remembered across
     questions and cleared only on an explicit new patient."""
     config = cl.user_session.get("config")
     if config is None:
-        mode = RETRIEVAL_MODE
-        config = {"configurable": {"thread_id": uuid.uuid4().hex},
-                  "tags": [f"mode:{mode}"], "metadata": {"retrieval_mode": mode}}
+        mode, specialty = RETRIEVAL_MODE, _specialty()
+        config = {"configurable": {"thread_id": uuid.uuid4().hex, "specialty": specialty},
+                  "tags": [f"mode:{mode}", f"specialty:{specialty}"],
+                  "metadata": {"retrieval_mode": mode, "specialty": specialty}}
         cl.user_session.set("config", config)
     return config
 
@@ -251,10 +260,20 @@ async def _post_answer(output: str, view) -> None:
 
 
 # --- Chainlit handlers -----------------------------------------------------
+@cl.set_chat_profiles
+async def chat_profiles():
+    """One profile per specialty on disk, so the doctor picks the clinical area before asking.
+    Derived from `data/specialties/`, never listed here: a second list would drift."""
+    return [cl.ChatProfile(name=specialty_id,
+                           markdown_description=corpus.specialty(specialty_id).display_name)
+            for specialty_id in corpus.specialties()]
+
+
 @cl.on_chat_start
 async def on_chat_start():
     _config()
-    await cl.Message(content=MSG_WEB_INTRO, actions=_session_actions()).send()
+    await cl.Message(content=msg_intro(_specialty(), web=True),
+                     actions=_session_actions()).send()
 
 
 @cl.on_message

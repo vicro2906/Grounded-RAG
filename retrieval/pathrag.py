@@ -459,7 +459,8 @@ def _trace_paths(query: str, paths: list[_Path]) -> None:
 
 def pathrag_search_with_paths(query: str, top_k: int = 8, node_top_n: int = NODE_TOP_N,
                               max_paths: int = MAX_PATHS, decay: float = DECAY,
-                              rewritten_query: str | None = None) -> tuple[list, str]:
+                              rewritten_query: str | None = None,
+                              scope: corpus.Scope | None = None) -> tuple[list, str]:
     """Full PathRAG retrieval: keywords -> nodes -> pruned paths -> chunks + concept map.
 
     Returns (payloads, concept_map). The payloads are ordinary citable chunks; the concept map
@@ -470,13 +471,15 @@ def pathrag_search_with_paths(query: str, top_k: int = 8, node_top_n: int = NODE
     paths = retrieve_paths(nodes, max_paths=max_paths, decay=decay) if nodes else []
     _trace_paths(query, paths)
     primary = map_chunk_ids_to_payloads(_path_chunk_ids(paths))[:PRIMARY_CHUNK_CAP]
-    return house_tail(query, primary, rewritten_query, top_k=top_k), format_paths(paths)
+    return house_tail(query, primary, rewritten_query, top_k=top_k, scope=scope), format_paths(paths)
 
 
-def pathrag_search(query: str, top_k: int = 8, rewritten_query: str | None = None) -> list:
+def pathrag_search(query: str, top_k: int = 8, rewritten_query: str | None = None,
+                   scope: corpus.Scope | None = None) -> list:
     """Chunk-only entry point, honouring the retrieval contract shared by every mode (this is
     what the evaluation A/B calls, so all modes are compared on chunks alone)."""
-    payloads, _ = pathrag_search_with_paths(query, top_k=top_k, rewritten_query=rewritten_query)
+    payloads, _ = pathrag_search_with_paths(query, top_k=top_k, rewritten_query=rewritten_query,
+                                            scope=scope)
     return payloads
 
 

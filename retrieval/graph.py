@@ -203,14 +203,15 @@ def graph_select(query: str, hl_keywords: list, ll_keywords: list,
 
 
 def graph_search(query: str, top_k: int = 8, chunk_top_k: int = 20, hybrid_k: int = 10,
-                 rewritten_query: str | None = None) -> list:
+                 rewritten_query: str | None = None,
+                 scope: corpus.Scope | None = None) -> list:
     """Track B retriever (collapsed single-call API, used by the eval and the combined graph).
     The GRAPH traversal is this mode's selection — the multi-hop signal — and `house_tail`
     adds the shared dense+BM25 complement and reranks to top_k, exactly as the other graph
     modes do (that sameness is what keeps the A/B measuring selection and nothing else).
     The traversal is handed over as a CALLABLE so the tail runs it in parallel with the hybrid:
     they are independent and hit different resources (LightRAG's loop vs Qdrant/OpenAI)."""
-    return house_tail(query, lambda: graph_traverse(query, chunk_top_k),
+    return house_tail(query, lambda: graph_traverse(query, chunk_top_k), scope=scope,
                       rewritten_query, top_k=top_k, hybrid_k=hybrid_k)
 
 

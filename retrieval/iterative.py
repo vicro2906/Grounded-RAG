@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from pydantic import BaseModel
 
+import corpus
 from rag import (rerank, rephrase, chat_model, REPHRASE_MODEL, _ABBREV_LIST, _get_reranker,
                  _get_bm25)
 
@@ -118,14 +119,15 @@ def _accumulate(pool: dict, payloads: list) -> None:
 
 
 def iterative_search(query: str, top_k: int = 8, max_hops: int = MAX_HOPS,
-                     per_hop: int = PER_HOP, rewritten_query: str | None = None) -> list:
+                     per_hop: int = PER_HOP, rewritten_query: str | None = None,
+                     scope: corpus.Scope | None = None) -> list:
     """Track A retriever for multi-hop questions: plan -> retrieve per sub-query ->
     reflect/retrieve follow-ups -> rerank the union against the ORIGINAL question.
     Single-hop questions fall back to one baseline shot; pass `rewritten_query` when the
     caller already rephrased the question (the pipeline does) to skip a duplicate LLM call."""
     plan = _plan(query)
     if not plan["is_multihop"]:
-        return retrieve_rerank(rewritten_query or rephrase(query), top_k=top_k)
+        return retrieve_rerank(rewritten_query or rephrase(query), top_k=top_k, scope=scope)
 
     pool: dict = {}
     subs = plan["sub_queries"][:max_hops]
@@ -133,7 +135,7 @@ def iterative_search(query: str, top_k: int = 8, max_hops: int = MAX_HOPS,
     # workers don't race on the lazy load; ex.map preserves order, so dedup is deterministic.
     _get_reranker(); _get_bm25()
     with ThreadPoolExecutor(max_workers=max(1, len(subs))) as ex:
-        for payloads in ex.map(lambda sq: retrieve_rerank(sq, top_k=per_hop), subs):
+        for payloads in ex.map(lambda sq: retrieve_rerank(sq, top_k=per_hop, scope=scope), subs):
             _accumulate(pool, payloads)
     rounds = len(subs)
 
@@ -141,7 +143,7 @@ def iterative_search(query: str, top_k: int = 8, max_hops: int = MAX_HOPS,
         r = _reflect(query, pool)
         if r["sufficient"] or not r["next_query"]:
             break
-        _accumulate(pool, retrieve_rerank(r["next_query"], top_k=per_hop))
+        _accumulate(pool, retrieve_rerank(r["next_query"], top_k=per_hop, scope=scope))
         rounds += 1
 
     # Final precision pass: rerank the pooled union against the ORIGINAL question.

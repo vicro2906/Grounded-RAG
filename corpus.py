@@ -43,20 +43,28 @@ REFERENCE_DIR = os.path.join(DATA_DIR, "textos")
 
 @dataclass(frozen=True)
 class Layout:
-    """The four artifact names of one corpus generation."""
+    """The four artifact names of one corpus generation, plus what its chunks can be filtered by."""
     chunks: str          # file under data/chunks/
     lightrag: str        # directory under data/ (graph mode; PathRAG reads the same one)
     hipporag: str        # directory under data/
     collection: str      # Qdrant collection holding the embeddings of `chunks`
+    # Whether its chunks carry `specialty`, and therefore whether a search can be confined to
+    # one. Stated per generation rather than assumed: Qdrant REJECTS a filter on a field with no
+    # payload index, and a generation predating the field has neither. Pretending otherwise
+    # would turn every question into «no está en las guías» — a clinical statement produced by a
+    # schema mismatch.
+    scopable: bool = True
 
 
 LAYOUTS = {
     # Built by the per-PDF ad-hoc converters. Names are legacy and deliberately not derived:
-    # they are what is already in Qdrant Cloud and on this machine's disk.
+    # they are what is already in Qdrant Cloud and on this machine's disk. Its chunks have no
+    # `specialty`, so it holds exactly one specialty's guidelines and cannot be narrowed.
     "v1": Layout(chunks="chunks.jsonl",
                  lightrag="lightrag_store",
                  hipporag="hipporag_store",
-                 collection="guias_vih_hibrida_ctx"),
+                 collection="guias_vih_hibrida_ctx",
+                 scopable=False),
     # Built by ingestion.extract_pdf + the redesigned chunker. The collection name drops the
     # domain: the corpus is no longer assumed to be about one specialty.
     "v2": Layout(chunks="chunks_v2.jsonl",
@@ -260,6 +268,32 @@ def specialties() -> tuple[str, ...]:
 def default_specialty() -> str:
     """The specialty a run answers from when nobody picked one."""
     return os.environ.get("SPECIALTY") or _manifest().get("default_specialty") or ""
+
+
+@dataclass(frozen=True)
+class Scope:
+    """Which slice of the corpus a search may reach.
+
+    It lives here, not in the retrieval stack, because it is a statement about the CORPUS, and
+    because `rag.py`, `retrieval/` and `evaluation.py` all need to name it. Frozen and explicit
+    rather than ambient: passing it through the call chain costs five signatures, and the
+    alternative (a contextvar) turns a contract into hidden state — a search that silently reads
+    the wrong specialty is exactly the kind of failure this project cannot see.
+
+    ONLY `specialty` filters. Filtering by `topic` was considered and rejected: some subjects
+    exist only in the older guidelines, so a topic filter would erase them, whereas letting
+    generation arbitrate between guides is visible and reversible."""
+    specialty: str = ""
+
+    @property
+    def is_open(self) -> bool:
+        """True when the scope restricts nothing.
+
+        Either because no specialty was asked for (the evaluation, and any caller deliberately
+        searching the whole corpus), or because the ACTIVE corpus generation does not carry the
+        field to filter on. The second case is not a silent failure: a generation built before
+        specialties existed holds exactly one, so searching all of it IS searching that one."""
+        return not self.specialty or not LAYOUT.scopable
 
 
 def resolve_specialty(specialty_id: str | None) -> str:

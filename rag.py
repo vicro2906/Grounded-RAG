@@ -144,16 +144,44 @@ def retrieve(query: str, top_k: int = 5):
     return [r.payload for r in response.points]
 
 
-def retrieve_hybrid(query: str, top_k: int = 5, prefetch_limit: int = 20):
+def scope_filter(scope: "corpus.Scope | None"):
+    """Translate a corpus Scope into a Qdrant filter, or None when it restricts nothing.
+
+    Uses the `specialty` payload index — the FIRST use this project makes of the payload indexes
+    it has been creating since the beginning: seven existed and no query ever passed a filter.
+
+    A chunk WITHOUT the field also matches, and that is load-bearing, not defensive. The
+    collection currently in production was built before `specialty` existed, so a plain equality
+    filter would match nothing and every question would come back «no está en las guías» — a
+    statement about the guidelines, made by a schema mismatch, that a doctor could act on. Once
+    a generation carries the field on every chunk the extra clause never fires, so the filter is
+    exact where it can be and open where it cannot. Same call `_common.in_scope` makes on the
+    graph modes' own selection."""
+    if scope is None or scope.is_open:
+        return None
+    return models.Filter(should=[
+        models.FieldCondition(key="specialty", match=models.MatchValue(value=scope.specialty)),
+        models.IsEmptyCondition(is_empty=models.PayloadField(key="specialty")),
+    ])
+
+
+def retrieve_hybrid(query: str, top_k: int = 5, prefetch_limit: int = 20,
+                    scope: "corpus.Scope | None" = None):
     """Hybrid search: combine semantic (dense vector) and lexical (sparse BM25)
     retrieval, fusing them with RRF in Qdrant. Pulls prefetch_limit candidates from
-    each branch and returns the payloads of the top_k fused results."""
+    each branch and returns the payloads of the top_k fused results.
+
+    `scope` restricts the search to one specialty. The filter goes INSIDE each prefetch as well
+    as on the fused query, and that is not redundant: a prefetch pulls its `prefetch_limit`
+    candidates BEFORE fusion, so filtering only at the end would let another specialty consume
+    the candidate budget and silently shrink the real one."""
     dense_vec = get_embedding(query)
     sparse = next(iter(_get_bm25().query_embed(query)))
+    where = scope_filter(scope)
     response = qdrant.query_points(
         collection_name=COLLECTION_HYBRID,
         prefetch=[
-            models.Prefetch(query=dense_vec, using="dense", limit=prefetch_limit),
+            models.Prefetch(query=dense_vec, using="dense", limit=prefetch_limit, filter=where),
             models.Prefetch(
                 query=models.SparseVector(
                     indices=sparse.indices.tolist(),
@@ -161,9 +189,11 @@ def retrieve_hybrid(query: str, top_k: int = 5, prefetch_limit: int = 20):
                 ),
                 using="bm25",
                 limit=prefetch_limit,
+                filter=where,
             ),
         ],
         query=models.FusionQuery(fusion=models.Fusion.RRF),
+        query_filter=where,
         limit=top_k,
         with_payload=True,
     )
@@ -285,9 +315,12 @@ def rerank(query: str, payloads: list, top_k: int = 5) -> list:
 # terms into BOTH forms «full name (ABBR)» (the guides use both), to improve retrieval. Also
 # the cheap half of the clarification step (known_facts / candidate_modifiers).
 # ---------------------------------------------------------------------------
+from functools import lru_cache
 from typing import cast
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel
+
+import abbreviations
 from abbreviations import ABBREVIATIONS
 
 
@@ -311,13 +344,38 @@ def embeddings_model(model: str = EMBEDDING_MODEL, **kwargs) -> OpenAIEmbeddings
     return OpenAIEmbeddings(model=model, base_url=OPENAI_BASE_URL, **kwargs)
 
 
-_ABBREV_LIST = "\n".join(f"{abbr} = {name}" for abbr, name in ABBREVIATIONS.items())
+# The four system prompts below are BUILT PER SPECIALTY rather than written as constants.
+# Everything domain-specific in them — the subject, what counts as in-domain, the patient
+# dimensions, the abbreviations, the example wording — comes from the active profile
+# (`data/specialties/<id>.toml`) and from the document manifest. What stays literal is the
+# REASONING: the steps, the ordering rules, the output contract. Those are properties of the
+# pipeline, not of the medicine, and templating them would have cost the one thing these prompts
+# most need, which is being readable.
+#
+# They are cached per specialty and the `_get_*_llm()` singletons are untouched: the MODEL never
+# depends on the specialty, only the system message does, so this costs nothing per call.
+@lru_cache(maxsize=None)
+def abbrev_list(specialty_id: str) -> str:
+    """«SIGLA = nombre» lines for the prompts. Scoped to ONE specialty on purpose: see
+    abbreviations.py — the union is for integrity checks, never for a prompt or a rewrite."""
+    return "\n".join(f"{abbr} = {name}"
+                     for abbr, name in abbreviations.for_specialty(specialty_id).items())
 
-_REPHRASE_SYS = f"""Eres un componente de PREPROCESADO de consultas para un asistente sobre las guías clínicas de VIH (GeSIDA). Haces DOS tareas y NO respondes la pregunta.
+
+# Kept for the modules that embed the list at import time (retrieval/, whose prompts are built
+# once). They read the DEFAULT specialty; making them per-specialty is what the retrieval Scope
+# will carry when the graph modes learn to filter.
+_ABBREV_LIST = abbrev_list(corpus.default_specialty())
+
+
+@lru_cache(maxsize=None)
+def rephrase_sys(specialty_id: str) -> str:
+    profile = corpus.specialty(specialty_id)
+    return f"""Eres un componente de PREPROCESADO de consultas para un asistente sobre guías clínicas de {profile.display_name}. Haces DOS tareas y NO respondes la pregunta.
 
 A) CLASIFICAR si la pregunta pertenece al dominio (campo in_domain):
-   - in_domain = true si trata sobre VIH o su manejo clínico (tratamiento antirretroviral, fármacos, coinfecciones, profilaxis, embarazo, vacunas, efectos adversos, resistencias, etc.) y podría responderse con guías clínicas de VIH.
-   - in_domain = false SOLO si es CLARAMENTE ajena (cultura general, política, charla, u otros temas médicos sin relación con el VIH). Ante la duda, marca true: es mejor dejarla pasar y que el resto del sistema decida.
+   - in_domain = true si trata sobre {profile.prompts['domain']} y podría responderse con esas guías clínicas.
+   - in_domain = false SOLO si es CLARAMENTE ajena ({profile.prompts['out_of_domain']}). Ante la duda, marca true: es mejor dejarla pasar y que el resto del sistema decida.
 
 B) REESCRIBIR la consulta para el buscador (campo rewritten_query; solo importa si in_domain=true — si es false, puedes devolver la pregunta tal cual):
    1. No añadas información clínica nueva (fármacos, dosis, cifras, criterios) que no esté en la pregunta original, y no cambies su significado ni intención.
@@ -325,15 +383,15 @@ B) REESCRIBIR la consulta para el buscador (campo rewritten_query; solo importa 
    3. NORMALIZACIÓN DE TÉRMINOS: para CUALQUIER fármaco o término que aparezca en la lista de abreviaturas de abajo (escrito como sigla o como nombre completo), inclúyelo SIEMPRE en AMBAS formas, con el patrón «nombre completo (SIGLA)». Ejemplos: "bictegravir" -> "bictegravir (BIC)"; "TAF" -> "tenofovir alafenamida (TAF)". Solo los términos de la lista; no inventes siglas.
 
 C) CRIBADO de datos del paciente (cribado barato, NO respondas; solo importa si in_domain=true):
-   1. known_facts: extrae los datos clínicos del PACIENTE que YA aparecen explícitos en la pregunta, como pares «atributo: valor». Ejemplos: "embarazo: sí", "semana_gestacion: 12", "aclaramiento_renal: 25 ml/min", "coinfeccion_VHB: sí", "CD4: 200", "carga_viral: indetectable", "pauta_actual: BIC/FTC/TAF". Solo lo dicho explícitamente; NO inventes ni infieras valores.
-   2. candidate_modifiers: lista de modificadores clínicos que esta pregunta PODRÍA necesitar para una recomendación precisa y que NO están ya resueltos en known_facts. Elige de esta lista cerrada cuando apliquen: "gestacion", "funcion_renal", "funcion_hepatica", "coinfeccion_VHB", "coinfeccion_VHC", "cd4", "carga_viral", "resistencias", "pauta_actual", "interacciones", "edad_pediatrica", "lactancia". No es una decisión final (eso lo confirma otro componente con la evidencia recuperada); aquí solo señalas candidatos plausibles. Si la pregunta es general/definitoria y no depende de datos del paciente, devuelve lista vacía.
+   1. known_facts: extrae los datos clínicos del PACIENTE que YA aparecen explícitos en la pregunta, como pares «atributo: valor». Ejemplos: {profile.prompts['fact_examples']}. Solo lo dicho explícitamente; NO inventes ni infieras valores.
+   2. candidate_modifiers: lista de modificadores clínicos que esta pregunta PODRÍA necesitar para una recomendación precisa y que NO están ya resueltos en known_facts. Elige de esta lista cerrada cuando apliquen: {", ".join(f'"{s}"' for s in profile.modifier_slugs)}. No es una decisión final (eso lo confirma otro componente con la evidencia recuperada); aquí solo señalas candidatos plausibles. Si la pregunta es general/definitoria y no depende de datos del paciente, devuelve lista vacía.
 
 D) SEGUIMIENTO (solo si te doy una PREGUNTA ANTERIOR): la consulta actual puede ser una continuación elíptica de ella («¿y en embarazo?», «¿y si hay insuficiencia renal?», «¿a qué dosis?»). En ese caso, resuelve el referente y reescribe la consulta como una pregunta AUTÓNOMA que combine el TEMA de la pregunta anterior con la variación de la actual (p. ej. anterior «¿qué TAR de inicio se recomienda?» + actual «¿y en embarazo?» -> «¿qué TAR de inicio se recomienda en el embarazo?»). REGLAS: (a) el tema que arrastras debe salir LITERALMENTE de la pregunta anterior, no lo inventes; (b) si la pregunta actual ya es autónoma (cambia de tema, o se entiende por sí sola), IGNORA la anterior y reescríbela tal cual; (c) esto NO relaja B.1: no añadas fármacos, dosis ni cifras que no estén en una de las dos preguntas.
 
-E) POSIBLE CAMBIO DE PACIENTE (campo possible_new_patient; solo si te doy DATOS DEL PACIENTE ACTUAL): márcalo true SOLO si la pregunta actual CONTRADICE de forma clara esos datos, de modo que es evidente que trata de OTRA persona. Ejemplos: los datos dicen «embarazo: sí» y la pregunta es sobre un varón; «edad_pediatrica» y la pregunta es claramente geriátrica; una pauta o una situación incompatibles con lo acumulado. NO lo marques por un simple cambio de tema, ni por añadir un dato nuevo que NO contradice lo anterior (eso es un seguimiento normal del MISMO paciente). Si no hay datos acumulados, es false. Ante la duda, false: una marca errónea solo cuesta una confirmación, y el médico siempre puede empezar de cero a mano.
+E) POSIBLE CAMBIO DE PACIENTE (campo possible_new_patient; solo si te doy DATOS DEL PACIENTE ACTUAL): márcalo true SOLO si la pregunta actual CONTRADICE de forma clara esos datos, de modo que es evidente que trata de OTRA persona. Ejemplos: {profile.prompts['switch_examples']}. NO lo marques por un simple cambio de tema, ni por añadir un dato nuevo que NO contradice lo anterior (eso es un seguimiento normal del MISMO paciente). Si no hay datos acumulados, es false. Ante la duda, false: una marca errónea solo cuesta una confirmación, y el médico siempre puede empezar de cero a mano.
 
 LISTA DE ABREVIATURAS (SIGLA = nombre):
-{_ABBREV_LIST}
+{abbrev_list(specialty_id)}
 
 Devuelve in_domain (bool), rewritten_query (str), known_facts (lista de strings "atributo: valor"), candidate_modifiers (lista de strings) y possible_new_patient (bool)."""
 
@@ -390,7 +448,7 @@ def _refine_human(query: str, prev_question: str | None, patient_facts: dict | N
 
 
 def refine(query: str, prev_question: str | None = None,
-           patient_facts: dict | None = None) -> dict:
+           patient_facts: dict | None = None, specialty: str | None = None) -> dict:
     """Single LLM call that (a) rewrites the query (no new info, normalizing terms), (b)
     classifies the HIV domain, (c) screens the patient data present in the question and the
     modifiers it might need, (d) resolves an elliptical follow-up against `prev_question`, and
@@ -405,7 +463,9 @@ def refine(query: str, prev_question: str | None = None,
     human = _refine_human(query, prev_question, patient_facts)
     try:
         out = cast(_Refined,
-                   _get_refine_llm().invoke([("system", _REPHRASE_SYS), ("human", human)]))
+                   _get_refine_llm().invoke([
+                       ("system", rephrase_sys(corpus.resolve_specialty(specialty))),
+                       ("human", human)]))
         return {"query": out.rewritten_query.strip() or query, "in_domain": out.in_domain,
                 "known_facts": _facts_to_dict(out.known_facts),
                 "candidate_modifiers": list(out.candidate_modifiers or []),
@@ -415,9 +475,10 @@ def refine(query: str, prev_question: str | None = None,
                 "candidate_modifiers": [], "possible_new_patient": False}
 
 
-def rephrase(query: str, prev_question: str | None = None) -> str:
+def rephrase(query: str, prev_question: str | None = None,
+             specialty: str | None = None) -> str:
     """Rewritten query only (the piece of refine() the retrievers need)."""
-    return refine(query, prev_question)["query"]
+    return refine(query, prev_question, specialty=specialty)["query"]
 
 
 def _provenance(chunk: dict) -> str:
@@ -450,16 +511,34 @@ def build_context(context: list):
     return chunk_index, "".join(parts)
 
 
+@lru_cache(maxsize=None)
+def _abbrev_example(specialty_id: str) -> tuple[str, str]:
+    """One (sigla, full name) pair from the active profile, to illustrate the equivalence rule.
+    Taken from the data rather than written into the prompt so the example is never about a drug
+    the reader's specialty has no idea about."""
+    for abbr, name in abbreviations.for_specialty(specialty_id).items():
+        return abbr, name
+    return "", ""
+
+
 # System prompt (Spanish: it drives Spanish output over the Spanish guides).
-SYS_PROMPT = """
-    Eres un asistente clínico especializado en el manejo del VIH. Respondes preguntas médicas utilizando EXCLUSIVAMENTE la información de los fragmentos de guías clínicas que te proporciona el sistema RAG.
+@lru_cache(maxsize=None)
+def sys_prompt(specialty_id: str) -> str:
+    profile = corpus.specialty(specialty_id)
+    # Rule 5 needs to know which situations have DEDICATED guidance, and that list is DERIVED
+    # from the manifest. It used to be typed into the prompt («embarazo, tuberculosis, profilaxis
+    # posexposición, alteraciones neurocognitivas»), which is a copy of the corpus index that
+    # ages the moment a document is added or removed.
+    scopes = ", ".join(corpus.topics_for(specialty_id)) or "la situación concreta de la pregunta"
+    return """
+    Eres un asistente clínico especializado en """ + profile.prompts["subject"] + """. Respondes preguntas médicas utilizando EXCLUSIVAMENTE la información de los fragmentos de guías clínicas que te proporciona el sistema RAG.
 
     REGLAS CLÍNICAS:
     1. Usa únicamente el contexto proporcionado. No uses conocimiento externo ni supongas información.
     2. No inventes recomendaciones, dosis, tratamientos ni criterios clínicos.
     3. Si la respuesta no está en el contexto, marca "informacion_suficiente": false y usa como respuesta: "La información no está disponible en las guías proporcionadas."
     4. Si el contexto es parcial o insuficiente, indícalo explícitamente dentro de la propia respuesta.
-    5. Cada fragmento va encabezado por la guía de la que procede y su año. Si dos fragmentos se CONTRADICEN, resuélvelo así y dilo explícitamente en la respuesta: (a) si una guía es específica de la situación de la pregunta (embarazo, tuberculosis, profilaxis posexposición, alteraciones neurocognitivas) y la otra es general, PREVALECE LA ESPECÍFICA aunque sea más antigua; (b) en igualdad de ámbito, PREVALECE LA MÁS RECIENTE, y menciona la anterior solo para señalar que ha quedado superada (p. ej. «la guía de 2022 recomienda X; la de 2013 indicaba Y»). No presentes dos versiones en conflicto como si fueran alternativas equivalentes. Si los fragmentos no se contradicen sino que se complementan, intégralos sin más.
+    5. Cada fragmento va encabezado por la guía de la que procede y su año. Si dos fragmentos se CONTRADICEN, resuélvelo así y dilo explícitamente en la respuesta: (a) si una guía es específica de la situación de la pregunta (""" + scopes + """) y la otra es general, PREVALECE LA ESPECÍFICA aunque sea más antigua; (b) en igualdad de ámbito, PREVALECE LA MÁS RECIENTE, y menciona la anterior solo para señalar que ha quedado superada (p. ej. «la guía de 2022 recomienda X; la de 2013 indicaba Y»). No presentes dos versiones en conflicto como si fueran alternativas equivalentes. Si los fragmentos no se contradicen sino que se complementan, intégralos sin más.
     6. Lenguaje clínico, preciso y estructurado.
     6 bis. Si el usuario incluye un bloque "DATOS APORTADOS POR EL MÉDICO", úsalos ÚNICAMENTE para seleccionar entre las recomendaciones del contexto la que aplica a ese paciente (p. ej. la rama de gestación, de insuficiencia renal o de coinfección). Esos datos NO son una fuente: no los cites, no los incluyas en "fragmentos_usados" ni en "cita_textual", y toda afirmación clínica debe seguir respaldada por los fragmentos del contexto. Si el contexto no cubre el escenario indicado por esos datos, dilo explícitamente y marca "informacion_suficiente" según corresponda.
 
@@ -474,7 +553,7 @@ SYS_PROMPT = """
 
     PREGUNTAS DE SEGUIMIENTO:
     12. Solo cuando "informacion_suficiente" sea true, genera EXACTAMENTE 3 preguntas de seguimiento ("preguntas_seguimiento") que un clínico podría plantear de forma natural justo después de esta consulta.
-    13. Cada pregunta debe: (a) ser específica y clínicamente útil; (b) abordar un aspecto NO resuelto ya en tu respuesta (profundizar en un matiz, un escenario clínico contiguo, monitorización, interacciones, manejo alternativo, etc.); (c) poder responderse previsiblemente con guías clínicas de VIH (GeSIDA/SPNS). NO formules preguntas de cultura general ni que dependan de datos del paciente concreto que no se han aportado.
+    13. Cada pregunta debe: (a) ser específica y clínicamente útil; (b) abordar un aspecto NO resuelto ya en tu respuesta (profundizar en un matiz, un escenario clínico contiguo, monitorización, interacciones, manejo alternativo, etc.); (c) poder responderse previsiblemente con las guías clínicas de """ + profile.display_name + """. NO formules preguntas de cultura general ni que dependan de datos del paciente concreto que no se han aportado.
     14. Redáctalas breves, autocontenidas, en español y terminadas en "?". No las numeres ni les añadas prefijos.
     15. Cuando "informacion_suficiente" sea false, devuelve "preguntas_seguimiento" como una lista vacía []. Las preguntas de seguimiento deben relacionarse siempre con la respuesta dada; si no hay respuesta, no se plantean.
 
@@ -492,8 +571,8 @@ SYS_PROMPT = """
     Si "informacion_suficiente" es false, tanto "fragmentos_usados" como "preguntas_seguimiento" deben ser listas vacías [].
 
     ABREVIATURAS DE LAS GUÍAS (forman parte de las guías; NO son conocimiento externo):
-    Trata cada sigla y su nombre completo como EL MISMO término. Si el contexto usa la sigla (p.ej. «BIC») y la pregunta el nombre completo («bictegravir»), o al revés, son el mismo fármaco/término y debes responder usando ese fragmento. Lista (SIGLA = nombre):
-    """ + _ABBREV_LIST
+    Trata cada sigla y su nombre completo como EL MISMO término. Si el contexto usa la sigla (p.ej. «""" + _abbrev_example(specialty_id)[0] + """») y la pregunta el nombre completo («""" + _abbrev_example(specialty_id)[1] + """»), o al revés, son el mismo término y debes responder usando ese fragmento. Lista (SIGLA = nombre):
+    """ + abbrev_list(specialty_id)
 
 
 def _format_clinical_facts(clinical_facts: dict | None) -> str:
@@ -571,7 +650,7 @@ def build_user_prompt(query: str, context: str, clinical_facts: dict | None = No
     """
 
 
-def generate_answer(query: str, context: str):
+def generate_answer(query: str, context: str, specialty: str | None = None):
     """Raw (non-LangChain) structured generation. Used by the evaluation; the graph uses the
     LangChain structured LLM in pipeline/generation.py."""
     prompt = build_user_prompt(query, context)
@@ -606,7 +685,7 @@ def generate_answer(query: str, context: str):
     }
     response = client.chat.completions.create(
         model= GENERATION_MODEL,
-        messages = [{"role": "system", "content": SYS_PROMPT},
+        messages = [{"role": "system", "content": sys_prompt(corpus.resolve_specialty(specialty))},
                     {"role": "user", "content": prompt}],
         temperature = 0.2,
         response_format = {"type": "json_schema","json_schema": ANSWER_SCHEMA}  # type: ignore[arg-type]
@@ -623,13 +702,16 @@ def generate_answer(query: str, context: str):
 # (every claim is supported by the context). Literal-citation integrity is NOT checked here;
 # evidence.format_answer already handles that.
 # ---------------------------------------------------------------------------
-_VALIDATE_SYS = f"""Eres un VALIDADOR de respuestas clínicas sobre VIH. Recibes una PREGUNTA, un CONTEXTO (fragmentos de guías) y una RESPUESTA. Decide si la respuesta es APTA según DOS criterios:
+@lru_cache(maxsize=None)
+def validate_sys(specialty_id: str) -> str:
+    profile = corpus.specialty(specialty_id)
+    return f"""Eres un VALIDADOR de respuestas clínicas sobre {profile.prompts['subject']}. Recibes una PREGUNTA, un CONTEXTO (fragmentos de guías) y una RESPUESTA. Decide si la respuesta es APTA según DOS criterios:
 
 1. RELEVANCIA: la respuesta aborda realmente lo que pregunta el usuario.
 2. FIDELIDAD (grounding): TODA afirmación clínica de la respuesta está respaldada por el CONTEXTO, aunque no sea una cita literal (basta con apoyo semántico claro). Marca NO apta si hay afirmaciones inventadas, no respaldadas por el contexto o que lo contradigan.
 
-Juzga ÚNICAMENTE con el contexto proporcionado, sin usar conocimiento externo. Las abreviaturas de las guías cuentan como respaldo válido (p.ej. si el contexto dice «BIC» y la respuesta «bictegravir», es el mismo fármaco). Lista (SIGLA = nombre):
-{_ABBREV_LIST}
+Juzga ÚNICAMENTE con el contexto proporcionado, sin usar conocimiento externo. Las abreviaturas de las guías cuentan como respaldo válido (p.ej. si el contexto dice «{_abbrev_example(specialty_id)[0]}» y la respuesta «{_abbrev_example(specialty_id)[1]}», es el mismo término). Lista (SIGLA = nombre):
+{abbrev_list(specialty_id)}
 
 Devuelve: is_valid (bool), reason (explicación breve) y unsupported_claims (lista de frases de la respuesta sin apoyo en el contexto; vacía si es apta)."""
 
@@ -651,7 +733,8 @@ def _get_validate_llm():
     return _validate_llm
 
 
-def validate(question: str, answer: dict, formatted_context: str) -> dict:
+def validate(question: str, answer: dict, formatted_context: str,
+             specialty: str | None = None) -> dict:
     """Validate relevance + grounding of the answer against the context. Returns
     {is_valid, error, reason, unsupported_claims}:
       - error=True  -> validation could NOT run (technical failure of the judge); the
@@ -664,7 +747,7 @@ def validate(question: str, answer: dict, formatted_context: str) -> dict:
                 "unsupported_claims": []}
     try:
         v = cast(_Validation, _get_validate_llm().invoke([
-            ("system", _VALIDATE_SYS),
+            ("system", validate_sys(corpus.resolve_specialty(specialty))),
             ("human", f"PREGUNTA:\n{question}\n\nCONTEXTO:\n{formatted_context}\n\n"
                       f"RESPUESTA A VALIDAR:\n{answer.get('answer', '')}"),
         ]))
@@ -687,11 +770,14 @@ def validate(question: str, answer: dict, formatted_context: str) -> dict:
 # already_covered subtracts known facts + already-asked questions; questions are ordered by
 # clinical impact. The cheap screen (candidate_modifiers / known_facts) lives in refine().
 # ---------------------------------------------------------------------------
-_ASSESS_SYS = f"""Eres un componente que decide si, ANTES de responder, conviene pedir al médico algún dato del paciente. Recibes una PREGUNTA, el CONTEXTO recuperado (fragmentos de guías de VIH), los DATOS YA CONOCIDOS del paciente, unos MODIFICADORES CANDIDATOS de un cribado previo y las PREGUNTAS YA FORMULADAS. NO respondas la pregunta.
+@lru_cache(maxsize=None)
+def assess_sys(specialty_id: str) -> str:
+    profile = corpus.specialty(specialty_id)
+    return f"""Eres un componente que decide si, ANTES de responder, conviene pedir al médico algún dato del paciente. Recibes una PREGUNTA, el CONTEXTO recuperado (fragmentos de guías de {profile.display_name}), los DATOS YA CONOCIDOS del paciente, unos MODIFICADORES CANDIDATOS de un cribado previo y las PREGUNTAS YA FORMULADAS. NO respondas la pregunta.
 
-Tu guía PRINCIPAL es el CONOCIMIENTO CLÍNICO sobre VIH, NO el contexto: el contexto puede estar incompleto o no haber recuperado el fragmento relevante, así que no dependas de él para saber qué importa. Razona en CUATRO pasos, rellenando los campos EN ORDEN:
+Tu guía PRINCIPAL es el CONOCIMIENTO CLÍNICO sobre {profile.display_name}, NO el contexto: el contexto puede estar incompleto o no haber recuperado el fragmento relevante, así que no dependas de él para saber qué importa. Razona en CUATRO pasos, rellenando los campos EN ORDEN:
 
-1. clinically_relevant (PRINCIPAL — conocimiento clínico): enumera TODAS las dimensiones del paciente que, por conocimiento clínico establecido del VIH, cambiarían la respuesta a ESTA pregunta, aparezcan o no en el contexto. Sé EXHAUSTIVO dentro de lo PERTINENTE a la pregunta. Modificadores típicos a considerar: gestación/lactancia, función renal, función hepática, coinfección VHB/VHC, interacciones farmacológicas, HLA-B*5701, CD4/carga viral, resistencias previas, edad pediátrica, adherencia, comorbilidades relevantes. NO incluyas dimensiones que no vengan a cuento para la pregunta, y para preguntas generales/definitorias (p. ej. "¿qué es el VIH?") déjala vacía. Es OBLIGATORIO rellenar este campo si luego vas a formular alguna pregunta.
+1. clinically_relevant (PRINCIPAL — conocimiento clínico): enumera TODAS las dimensiones del paciente que, por conocimiento clínico establecido de {profile.display_name}, cambiarían la respuesta a ESTA pregunta, aparezcan o no en el contexto. Sé EXHAUSTIVO dentro de lo PERTINENTE a la pregunta. Modificadores típicos a considerar: {", ".join(profile.modifier_labels)}, comorbilidades relevantes. NO incluyas dimensiones que no vengan a cuento para la pregunta, y para preguntas generales/definitorias (p. ej. "{profile.prompts['general_question_example']}") déjala vacía. Es OBLIGATORIO rellenar este campo si luego vas a formular alguna pregunta.
 2. branches_on (COMPLEMENTO — evidencia): dimensiones ADICIONALES por las que el CONTEXTO recuperado da recomendaciones distintas y que NO estén ya en clinically_relevant (aportan especificidad). Si no añade nada nuevo, déjala vacía.
 3. already_covered: de las dimensiones de clinically_relevant Y branches_on, las que YA ESTÁN RESUELTAS por (a) los DATOS YA CONOCIDOS en CUALQUIER forma o unidad equivalente (si se conoce "semana_gestacion" o "trimestre" → gestación cubierta; "aclaramiento_renal" → función renal cubierta; valor de CD4 → CD4 cubierto); o (b) por estar en PREGUNTAS YA FORMULADAS, aunque el dato siga incompleto. Sé generoso: cubierta si cualquier dato conocido permite deducirla o si ya se preguntó.
 4. questions: deriva las preguntas EXACTAMENTE de las dimensiones pendientes = (clinically_relevant ∪ branches_on) − already_covered. UNA pregunta por dimensión pendiente; cada pregunta DEBE corresponder a una dimensión que hayas listado en clinically_relevant o branches_on (no formules preguntas que no correspondan a una dimensión listada). ORDÉNALAS por IMPACTO CLÍNICO (la que más cambie el manejo de este paciente, primero), sin importar de qué vía venga. Concretas, en español, terminadas en "?", pidiendo UN dato cada una. Máximo 3. NUNCA repitas, ni reformules, una pregunta que ya esté en PREGUNTAS YA FORMULADAS. Si no queda ninguna pendiente, lista vacía.
@@ -699,7 +785,7 @@ Tu guía PRINCIPAL es el CONOCIMIENTO CLÍNICO sobre VIH, NO el contexto: el con
 needs_clarification = true SOLO si questions no está vacía. Coherencia OBLIGATORIA: si questions no está vacía, las dimensiones correspondientes deben aparecer en clinically_relevant o branches_on; y ninguna dimensión de questions puede estar en already_covered.
 
 Las abreviaturas de las guías cuentan como el mismo término (lista SIGLA = nombre):
-{_ABBREV_LIST}
+{abbrev_list(specialty_id)}
 
 Devuelve clinically_relevant, branches_on, already_covered, questions (listas) y needs_clarification (bool)."""
 
@@ -725,7 +811,7 @@ def _get_assess_llm():
 
 def assess(question: str, formatted_context: str, known_facts: dict | None = None,
            candidate_modifiers: list | None = None, asked_questions: list | None = None,
-           max_questions: int = 1) -> dict:
+           max_questions: int = 1, specialty: str | None = None) -> dict:
     """Decide whether to ask the doctor for missing patient data before answering. Returns
     {needs_clarification, questions, branches_on, clinically_relevant, already_covered} — the
     reasoning fields are kept for the trace. `asked_questions` (previous rounds) must never be
@@ -738,7 +824,7 @@ def assess(question: str, formatted_context: str, known_facts: dict | None = Non
     asked_txt = "\n".join(f"- {q}" for q in (asked_questions or [])) or "(ninguna)"
     try:
         a = cast(_Assessment, _get_assess_llm().invoke([
-            ("system", _ASSESS_SYS),
+            ("system", assess_sys(corpus.resolve_specialty(specialty))),
             ("human", f"PREGUNTA:\n{question}\n\nCONTEXTO:\n{formatted_context}\n\n"
                       f"DATOS YA CONOCIDOS:\n{facts_txt}\n\n"
                       f"MODIFICADORES CANDIDATOS:\n{cands_txt}\n\n"

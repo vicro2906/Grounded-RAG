@@ -253,6 +253,25 @@ def test_no_generation_shares_an_artifact_with_another():
         assert len(names) == len(set(names)), f"{field} is shared across corpus generations"
 
 
+def test_a_generation_without_the_field_cannot_be_narrowed(monkeypatch):
+    """Qdrant REJECTS a filter on a field with no payload index, and the collection in production
+    was built before `specialty` existed. Sending the filter anyway would 400 every query; a
+    plain equality filter over an unindexed field would match nothing and turn every question
+    into «no está en las guías» — a clinical claim produced by a schema mismatch.
+
+    Not filtering is CORRECT there, not a workaround: a corpus built before specialties existed
+    holds exactly one, so searching all of it is searching that one."""
+    import rag
+    monkeypatch.setattr(corpus, "LAYOUT", corpus.LAYOUTS["v1"])
+    assert corpus.Scope(specialty="vih").is_open
+    assert rag.scope_filter(corpus.Scope(specialty="vih")) is None
+
+    monkeypatch.setattr(corpus, "LAYOUT", corpus.LAYOUTS["v2"])
+    assert not corpus.Scope(specialty="vih").is_open
+    assert rag.scope_filter(corpus.Scope(specialty="vih")) is not None
+    assert rag.scope_filter(corpus.Scope()) is None, "an empty scope must never filter"
+
+
 def test_unknown_generation_fails_loudly(monkeypatch):
     """A typo in CORPUS_VERSION must not quietly fall back to v1 and answer from the old index."""
     import importlib

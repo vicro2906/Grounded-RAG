@@ -63,7 +63,11 @@ BM25_MODEL = "Qdrant/bm25"           # sparse lexical, runs locally
 BATCH_SIZE = 96
 PRICE_PER_1M_TOKENS = 0.13
 
-KEYWORD_FIELDS = ["topic", "content_type", "source_file", "organization",
+# `specialty` is the one that is actually QUERIED (rag.scope_filter): it confines a search to
+# one medical area. The rest are indexed for filters this project does not yet make — they cost
+# almost nothing and removing them would be a schema change, but do not mistake them for
+# features in use.
+KEYWORD_FIELDS = ["specialty", "topics", "content_type", "source_file", "organization",
                   "evidence_grades"]
 INTEGER_FIELDS = ["year", "heading_level"]
 

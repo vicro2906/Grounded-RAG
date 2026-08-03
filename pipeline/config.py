@@ -2,6 +2,7 @@
 import os
 from typing import Literal, TypedDict
 
+import corpus
 from retrieval.registry import VALID_MODES  # re-exported: the catalogue of retrieval modes
 
 # Validation loop: max generations (initial + retries).
@@ -28,6 +29,10 @@ class ConfigSchema(TypedDict, total=False):
     must be spelled out: Studio builds the dropdown from the Literal at import time, so it
     cannot be derived from VALID_MODES — keep both in sync when adding a mode."""
     retrieval_mode: Literal["baseline", "iterative", "graph", "pathrag", "hipporag"]
+    # A plain string, NOT a Literal, deliberately: the available specialties are files on disk,
+    # so spelling them out here would be a second list to keep in sync with data/specialties/.
+    # Studio shows a text box; an unknown value resolves to the default rather than failing.
+    specialty: str
 
 
 # --- User-facing messages (Spanish: shown to the doctor) ---
@@ -86,17 +91,12 @@ MSG_STEP_SOURCES_MORE = "y {n} más"
 STEP_SOURCES_SHOWN = 3
 
 # --- CLI (conversational REPL) ---
-MSG_CLI_INTRO = (
-    "Asistente sobre las guías de VIH (GeSIDA). Escribe tu consulta y pulsa Enter.\n"
-    "Los datos que menciones se recuerdan durante la conversación para afinar las respuestas.\n"
-    "Comandos:  /nuevo (empezar con otro paciente) · /paciente (ver datos recordados) · "
-    "/ayuda · /salir"
-)
 MSG_CLI_HELP = (
     "Comandos disponibles:\n"
-    "  /nuevo     — olvida los datos del paciente actual y empieza de cero\n"
-    "  /paciente  — muestra los datos que recuerdo de este paciente\n"
-    "  /salir     — termina la sesión"
+    "  /nuevo         — olvida los datos del paciente actual y empieza de cero\n"
+    "  /paciente      — muestra los datos que recuerdo de este paciente\n"
+    "  /especialidad  — muestra o cambia el área clínica desde la que respondo\n"
+    "  /salir         — termina la sesión"
 )
 MSG_NEW_PATIENT = "De acuerdo, empiezo de cero. He olvidado los datos del paciente anterior."
 MSG_CANCELLED = "Consulta cancelada. Los datos del paciente se mantienen."
@@ -112,11 +112,6 @@ MSG_CONFIRM_NEW_PATIENT_ASK = (
 MSG_NO_PATIENT_DATA = "Todavía no he recogido ningún dato del paciente en esta conversación."
 
 # --- Web (Chainlit) ---
-MSG_WEB_INTRO = (
-    "Asistente sobre las guías de VIH (GeSIDA). Escribe tu consulta.\n\n"
-    "Los datos que menciones se recuerdan durante la conversación para afinar las respuestas; "
-    "usa **Paciente nuevo** para empezar de cero."
-)
 MSG_WEB_NEW_PATIENT = "Paciente nuevo"
 MSG_WEB_SHOW_PATIENT = "Datos recordados"
 MSG_WEB_REFINE_YES = "Aportar estos datos"
@@ -139,8 +134,32 @@ MSG_VALIDATION_ERROR = (
     "con el servicio de validación). Por seguridad no la muestro sin verificar; "
     "inténtalo de nuevo en unos momentos."
 )
-MSG_OUT_OF_DOMAIN = (
-    "Soy un asistente centrado en las guías clínicas de VIH (GeSIDA) y solo puedo "
-    "ayudarte con consultas sobre el manejo clínico del VIH. ¿Tienes alguna pregunta "
-    "sobre ese tema?"
-)
+# --- Specialty-aware wording -----------------------------------------------
+# These name the medical area the assistant answers from, so they are BUILT from the active
+# specialty profile instead of being written down. They were the last place the product told
+# the doctor it was a VIH assistant regardless of which guidelines it had loaded.
+def msg_out_of_domain(specialty_id: str) -> str:
+    name = corpus.specialty(specialty_id).display_name
+    return (f"Soy un asistente centrado en las guías clínicas de {name} y solo puedo "
+            f"ayudarte con consultas sobre ese ámbito. ¿Tienes alguna pregunta sobre ese tema?")
+
+
+def msg_intro(specialty_id: str, web: bool = False) -> str:
+    """The greeting. Same sentence in both frontends except for how the patient is reset —
+    a command in the terminal, a button in the browser."""
+    name = corpus.specialty(specialty_id).display_name
+    if web:
+        return (f"Asistente sobre las guías clínicas de {name}. Escribe tu consulta.\n\n"
+                "Los datos que menciones se recuerdan durante la conversación para afinar las "
+                "respuestas; usa **Paciente nuevo** para empezar de cero.")
+    return (f"Asistente sobre las guías clínicas de {name}. Escribe tu consulta y pulsa Enter.\n"
+            "Los datos que menciones se recuerdan durante la conversación para afinar las "
+            "respuestas.\n"
+            "Comandos:  /nuevo (empezar con otro paciente) · /paciente (ver datos recordados) · "
+            "/especialidad · /ayuda · /salir")
+
+
+MSG_SPECIALTY_CURRENT = "Especialidad activa: {name}. Disponibles: {available}."
+MSG_SPECIALTY_CHANGED = ("De acuerdo, ahora respondo desde las guías de {name}. Los datos del "
+                         "paciente se mantienen; usa /nuevo si es otro paciente.")
+MSG_SPECIALTY_UNKNOWN = "No tengo guías de «{asked}». Disponibles: {available}."

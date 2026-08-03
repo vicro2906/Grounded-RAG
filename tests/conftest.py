@@ -75,13 +75,16 @@ def graph_env(monkeypatch):
         rerank_calls: list[tuple] = []         # (query, candidates, top_k) per rerank
         refine_prev: list = []                 # prev_question refine was called with, per turn
         refine_facts: list = []                # patient_facts refine was called with, per turn
+        refine_specialties: list = []          # specialty refine was called with, per turn
+        retrieval_scopes: list = []            # Scope every retrieval was confined to
         new_patient = False                    # make refine flag a probable patient switch
 
     env = Env()
 
-    def fake_refine(question, prev_question=None, patient_facts=None):
+    def fake_refine(question, prev_question=None, patient_facts=None, specialty=None):
         env.refine_prev.append(prev_question)
         env.refine_facts.append(patient_facts)
+        env.refine_specialties.append(specialty)
         return {"query": f"{question} (reescrita)", "in_domain": "fuera" not in question,
                 "known_facts": {}, "candidate_modifiers": ["coinfeccion_VHB"],
                 "possible_new_patient": env.new_patient}
@@ -92,12 +95,13 @@ def graph_env(monkeypatch):
         return {"needs_clarification": bool(qs), "questions": qs, "branches_on": [],
                 "clinically_relevant": [], "already_covered": []}
 
-    def fake_validate(question, answer, formatted_context):
+    def fake_validate(question, answer, formatted_context, specialty=None):
         return {"is_valid": env.valid, "error": False, "reason": "stub",
                 "unsupported_claims": [] if env.valid else ["afirmación sin respaldo"]}
 
-    def fake_retrieve_hybrid(query, *args, **kwargs):
+    def fake_retrieve_hybrid(query, *args, scope=None, **kwargs):
         env.retrieval_queries.append(query)
+        env.retrieval_scopes.append(scope)
         # First pass returns the chunk the answer is built on; any later pass (re_retrieve,
         # refocus_retrieve) returns a different one, so a test can see what a re-run brought in.
         return [CHUNK] if len(env.retrieval_queries) == 1 else [CHUNK_NEW]

@@ -9,6 +9,7 @@ import threading
 
 import pytest
 
+import corpus
 from retrieval import _common
 from retrieval._common import (canonical_key, expand_abbrevs, house_tail, load_chunks,
                                map_chunk_ids_to_payloads, map_to_payloads, merge_dedup, norm)
@@ -129,12 +130,14 @@ def tail_env(monkeypatch):
         hybrid = [{"chunk_id": "h1", "text": "hybrid"}]
         rephrased: list = []               # queries the tail had to rephrase itself
         hybrid_queries: list = []
+        hybrid_scopes: list = []           # the Scope the complement was confined to
         rerank_calls: list = []
 
     env = Env()
 
-    def fake_retrieve_hybrid(query, **kwargs):
+    def fake_retrieve_hybrid(query, scope=None, **kwargs):
         env.hybrid_queries.append(query)
+        env.hybrid_scopes.append(scope)
         return list(env.hybrid)
 
     def fake_rerank(query, payloads, top_k=5):
@@ -173,6 +176,39 @@ def test_an_already_rewritten_query_is_not_rephrased_again(tail_env):
 def test_without_a_rewritten_query_the_tail_rephrases_once(tail_env):
     house_tail("pregunta", [])
     assert tail_env.rephrased == ["pregunta"] and tail_env.hybrid_queries == ["pregunta (r)"]
+
+
+def test_the_scope_reaches_both_halves_of_the_tail(tail_env, monkeypatch):
+    """The leak worth pinning: filtering only the mode's own selection would let the hybrid
+    complement pull another specialty's chunks straight into the same context. Since every
+    graph mode ends here, this is the single place that guarantee can be made.
+
+    Pinned against a corpus generation that CARRIES the field — the one in production does not,
+    and there an open scope is the correct answer (see test_corpus_quality)."""
+    monkeypatch.setattr(corpus, "LAYOUT", corpus.LAYOUTS["v2"])
+    scope = corpus.Scope(specialty="vih")
+    primary = [{"chunk_id": "g1", "text": "graph", "specialty": "cardiologia"},
+               {"chunk_id": "g2", "text": "graph", "specialty": "vih"}]
+    out = house_tail("pregunta", primary, "reescrita", scope=scope)
+
+    assert tail_env.hybrid_scopes == [scope], "the complement searched unscoped"
+    assert [p["chunk_id"] for p in out] == ["g2", "h1"], "an out-of-scope chunk survived"
+
+
+def test_a_chunk_from_before_the_field_existed_is_kept(tail_env, monkeypatch):
+    """Chunks indexed before `specialty` was a field carry none. Dropping them would empty the
+    corpus on upgrade — a silent «no está en las guías» over guidelines that do cover it."""
+    monkeypatch.setattr(corpus, "LAYOUT", corpus.LAYOUTS["v2"])
+    legacy = [{"chunk_id": "old", "text": "sin specialty"}]
+    out = house_tail("pregunta", legacy, "reescrita", scope=corpus.Scope(specialty="vih"))
+    assert [p["chunk_id"] for p in out] == ["old", "h1"]
+
+
+def test_an_open_scope_filters_nothing(tail_env):
+    """What the evaluation and any deliberate whole-corpus search rely on."""
+    primary = [{"chunk_id": "g1", "text": "x", "specialty": "cardiologia"}]
+    assert len(house_tail("pregunta", primary, "reescrita", scope=corpus.Scope())) == 2
+    assert len(house_tail("pregunta", primary, "reescrita", scope=None)) == 2
 
 
 def test_nothing_retrieved_returns_empty_without_paying_for_a_rerank(tail_env):

@@ -140,9 +140,23 @@ def merge_dedup(*lists) -> list:
     return out
 
 
+def in_scope(payloads: list, scope: "corpus.Scope | None") -> list:
+    """Drop payloads outside the scope.
+
+    The graph modes select through their OWN index (LightRAG content, HippoRAG passage nodes,
+    PathRAG source_id), which knows nothing about specialties, so their selection is filtered
+    here on the way back rather than at the source. Chunks with no `specialty` are kept: they
+    predate the field, and dropping them would silently empty the corpus after an upgrade."""
+    if scope is None or scope.is_open:
+        return payloads
+    return [p for p in payloads
+            if p.get("specialty", scope.specialty) == scope.specialty]
+
+
 def house_tail(query: str, primary: list | Callable[[], list],
                rewritten_query: str | None = None,
-               top_k: int = 8, hybrid_k: int = 10) -> list:
+               top_k: int = 8, hybrid_k: int = 10,
+               scope: "corpus.Scope | None" = None) -> list:
     """The tail EVERY graph-based mode shares: merge its selection with our dense+BM25 hybrid
     complement (dedup, the mode's own chunks first) and rerank the union to top_k.
 
@@ -156,12 +170,18 @@ def house_tail(query: str, primary: list | Callable[[], list],
     `primary` is either the selection itself or a CALLABLE producing it. The callable form runs
     the mode's selection and the hybrid complement IN PARALLEL, which is worth it when the two
     hit different resources (a local graph walk vs Qdrant+OpenAI over the network) — that is
-    the graph mode's case, and the reason it used to keep its own copy of this tail."""
+    the graph mode's case, and the reason it used to keep its own copy of this tail.
+
+    `scope` restricts BOTH halves to one specialty. Since every mode ends here, that makes this
+    the single place a search can be confined, which is what keeps the guarantee true for modes
+    whose own index has no notion of a specialty at all."""
     _get_reranker(); _get_bm25()  # pre-warm the local models before any parallel branch
 
     def fetch_hybrid() -> list:
+        # The complement is scoped TOO. Filtering only the mode's own selection would leak: the
+        # hybrid half would keep pulling another specialty's chunks straight into the context.
         return retrieve_hybrid(rewritten_query or rephrase(query),
-                               top_k=hybrid_k, prefetch_limit=30)
+                               top_k=hybrid_k, prefetch_limit=30, scope=scope)
 
     if callable(primary):
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -170,7 +190,7 @@ def house_tail(query: str, primary: list | Callable[[], list],
     else:
         hybrid = fetch_hybrid()
 
-    merged = merge_dedup(primary, hybrid)
+    merged = merge_dedup(in_scope(primary, scope), hybrid)
     if not merged:
         return []
     # The graph modes collapse all of this into ONE graph node, so nothing else reports from

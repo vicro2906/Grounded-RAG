@@ -10,9 +10,10 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+import corpus
 from conftest import CHUNK
 from pipeline import build_combined_graph, refinement_reply
-from pipeline.config import (MSG_NOT_VALIDATED, MSG_OUT_OF_DOMAIN, MSG_STEP_LABELS,
+from pipeline.config import (MSG_NOT_VALIDATED, msg_out_of_domain, MSG_STEP_LABELS,
                              MSG_VALIDATION_ERROR, STEP_FORMATTING, STEP_GENERATION,
                              STEP_RETRIEVAL)
 
@@ -30,6 +31,48 @@ def thread():
     return {"configurable": {"thread_id": uuid.uuid4().hex}}
 
 
+# --- Specialty scoping: what keeps one area's guidelines out of another's answer ---
+def test_every_retrieval_is_confined_to_the_active_specialty(app, graph_env):
+    """The guarantee is not "the first search is scoped" — it is that NO search escapes. A
+    single unscoped call (the hybrid complement, a validator-driven re-retrieval) would put
+    another area's guidance into a context the doctor is told is theirs."""
+    cfg = {"configurable": {"thread_id": uuid.uuid4().hex, "specialty": "vih"}}
+    app.invoke({"question": "¿Qué TAR en coinfección por VHB?"}, context=BASELINE, config=cfg)
+
+    assert graph_env.retrieval_scopes, "no retrieval ran"
+    assert all(s is not None and s.specialty == "vih" for s in graph_env.retrieval_scopes)
+
+
+def test_the_specialty_is_pinned_on_the_first_turn_and_survives_the_conversation(app, graph_env):
+    """Resolved once and written into the state, so a later turn cannot silently answer from a
+    different area because a config default disagreed."""
+    cfg = {"configurable": {"thread_id": uuid.uuid4().hex, "specialty": "vih"}}
+    app.invoke({"question": "¿Qué TAR de inicio?"}, context=BASELINE, config=cfg)
+    assert app.get_state(cfg).values["specialty"] == "vih"
+
+    # Second turn on the same thread, with the configurable gone: the state must still decide.
+    bare = {"configurable": {"thread_id": cfg["configurable"]["thread_id"]}}
+    app.invoke({"question": "¿y en embarazo?"}, context=BASELINE, config=bare)
+    assert app.get_state(bare).values["specialty"] == "vih"
+    assert all(s.specialty == "vih" for s in graph_env.retrieval_scopes)
+
+
+def test_an_unknown_specialty_widens_instead_of_emptying_the_corpus(app, graph_env):
+    """A typo must not silently produce «no está en las guías» over an empty filtered corpus —
+    that reads as a clinical statement and it would be false."""
+    cfg = {"configurable": {"thread_id": uuid.uuid4().hex, "specialty": "no_existe"}}
+    app.invoke({"question": "¿Qué TAR de inicio?"}, context=BASELINE, config=cfg)
+    assert app.get_state(cfg).values["specialty"] == corpus.default_specialty()
+
+
+def test_the_prompts_follow_the_specialty_too(app, graph_env):
+    """Scoping retrieval without scoping the prompt would leave the guardrail and the clinical
+    modifiers describing an area the answer no longer comes from."""
+    cfg = {"configurable": {"thread_id": uuid.uuid4().hex, "specialty": "vih"}}
+    app.invoke({"question": "¿Qué TAR de inicio?"}, context=BASELINE, config=cfg)
+    assert graph_env.refine_specialties == ["vih"]
+
+
 def test_answers_without_clarification(app, graph_env):
     result = app.invoke({"question": "¿Qué TAR en coinfección por VHB?"},
                         context=BASELINE, config=thread())
@@ -40,7 +83,7 @@ def test_answers_without_clarification(app, graph_env):
 def test_out_of_domain_short_circuits(app, graph_env):
     result = app.invoke({"question": "una pregunta fuera de dominio"},
                         context=BASELINE, config=thread())
-    assert result["output"] == MSG_OUT_OF_DOMAIN
+    assert result["output"] == msg_out_of_domain(corpus.default_specialty())
     assert not graph_env.llm.calls, "an out-of-domain question must never reach generation"
 
 

@@ -461,13 +461,14 @@ def rank_passages(query: str, top_n: int = PASSAGE_TOP_N) -> list[str]:
     return [chunk_id for chunk_id, _score in passages[:top_n]]
 
 
-def hipporag_search(query: str, top_k: int = 8, rewritten_query: str | None = None) -> list:
+def hipporag_search(query: str, top_k: int = 8, rewritten_query: str | None = None,
+                    scope: corpus.Scope | None = None) -> list:
     """HippoRAG 2 retriever, honouring the shared retrieval contract. The PPR ranking selects
     the primary passages; `house_tail` adds the dense+BM25 complement and reranks — so an
     empty graph result (no triple survived the filter) degrades to the dense fallback the
     paper prescribes rather than to no evidence at all."""
     primary = map_chunk_ids_to_payloads(rank_passages(query))
-    return house_tail(query, primary, rewritten_query, top_k=top_k)
+    return house_tail(query, primary, rewritten_query, top_k=top_k, scope=scope)
 
 
 def _smoke() -> None:

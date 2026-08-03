@@ -65,9 +65,11 @@ from langgraph.types import Command
 
 from progress import read_chunk
 
+import corpus
 from pipeline import (build_graph, build_combined_graph, refinement_reply,
-                      RETRIEVAL_MODE, VALID_MODES,
-                      MSG_REFINE_OFFER, MSG_CLI_INTRO, MSG_CLI_HELP, MSG_NEW_PATIENT,
+                      RETRIEVAL_MODE, VALID_MODES, MSG_SPECIALTY_CURRENT,
+                      MSG_SPECIALTY_CHANGED, MSG_SPECIALTY_UNKNOWN,
+                      MSG_REFINE_OFFER, msg_intro, MSG_CLI_HELP, MSG_NEW_PATIENT,
                       MSG_NO_PATIENT_DATA, MSG_PATIENT_HEADER, MSG_CONFIRM_NEW_PATIENT,
                       MSG_CONFIRM_NEW_PATIENT_ASK, MSG_STEP_INITIAL, MSG_STEP_RESUMED,
                       MSG_STEP_LABELS, MSG_STEP_SOURCES, MSG_STEP_SOURCES_MORE,
@@ -231,8 +233,30 @@ def _answer_question(app_cli, question, mode, config, status):
         waiting = MSG_STEP_RESUMED
 
 
+def _active_specialty(app_cli, config) -> str:
+    """What the thread is actually answering from: the pinned state if a question has run,
+    otherwise what the session was started with."""
+    return (app_cli.get_state(config).values.get("specialty")
+            or config["configurable"].get("specialty")
+            or corpus.default_specialty())
+
+
+def _specialty_from_argv() -> str:
+    """`--specialty <id>` / `--specialty=<id>`. An explicit flag rather than a bare positional:
+    the mode is already positional, and a specialty named like a retrieval mode would otherwise
+    be ambiguous. An unknown value resolves to the manifest default instead of failing."""
+    args = sys.argv[1:]
+    for i, arg in enumerate(args):
+        if arg.startswith("--specialty="):
+            return corpus.resolve_specialty(arg.split("=", 1)[1])
+        if arg == "--specialty" and i + 1 < len(args):
+            return corpus.resolve_specialty(args[i + 1])
+    return corpus.default_specialty()
+
+
 def main_cli():
     mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in VALID_MODES else RETRIEVAL_MODE
+    specialty = _specialty_from_argv()
     # Own instance WITH persistence: the graphs above are for the platform (which injects its
     # own checkpointer), this one is a plain embedding and must carry its own — both to resume
     # the clarification interrupt AND to remember the patient across questions. Compiled here so
@@ -240,11 +264,14 @@ def main_cli():
     app_cli = build_combined_graph(checkpointer=InMemorySaver())
     # ONE thread for the whole conversation: the checkpointer keys the accumulated patient data
     # (and any paused run) by thread_id, so every question in this session shares it.
-    config = {"configurable": {"thread_id": uuid.uuid4().hex},
-              "tags": [f"mode:{mode}"], "metadata": {"retrieval_mode": mode}}  # LangSmith
+    # `specialty` rides in `configurable` rather than in the first payload: node_rephrase pins it
+    # into the state on turn 1, so it survives the session and /especialidad can change it there.
+    config = {"configurable": {"thread_id": uuid.uuid4().hex, "specialty": specialty},
+              "tags": [f"mode:{mode}", f"specialty:{specialty}"],
+              "metadata": {"retrieval_mode": mode, "specialty": specialty}}  # LangSmith
 
     status = Status()
-    print(MSG_CLI_INTRO)
+    print(msg_intro(specialty))
     quit_armed = False        # one Ctrl-C at the prompt warns, a second one ends the session
     while True:
         try:
@@ -277,6 +304,23 @@ def main_cli():
             # resolve against the old patient's question). Per-question state resets each turn.
             app_cli.update_state(config, {"patient_facts": {}, "prev_question": ""})
             print(MSG_NEW_PATIENT)
+            continue
+        if low.startswith("/especialidad"):
+            asked = text.split(maxsplit=1)[1].strip() if " " in text else ""
+            available = ", ".join(corpus.specialties())
+            if not asked:
+                print(MSG_SPECIALTY_CURRENT.format(
+                    name=corpus.specialty(_active_specialty(app_cli, config)).display_name,
+                    available=available))
+            elif asked not in corpus.specialties():
+                print(MSG_SPECIALTY_UNKNOWN.format(asked=asked, available=available))
+            else:
+                # The PATIENT survives a specialty change on purpose: the same person crosses
+                # areas, and dropping their renal function because the doctor switched guidelines
+                # would lose clinical data the answers depend on.
+                app_cli.update_state(config, {"specialty": asked})
+                config["configurable"]["specialty"] = asked
+                print(MSG_SPECIALTY_CHANGED.format(name=corpus.specialty(asked).display_name))
             continue
 
         _answer_question(app_cli, text, mode, config, status)

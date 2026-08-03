@@ -12,8 +12,13 @@ Two families, and both are about what happens when things are NOT ideal:
 """
 import pytest
 
+import corpus
 import rag
 from conftest import CHUNK
+
+# The prompts are built per specialty now, so every assertion about their wording has to say
+# WHICH one it is reading. The manifest default is the one the app answers from.
+SPECIALTY = corpus.default_specialty()
 
 
 class _Boom:
@@ -221,14 +226,43 @@ def test_the_conflict_rule_can_actually_be_applied():
     _, formatted = rag.build_context([CHUNK, dict(CHUNK, year=2013, doc_title="Guía antigua")])
 
     assert "(2022)" in formatted and "(2013)" in formatted
-    assert "PREVALECE LA MÁS RECIENTE" in rag.SYS_PROMPT
-    assert "PREVALECE LA ESPECÍFICA" in rag.SYS_PROMPT
+    assert "PREVALECE LA MÁS RECIENTE" in rag.sys_prompt(SPECIALTY)
+    assert "PREVALECE LA ESPECÍFICA" in rag.sys_prompt(SPECIALTY)
+
+
+def test_the_conflict_rule_names_the_scopes_the_corpus_actually_covers():
+    """The «specific beats general» half needs to know WHICH situations have dedicated guidance,
+    and that list is derived from the manifest. It used to be typed into the prompt, so it aged
+    silently every time the corpus changed."""
+    prompt = rag.sys_prompt(SPECIALTY)
+    for topic in corpus.topics_for(SPECIALTY):
+        assert topic in prompt
 
 
 def test_the_provenance_line_is_declared_non_citable():
     """It sits inside the numbered fragment, so without this the model could quote it as if it
     were guideline text."""
-    assert 'no la cites nunca en "cita_textual"' in rag.SYS_PROMPT
+    assert 'no la cites nunca en "cita_textual"' in rag.sys_prompt(SPECIALTY)
+
+
+def test_every_prompt_speaks_the_active_specialtys_vocabulary():
+    """The four system prompts are built per specialty. What must reach ALL of them is the
+    abbreviation dictionary: it is what makes a sigla and its full name the same term to the
+    rewriter, the generator, the judge and the clarifier alike."""
+    example = next(iter(corpus.specialty(SPECIALTY).abbreviations))
+    for build in (rag.rephrase_sys, rag.sys_prompt, rag.validate_sys, rag.assess_sys):
+        assert f"{example} = " in build(SPECIALTY)
+
+
+def test_the_clarifier_and_the_screener_name_the_same_modifiers():
+    """One profile entry yields both spellings. They were two hand-maintained lists in two
+    prompts and had already drifted: the screener knew twelve slugs, the clarifier a different,
+    longer prose list."""
+    profile = corpus.specialty(SPECIALTY)
+    screener, clarifier = rag.rephrase_sys(SPECIALTY), rag.assess_sys(SPECIALTY)
+    for modifier in profile.modifiers:
+        assert f'"{modifier.slug}"' in screener
+        assert modifier.label in clarifier
 
 
 # --- prompt assembly: the non-citable blocks -------------------------------

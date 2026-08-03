@@ -11,8 +11,10 @@ from typing import cast
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
+import corpus
+from corpus import Scope
 from rag import (refine, retrieve_hybrid, rerank, build_context, validate, assess,
-                 SYS_PROMPT, build_user_prompt)
+                 sys_prompt, build_user_prompt)
 from retrieval import merge_dedup
 from retrieval.registry import MODES
 from evidence import format_answer, section_label
@@ -20,7 +22,7 @@ from progress import STEP_RETRIEVAL as PROGRESS_RETRIEVAL, emit
 
 from .config import (MAX_ITER, CLARIFY_MAX_ROUNDS, CLARIFY_QUESTIONS_PER_ROUND,
                      RETRIEVAL_MODE, VALID_MODES, ConfigSchema,
-                     MSG_NOT_VALIDATED, MSG_VALIDATION_ERROR, MSG_OUT_OF_DOMAIN,
+                     MSG_NOT_VALIDATED, MSG_VALIDATION_ERROR, msg_out_of_domain,
                      MSG_TECHNICAL_ERROR, STEP_FORMATTING, STEP_GENERATION, STEP_RETRIEVAL)
 from .state import RAGState
 from .generation import ClinicalAnswer, structured_llm
@@ -70,7 +72,7 @@ def node_technical_error(state: RAGState) -> dict:
 
 
 # --- Head: rephrase + domain guardrail -------------------------------------
-def node_rephrase(state: RAGState) -> dict:
+def node_rephrase(state: RAGState, config) -> dict:
     """question -> rewritten/normalized query + domain classification (single LLM call), plus
     the cheap half of the clarification step (seeds clinical_facts / candidate_modifiers).
 
@@ -88,9 +90,13 @@ def node_rephrase(state: RAGState) -> dict:
     topic, then records THIS question as the previous one for next turn. Both are cleared only
     on an explicit new patient (never here)."""
     prior = state.get("patient_facts") or {}
-    r = refine(state["question"], prev_question=state.get("prev_question"), patient_facts=prior)
+    specialty = _specialty(state, config)
+    r = refine(state["question"], prev_question=state.get("prev_question"), patient_facts=prior,
+               specialty=specialty)
     turn_facts = r.get("known_facts", {})
-    return {"search_query": r["query"], "in_domain": r["in_domain"],
+    # `specialty` is written back so it is pinned from the first turn: resolved once, it cannot
+    # drift later because a config default or an empty context said otherwise.
+    return {"search_query": r["query"], "in_domain": r["in_domain"], "specialty": specialty,
             "patient_facts": {**prior, **turn_facts}, "prev_question": state["question"],
             "turn_facts": turn_facts, "possible_new_patient": r.get("possible_new_patient", False),
             "candidate_modifiers": r.get("candidate_modifiers", []),
@@ -101,8 +107,8 @@ def node_rephrase(state: RAGState) -> dict:
 
 
 def node_out_of_domain(state: RAGState) -> dict:
-    """Question outside the HIV domain: direct message, no retrieval or generation."""
-    return {"output": MSG_OUT_OF_DOMAIN}
+    """Question outside the active specialty: direct message, no retrieval or generation."""
+    return {"output": msg_out_of_domain(_specialty(state))}
 
 
 def _resolve_mode(config) -> str:
@@ -117,6 +123,31 @@ def _resolve_mode(config) -> str:
     if not mode:  # programmatic app.invoke(config={"configurable": {...}})
         mode = ((config or {}).get("configurable") or {}).get("retrieval_mode")
     return mode if mode in VALID_MODES else RETRIEVAL_MODE
+
+
+def _specialty(state: RAGState, config=None) -> str:
+    """Which specialty's guidelines this run answers from: the state (the doctor picked one for
+    the session) -> Studio/context -> configurable -> the manifest's default.
+
+    State comes FIRST, unlike `_resolve_mode`, and the difference is deliberate: the retrieval
+    mode is a per-run engineering choice, while the specialty is what the doctor is working on
+    and must not change under them mid-conversation because a config default disagreed."""
+    chosen = state.get("specialty")
+    if not chosen:
+        try:
+            from langgraph.runtime import get_runtime
+            chosen = (get_runtime(ConfigSchema).context or {}).get("specialty")
+        except Exception:
+            pass
+    if not chosen:
+        chosen = ((config or {}).get("configurable") or {}).get("specialty")
+    return corpus.resolve_specialty(chosen)
+
+
+def _scope(state: RAGState, config=None) -> Scope:
+    """The retrieval scope for this run. Every retrieval call takes one, so no search can
+    accidentally reach outside the specialty the doctor is working in."""
+    return Scope(specialty=_specialty(state, config))
 
 
 def retrieval_entry(mode: str) -> str:
@@ -217,7 +248,7 @@ def _retrieved(contexts: list, **extra) -> dict:
 def node_retrieve(state: RAGState) -> dict:
     """search_query (+ carried-over patient facts) -> ~20 candidates via hybrid (dense + BM25)."""
     candidates = retrieve_hybrid(_with_facts(state["search_query"], state),
-                                 top_k=20, prefetch_limit=30)
+                                 top_k=20, prefetch_limit=30, scope=_scope(state))
     return {"candidates": candidates, "retrieval_mode": "baseline"}
 
 
@@ -228,7 +259,8 @@ def node_rerank(state: RAGState) -> dict:
     return _retrieved(contexts)
 
 
-def _retrieve_with(mode: str, question: str, rewritten_query: str | None) -> tuple[list, str]:
+def _retrieve_with(mode: str, question: str, rewritten_query: str | None,
+                   scope: Scope | None = None) -> tuple[list, str]:
     """Run `mode`'s retrieval, returning (payloads, concept_map).
 
     Every mode is called the same way — the ORIGINAL question plus the already-rephrased query
@@ -239,8 +271,8 @@ def _retrieve_with(mode: str, question: str, rewritten_query: str | None) -> tup
     m = MODES[mode]
     with_map = m.search_with_concept_map()
     if with_map is not None:
-        return with_map(question, top_k=8, rewritten_query=rewritten_query)
-    return m.search()(question, top_k=8, rewritten_query=rewritten_query), ""
+        return with_map(question, top_k=8, rewritten_query=rewritten_query, scope=scope)
+    return m.search()(question, top_k=8, rewritten_query=rewritten_query, scope=scope), ""
 
 
 def _make_retrieval_node(mode: str):
@@ -249,7 +281,8 @@ def _make_retrieval_node(mode: str):
     @guarded(STEP_RETRIEVAL)
     def node(state: RAGState) -> dict:
         rewritten = _with_facts(state.get("search_query") or state["question"], state)
-        contexts, concept_map = _retrieve_with(mode, state["question"], rewritten)
+        contexts, concept_map = _retrieve_with(mode, state["question"], rewritten,
+                                               scope=_scope(state))
         return _retrieved(contexts, concept_map=concept_map, retrieval_mode=mode)
     node.__name__ = f"node_{mode}_retrieve"
     return node
@@ -276,7 +309,8 @@ def node_assess_context(state: RAGState) -> dict:
                known_facts=state.get("patient_facts"),
                candidate_modifiers=state.get("candidate_modifiers"),
                asked_questions=state.get("asked_questions"),
-               max_questions=CLARIFY_QUESTIONS_PER_ROUND)
+               max_questions=CLARIFY_QUESTIONS_PER_ROUND,
+               specialty=_specialty(state))
     return {"pending_clarifications": a["questions"] if a["needs_clarification"] else [],
             "assessment": {k: a.get(k) for k in
                            ("clinically_relevant", "branches_on", "already_covered")}}
@@ -356,15 +390,17 @@ def refinement_reply(questions: list, answers: dict):
     return {q: a for q, a in replies.items() if a} or ""
 
 
-def _retrieve_for_mode(mode: str, question: str, query: str) -> tuple[list, str]:
+def _retrieve_for_mode(mode: str, question: str, query: str,
+                       scope: Scope | None = None) -> tuple[list, str]:
     """Run `mode`'s retrieval over an already-enriched query, returning (payloads, concept_map).
 
     The single place that knows baseline is the mode without one search function (the graph
     splits it into retrieve -> rerank), so every node that re-runs retrieval dispatches through
     here instead of repeating the special case."""
     if mode == "baseline":
-        return rerank(query, retrieve_hybrid(query, top_k=20, prefetch_limit=30), top_k=5), ""
-    return _retrieve_with(mode, question, query)
+        return rerank(query, retrieve_hybrid(query, top_k=20, prefetch_limit=30, scope=scope),
+                      top_k=5), ""
+    return _retrieve_with(mode, question, query, scope=scope)
 
 
 def _facts_phrase(patient_facts: dict | None) -> str:
@@ -396,7 +432,8 @@ def node_re_retrieve(state: RAGState, config) -> dict:
         return {}
     mode = state.get("retrieval_mode") or _resolve_mode(config)
     rewritten = _with_facts(state.get("search_query") or state["question"], state)
-    contexts, concept_map = _retrieve_for_mode(mode, state["question"], rewritten)
+    contexts, concept_map = _retrieve_for_mode(mode, state["question"], rewritten,
+                                               scope=_scope(state, config))
     return _retrieved(contexts, concept_map=concept_map)
 
 
@@ -427,14 +464,15 @@ def node_generate(state: RAGState) -> dict:
               f"pregunta. Si el contexto sigue sin respaldarla, marca "
               f"informacion_suficiente=false."
         )
-    messages = [("system", SYS_PROMPT), ("human", user)]
+    messages = [("system", sys_prompt(_specialty(state))), ("human", user)]
     answer = cast(ClinicalAnswer, structured_llm.invoke(messages))
     return {"answer": answer.model_dump(), "attempts": state.get("attempts", 0) + 1}
 
 
 def node_validate(state: RAGState) -> dict:
     """Relevance + grounding judge over the answer. Marks valid / not valid."""
-    verdict = validate(state["question"], state["answer"], state["formatted_context"])
+    verdict = validate(state["question"], state["answer"], state["formatted_context"],
+                       specialty=_specialty(state))
     return {"validation": verdict}
 
 
@@ -460,7 +498,8 @@ def node_refocus_retrieve(state: RAGState, config) -> dict:
     previous = state.get("contexts") or []
     found, concept_map = _retrieve_for_mode(
         mode, f"{state['question']}\n{focus}",
-        f"{_with_facts(state.get('search_query') or state['question'], state)}\n{focus}")
+        f"{_with_facts(state.get('search_query') or state['question'], state)}\n{focus}",
+        scope=_scope(state, config))
     contexts = rerank(state["question"], merge_dedup(found, previous),
                       top_k=len(previous) or 8)
     return _retrieved(contexts, refocus_query=focus,

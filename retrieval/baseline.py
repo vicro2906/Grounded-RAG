@@ -4,17 +4,20 @@ The simplest of the three interchangeable architectures, and the building block 
 two reuse: iterative falls back to one baseline shot for single-hop questions, and graph
 runs the same hybrid search as its complement branch.
 """
+import corpus
 from rag import rephrase, retrieve_hybrid, rerank
 
 
-def retrieve_rerank(query: str, top_k: int = 5, candidates: int = 20) -> list:
+def retrieve_rerank(query: str, top_k: int = 5, candidates: int = 20,
+                    scope: corpus.Scope | None = None) -> list:
     """Retrieve `candidates` via hybrid search (dense + BM25 RRF) and reorder them with
     the cross-encoder, returning the best top_k."""
-    cand = retrieve_hybrid(query, top_k=candidates, prefetch_limit=30)
+    cand = retrieve_hybrid(query, top_k=candidates, prefetch_limit=30, scope=scope)
     return rerank(query, cand, top_k=top_k)
 
 
-def search(query: str, top_k: int = 5) -> list:
+def search(query: str, top_k: int = 5, rewritten_query: str | None = None,
+           scope: corpus.Scope | None = None) -> list:
     """Full baseline retriever: rephrase -> hybrid -> reranker. Used directly by the
     evaluation; the graph runs the same steps as separate nodes (retrieve -> rerank).
 
@@ -23,4 +26,4 @@ def search(query: str, top_k: int = 5) -> list:
     run comparing modes varies context SIZE as well as the selection mechanism — pass an
     explicit top_k to control for it. The default is deliberately left alone: changing it would
     silently move the numbers in results/ that were measured at 5."""
-    return retrieve_rerank(rephrase(query), top_k=top_k)
+    return retrieve_rerank(rewritten_query or rephrase(query), top_k=top_k, scope=scope)

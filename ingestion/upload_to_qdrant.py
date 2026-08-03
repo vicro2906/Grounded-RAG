@@ -63,7 +63,7 @@ BATCH_SIZE = 96
 PRICE_PER_1M_TOKENS = 0.13  # indicative USD for text-embedding-3-large
 
 # Payload indexes to filter on in the searches.
-KEYWORD_FIELDS = ["topic", "content_type", "source_file", "organization",
+KEYWORD_FIELDS = ["specialty", "topics", "content_type", "source_file", "organization",
                   "evidence_grades"]
 INTEGER_FIELDS = ["year", "heading_level"]
 
