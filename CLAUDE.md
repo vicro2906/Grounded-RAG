@@ -449,6 +449,24 @@ keeping strict grounding + validate.
   `retrieval/`): `chunk_guidelines.py` (structural chunking), **`quality.py`** (the quality
   gates), `contextualize.py` (Contextual Retrieval), `upload_to_qdrant.py` (dense) and
   `upload_to_qdrant_hybrid.py` (dense+BM25).
+- **`ingestion/extract_pdf.py`** — **PDF → Markdown, versioned** (`python -m ingestion.extract_pdf
+  --all --report`). Replaces the per-PDF ad-hoc scripts. **No LLM is ever constructed here**, and
+  that is what keeps every literal quote a transcription checkable against the PDF; genuinely
+  graphical figures stay OMITTED with a canonical marker naming cause and page. Three components
+  the plan expected were REMOVED after measuring, not written defensively: pdfplumber decodes
+  ligatures correctly (no repair), it puts evidence grades at the end of their sentence (4
+  doubtful in 60 pages vs 181 in the old Markdown — no geometric re-anchoring), and the tables
+  are in the text layer (no VLM). **Two mistakes worth remembering, both mine:** (a) the
+  whitespace-alignment table strategy is NOT a safe fallback — on a page of prose it finds a
+  table anyway and chops paragraphs at arbitrary positions, which turned 55% of the output into
+  fake rows and collapsed the outline from ~165 headings to 24; `lines` only, and anything else
+  is declared per document in the manifest. (b) A lexical "nothing invented" gate discarded 7 of
+  10 CORRECT tables, because a cell wrapping across lines interleaves with its neighbours in the
+  region's reading order; it is now a CONSERVATION gate (characters + numerals), which is the
+  failure that actually happened. Lines come from pdfplumber's own assembly, not from regrouping
+  `extract_words` — word segmentation splits at kerning gaps (`N`+`europsichol`, 231 broken
+  tokens in one guide) and would also make the Markdown disagree with the reference text the
+  gates check it against.
 - **`ingestion/quality.py`** — the corpus quality GATES, and the reason they are code rather than
   a checklist: every defect they check was found by reading the corpus by hand long after it had
   been indexed and answered from, and none announced itself. `python -m ingestion.chunk_guidelines
@@ -786,13 +804,18 @@ the plan, not as a bug list to rediscover.
    (MIT)**, not PyMuPDF (AGPL-3.0, and this repo is MIT and public); the ~35 graphical figures
    and decision algorithms stay OMITTED with a normalized marker, because **no LLM may ever touch
    the extraction path** — that is what keeps everything citable a verifiable transcription.
-   **Status:** Phase 0 DONE (quality gates + the `corpus.py` generation switch) and **Phase 1
-   DONE** (manifest, specialty profiles, per-specialty prompts, `Scope` filtering end to end,
-   CLI `--specialty` / `/especialidad` and a Chainlit chat profile per specialty — see Key
-   files). Next: the extractor, then the chunker. The migration sequence, the per-table safety
-   gates and the three sites that assume the breadcrumb lives inside `text` are in the approved
-   plan. **Nothing has been re-indexed yet: `CORPUS_VERSION` is still `v1` and the app answers
-   exactly as before.**
+   **Status:** Phases 0, 1 and 2 DONE — quality gates + the `corpus.py` generation switch;
+   manifest, specialty profiles, per-specialty prompts and `Scope` filtering end to end; and the
+   versioned extractor (see Key files). **Phase 3 (the chunker) is next**, and the numbers say
+   why: measured on the REGENERATED corpus against the current one, omission markers went
+   112 → 5, words absent from the PDF's text layer 198 → 12, table captions with no rows 33 → 1,
+   and estimated token counts 514 → 0 — while **oversized chunks got WORSE (89 → 107) and
+   duplicate openings too (42 → 52)**, because both are the chunker's job: it still does not
+   split tables by row and still prepends the breadcrumb to the citable text. TABLA 3 and the
+   19-column interaction matrix now come out whole, and `fluconazol` is spelled correctly.
+   **Nothing has been re-indexed and `data/markdown/` is untouched:** `CORPUS_VERSION` is still
+   `v1`, the app answers exactly as before, and the cutover needs the per-document human review
+   that is step 3 of the migration sequence.
 0. **THE FULL A/B IS THE BLOCKER.** Five modes are implemented and wired
    (baseline / iterative / graph / pathrag / hipporag). A **stratified probe
    (`EVAL_SAMPLE=3` = 12 questions, gpt-4o-mini judge, 0 NaN) ran on 2026-07-22** over the
