@@ -40,6 +40,11 @@ markdown     = "TAR_2022.md"
 reference    = "TAR_2022/TAR_2022.txt"
 source_pdf   = "GuiaGeSIDAPlanNacionalSobreElSidaRespectoAlTratamientoAntirretroviralEnAdultosInfectadosPorElVirusDeLaInmunodeficienciaHumanaActualizacionEnero2022.pdf"
 
+[document.extraction]
+# Front matter (cover, panel of authors, contents) ends here; the clinical text
+# begins on this page. Read once by a human — it is a fact about this PDF.
+first_page   = 10
+
 [[document]]
 doc_id       = "VIH_TB"
 title        = "Tratamiento de la tuberculosis en personas con infección por VIH"
@@ -51,6 +56,11 @@ language     = "es"
 markdown     = "VIH_TB.md"
 reference    = "TB_VIH/TB_VIH.txt"
 source_pdf   = "gesida_TB_en_VIH.pdf"
+
+[document.extraction]
+# Front matter (cover, panel of authors, contents) ends here; the clinical text
+# begins on this page. Read once by a human — it is a fact about this PDF.
+first_page   = 8
 
 [[document]]
 doc_id       = "VIH_embarazo"
@@ -64,6 +74,11 @@ markdown     = "VIH_embarazo.md"
 reference    = "VIH_embarazo/VIH_embarazo.txt"
 source_pdf   = "gesida_VIH_embarazo.pdf"
 
+[document.extraction]
+# Front matter (cover, panel of authors, contents) ends here; the clinical text
+# begins on this page. Read once by a human — it is a fact about this PDF.
+first_page   = 14
+
 [[document]]
 doc_id       = "adherencia"
 title        = "Recomendaciones GeSIDA/SEFH/PNS para mejorar la adherencia al tratamiento"
@@ -75,6 +90,11 @@ language     = "es"
 markdown     = "adherencia.md"
 reference    = "adherencia/adherencia.txt"
 source_pdf   = "GUIA_GESIDA_febrero_2020_Adherencia.pdf"
+
+[document.extraction]
+# Front matter (cover, panel of authors, contents) ends here; the clinical text
+# begins on this page. Read once by a human — it is a fact about this PDF.
+first_page   = 6
 
 [[document]]
 doc_id       = "medicina_preventiva"
@@ -88,6 +108,11 @@ markdown     = "medicina preventiva.md"
 reference    = "medicina_preventiva/medicina_preventiva.txt"
 source_pdf   = "GESIDA-Documento-de-Consenso-de-GeSIDA-y-la-Sociedad-Espanola-de-Medicina-Preventiva-Salud-Publica-y-Gestion-Sanitaria.pdf"
 
+[document.extraction]
+# Front matter (cover, panel of authors, contents) ends here; the clinical text
+# begins on this page. Read once by a human — it is a fact about this PDF.
+first_page   = 10
+
 [[document]]
 doc_id       = "profilaxis"
 title        = "Profilaxis posexposición ocupacional y no ocupacional al VIH, VHB y VHC"
@@ -100,6 +125,11 @@ markdown     = "profilaxis.md"
 reference    = "profilaxis_posexposicion/profilaxis_posexposicion.txt"
 source_pdf   = "GESIDA-Documento-de-Consenso-sobre-la-Profilaxis-Posexposicion-Ocupacional-y-No-Ocupacional-al-VIH-VHB-y-VHC-en-Adultos-y-Ninos.pdf"
 
+[document.extraction]
+# Front matter (cover, panel of authors, contents) ends here; the clinical text
+# begins on this page. Read once by a human — it is a fact about this PDF.
+first_page   = 11
+
 [[document]]
 doc_id       = "alteraciones_NC"
 title        = "Manejo clínico de las alteraciones neurocognitivas asociadas al VIH"
@@ -111,3 +141,8 @@ language     = "es"
 markdown     = "ManejoclinicodelasalteracionesNC.md"
 reference    = "alteraciones_NC/alteraciones_NC.txt"
 source_pdf   = "gesidadcyrc2013-ManejoclinicodelasalteracionesNC.pdf"
+
+[document.extraction]
+# Front matter (cover, panel of authors, contents) ends here; the clinical text
+# begins on this page. Read once by a human — it is a fact about this PDF.
+first_page   = 6

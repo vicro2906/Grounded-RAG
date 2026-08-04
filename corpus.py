@@ -30,7 +30,7 @@ all need it, and `ingestion/` must stay clear of the retrieval stack.
 """
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -120,6 +120,10 @@ class Document:
     markdown: str          # file name under data/markdown/
     reference: str         # path under data/textos/ — the PDF's own text layer
     source_pdf: str        # file name under data/pdfs/
+    # Per-PDF extraction knobs (optional). This is where "each guideline has its own quirks"
+    # lives now — as three lines of data instead of a script written for one document and then
+    # thrown away, which is how the corpus came to be unreproducible in the first place.
+    extraction: dict = field(default_factory=dict)
 
     @property
     def markdown_path(self) -> str:
@@ -158,6 +162,7 @@ def documents() -> tuple[Document, ...]:
             raise SystemExit(f"data/corpus.toml: document #{i} "
                              f"({entry.get('doc_id', 'no doc_id')}) is missing {missing}")
         out.append(Document(topics=tuple(entry["topics"]),
+                            extraction=dict(entry.get("extraction") or {}),
                             **{f: entry[f] for f in _REQUIRED_DOC_FIELDS if f != "topics"}))
     ids = [d.doc_id for d in out]
     if len(ids) != len(set(ids)):

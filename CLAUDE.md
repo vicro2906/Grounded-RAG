@@ -412,7 +412,20 @@ keeping strict grounding + validate.
   index build + traversal; store in `data/lightrag_store/`), `pathrag.py` (flow-pruned paths
   over that same store — no index of its own) and `hipporag.py` (HippoRAG 2; own store in
   `data/hipporag_store/`, built with `python -m retrieval.hipporag`).
-- **`corpus.py`** — **the corpus GENERATION switch**, and a root module for the same reason
+- **`data/corpus.toml`** — the DOCUMENT MANIFEST (replaces the old `DOC_REGISTRY`): per document
+  `doc_id, title, specialty, topics, organization, year, language, markdown, reference,
+  source_pdf`. An unlisted `.md` is now an ERROR — it used to enter the corpus silently tagged
+  `topic="vih_general"`, i.e. a document whose year and scope the generation prompt could not
+  see while that same prompt arbitrates between guides spanning 2013-2025. It is also the ONLY
+  thing that knows which reference text belongs to which Markdown (the names pair by no rule:
+  `VIH_TB.md` ↔ `textos/TB_VIH/`), which is what makes the G5 oracle possible.
+- **`data/specialties/<id>.toml`** — the SPECIALTY PROFILE: display name, the in-domain
+  description for the guardrail, the clinical modifiers (`slug` for the screener + `label` for
+  the clarifier, ONE entry so the two prompts cannot drift — they already had), the grade scheme
+  and the abbreviations. **`specific_scopes` is NOT here: it is derived from the manifest**, so
+  adding a document teaches SYS_PROMPT's conflict rule about it.
+- **`corpus.py`** — **the corpus GENERATION switch** and the loader for both files above,
+  and a root module for the same reason
   `progress.py` is one (`rag.py`, `retrieval/` and `ingestion/` all need it, and `ingestion/`
   must not import the retrieval stack). The corpus fans out into FOUR artifacts that must always
   describe the same text — `chunks.jsonl`, the Qdrant collection, the LightRAG store (PathRAG
@@ -426,6 +439,12 @@ keeping strict grounding + validate.
   module names an artifact instead of deriving it — which immediately caught
   `upload_to_qdrant_hybrid.py` defaulting to `guias_vih_hibrida` while the app queried
   `guias_vih_hibrida_ctx`, i.e. uploading to a collection nobody searched.
+  It also owns **`Scope`** (which slice of the corpus a search may reach) and the per-generation
+  flag **`scopable`**. **v1 is NOT scopable, and that is correct, not a workaround:** Qdrant
+  REJECTS a filter on a field with no payload index, the live collection predates `specialty`,
+  and a plain equality filter over an absent field would match nothing — turning every question
+  into «no está en las guías», a clinical claim produced by a schema mismatch. A corpus built
+  before specialties existed holds exactly one, so searching all of it IS searching that one.
 - `ingestion/` — corpus→index steps, a PACKAGE (run them with `python -m ingestion.<step>`, like
   `retrieval/`): `chunk_guidelines.py` (structural chunking), **`quality.py`** (the quality
   gates), `contextualize.py` (Contextual Retrieval), `upload_to_qdrant.py` (dense) and
@@ -767,10 +786,13 @@ the plan, not as a bug list to rediscover.
    (MIT)**, not PyMuPDF (AGPL-3.0, and this repo is MIT and public); the ~35 graphical figures
    and decision algorithms stay OMITTED with a normalized marker, because **no LLM may ever touch
    the extraction path** — that is what keeps everything citable a verifiable transcription.
-   **Status:** Phase 0 DONE (quality gates + the `corpus.py` generation switch — see Key files).
-   Next: manifest + specialty profile, then the extractor, then the chunker. The migration
-   sequence, the per-table safety gates and the three sites that assume the breadcrumb lives
-   inside `text` are in the approved plan.
+   **Status:** Phase 0 DONE (quality gates + the `corpus.py` generation switch) and **Phase 1
+   DONE** (manifest, specialty profiles, per-specialty prompts, `Scope` filtering end to end,
+   CLI `--specialty` / `/especialidad` and a Chainlit chat profile per specialty — see Key
+   files). Next: the extractor, then the chunker. The migration sequence, the per-table safety
+   gates and the three sites that assume the breadcrumb lives inside `text` are in the approved
+   plan. **Nothing has been re-indexed yet: `CORPUS_VERSION` is still `v1` and the app answers
+   exactly as before.**
 0. **THE FULL A/B IS THE BLOCKER.** Five modes are implemented and wired
    (baseline / iterative / graph / pathrag / hipporag). A **stratified probe
    (`EVAL_SAMPLE=3` = 12 questions, gpt-4o-mini judge, 0 NaN) ran on 2026-07-22** over the
