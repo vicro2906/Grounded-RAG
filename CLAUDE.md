@@ -340,13 +340,19 @@ keeping strict grounding + validate.
   bypass it. `AnswerView` is deliberately NOT stored in the graph state — `answer` and
   `chunk_index` already are, both plain data, so a web frontend calls `resolve_answer` itself
   and no dataclass ever has to survive a checkpointer's serializer.
-- **`tests/`** — pytest suite, 242 tests + 8 xfail, **no API calls and no network**
+- **`tests/`** — pytest suite, 311 tests + 9 xfail, **no API calls and no network**
   (`.venv\Scripts\python.exe -m pytest`, ~18 s; most of that is importing `main` in the CLI
   tests, which warms the reranker). The principle: the LLM is replaced ONLY where the
   randomness enters (refine / assess / validate / generation / retrieval, in `conftest.py`), so
   everything the pipeline DECIDES stays real and every branch can be visited on demand —
   including the ones a manual run almost never reaches (judge rejects, judge errors, budget
   exhausted, second question on the same thread).
+  - **`test_chunking.py`** — the chunker's RULES on synthetic Markdown, one test per defect
+    measured in the shipped corpus: the budget reserving room for the breadcrumb, a split table
+    repeating its header and never cutting a row, a small recommendation merging with the section
+    it belongs to, an overlap that is actually non-empty, and a `chunk_id` that survives an edit
+    made above it. The gates measure the corpus; these pin the rules that produce it, so a
+    regression is attributable to a rule rather than to a number moving.
   - **`test_corpus_quality.py`** — the quality gates over the corpus THAT SHIPS, plus the corpus
     generation switch. Two kinds of test, and the split is the point. The gates run against the
     committed `chunks.jsonl` and `data/markdown/`, and the eight that currently FAIL are marked
@@ -512,7 +518,7 @@ keeping strict grounding + validate.
   `/ayuda`, `/salir`. **Ctrl-C** cancels the query in flight and returns to the prompt (safe:
   the next question restarts from the top on the same thread, the orphaned pause is discarded
   and `patient_facts` survives); a second one at an idle prompt ends the session.
-- Tests: `.venv\Scripts\python.exe -m pytest` (242 tests + 8 xfail, ~18 s, no API calls). Run them before
+- Tests: `.venv\Scripts\python.exe -m pytest` (311 tests + 9 xfail, ~28 s, no API calls). Run them before
   committing. They freeze the MECHANICS, not the medicine — whether an answer is clinically
   right is what `evaluation.py` and a clinician are for.
 - **Web (Chainlit): `.venv\Scripts\chainlit.exe run web/app.py`** → http://localhost:8000.
@@ -804,18 +810,28 @@ the plan, not as a bug list to rediscover.
    (MIT)**, not PyMuPDF (AGPL-3.0, and this repo is MIT and public); the ~35 graphical figures
    and decision algorithms stay OMITTED with a normalized marker, because **no LLM may ever touch
    the extraction path** — that is what keeps everything citable a verifiable transcription.
-   **Status:** Phases 0, 1 and 2 DONE — quality gates + the `corpus.py` generation switch;
-   manifest, specialty profiles, per-specialty prompts and `Scope` filtering end to end; and the
-   versioned extractor (see Key files). **Phase 3 (the chunker) is next**, and the numbers say
-   why: measured on the REGENERATED corpus against the current one, omission markers went
-   112 → 5, words absent from the PDF's text layer 198 → 12, table captions with no rows 33 → 1,
-   and estimated token counts 514 → 0 — while **oversized chunks got WORSE (89 → 107) and
-   duplicate openings too (42 → 52)**, because both are the chunker's job: it still does not
-   split tables by row and still prepends the breadcrumb to the citable text. TABLA 3 and the
-   19-column interaction matrix now come out whole, and `fluconazol` is spelled correctly.
+   **Status: Phases 0-3 DONE.** Quality gates + the `corpus.py` generation switch; manifest,
+   specialty profiles, per-specialty prompts and `Scope` filtering end to end; the versioned
+   extractor; and the redesigned chunker (see Key files). Measured on the REGENERATED corpus
+   against the shipped one, every gate is now better or equal:
+
+   | gate | v1 | v2 |
+   |---|---|---|
+   | omission markers | 112 | **5** |
+   | words absent from the PDF's text layer | 198 | **12** |
+   | table captions with no rows | 33 | **1** |
+   | chunks over the token budget | 89 | **1** |
+   | chunks sharing their opening 120 chars | 42 | **4** |
+   | `content_type` mislabelled | 14 | **0** |
+   | `n_tokens` an estimate rather than a count | 514 | **0** |
+   | chunks with no body | 1 | **0** |
+
+   583 chunks, median 662 tokens, p90 878, max 910. TABLA 3 and the 19-column interaction
+   matrix come out whole, and `fluconazol` is spelled correctly.
    **Nothing has been re-indexed and `data/markdown/` is untouched:** `CORPUS_VERSION` is still
-   `v1`, the app answers exactly as before, and the cutover needs the per-document human review
-   that is step 3 of the migration sequence.
+   `v1`, the app answers exactly as before. **What is left is the cutover** — per-document human
+   review, then chunk → contextualize → upload → rebuild both graph stores → flip the default.
+   The sequence and its costs (~$1-3, ~2 h, almost all LightRAG) are in the approved plan.
 0. **THE FULL A/B IS THE BLOCKER.** Five modes are implemented and wired
    (baseline / iterative / graph / pathrag / hipporag). A **stratified probe
    (`EVAL_SAMPLE=3` = 12 questions, gpt-4o-mini judge, 0 NaN) ran on 2026-07-22** over the
