@@ -51,7 +51,8 @@ import corpus
 from rag import (EMBEDDING_MODEL, REPHRASE_MODEL, _ABBREV_LIST, chat_model, client,
                  get_embedding)
 
-from ._common import canonical_key, house_tail, load_chunks, map_chunk_ids_to_payloads
+from ._common import (canonical_key, house_tail, indexed_text, load_chunks,
+                      map_chunk_ids_to_payloads)
 
 # --- Config ---------------------------------------------------------------
 STORE_DIR = corpus.hipporag_dir()
@@ -161,7 +162,7 @@ async def _extract_chunk(chunk: dict, semaphore: asyncio.Semaphore) -> dict:
                 model=REPHRASE_MODEL,
                 temperature=0,
                 messages=[{"role": "system", "content": _OPENIE_SYS},
-                          {"role": "user", "content": chunk["text"]}],
+                          {"role": "user", "content": indexed_text(chunk)}],
                 response_format={"type": "json_schema", "json_schema": _openie_schema()},
             )
             data = json.loads(response.choices[0].message.content)
@@ -292,7 +293,7 @@ async def _build_index() -> None:
     # rather than on the first query of every process.
     print("Embedding passages…")
     passage_ids = [c["chunk_id"] for c in chunks]
-    passage_emb = _embed_texts([c["text"] for c in chunks])
+    passage_emb = _embed_texts([indexed_text(c) for c in chunks])
 
     print("Assembling the graph…")
     graph = _build_graph(openie, phrase_ids, phrase_emb, phrase_keys)

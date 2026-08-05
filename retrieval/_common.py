@@ -47,12 +47,28 @@ def norm(text: str) -> str:
     return " ".join((text or "").split())
 
 
+def indexed_text(chunk: dict) -> str:
+    """What an index stores for a chunk: the breadcrumb-prefixed form when it has one.
+
+    The graph indexes are built from this string (the entity extractor needs the section
+    context), while `evidence` cites the plain `text`. Both must map back to the same payload."""
+    return chunk.get("text_for_retrieval") or chunk.get("text", "")
+
+
 _chunk_lookup: dict | None = None
 def get_chunk_lookup() -> dict:
-    """Map normalized chunk text -> our payload (with full metadata), built once."""
+    """Map normalized chunk text -> our payload (with full metadata), built once.
+
+    Keyed on BOTH forms. An index stores `text_for_retrieval`, but callers that hold a citable
+    quote look up by `text`; answering only one of the two would push every lookup of the other
+    onto the prefix fallback, which is the path that can return a sibling section."""
     global _chunk_lookup
     if _chunk_lookup is None:
-        _chunk_lookup = {norm(c["text"]): c for c in load_chunks()}
+        lookup: dict = {}
+        for chunk in load_chunks():
+            lookup[norm(indexed_text(chunk))] = chunk
+            lookup.setdefault(norm(chunk["text"]), chunk)
+        _chunk_lookup = lookup
     return _chunk_lookup
 
 

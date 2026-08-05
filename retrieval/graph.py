@@ -39,7 +39,7 @@ from lightrag.llm.openai import openai_embed, gpt_4o_mini_complete
 import corpus
 from rag import EMBEDDING_MODEL, OPENAI_BASE_URL
 
-from ._common import house_tail, load_chunks, map_to_payloads
+from ._common import house_tail, indexed_text, load_chunks, map_to_payloads
 
 # --- Config ---------------------------------------------------------------
 WORKING_DIR = corpus.lightrag_dir()          # file-based graph + vector store, per corpus generation
@@ -105,7 +105,10 @@ async def _build_index() -> None:
     # Each chunk is its own document (all < chunk_token_size, so each stays one LightRAG
     # chunk). Re-running resumes: processed docs are skipped and the LLM cache makes redo cheap.
     await rag.ainsert(
-        input=[c["text"] for c in chunks],
+        # The breadcrumb-prefixed form: entity extraction needs the section context to tell
+        # «TDF» in a pregnancy chapter from «TDF» in a renal one. `_common.get_chunk_lookup`
+        # is keyed on both forms, so the bridge back to citable payloads still resolves.
+        input=[indexed_text(c) for c in chunks],
         ids=[c["chunk_id"] for c in chunks],
         file_paths=[c["source_file"] for c in chunks],
     )

@@ -30,8 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import corpus
-from ingestion.chunk_guidelines import (MAX_TOKENS, RE_GRADE, RE_TABLE_ROW, count_tokens,
-                                        is_mostly_table)
+from ingestion.chunk_guidelines import (MAX_TOKENS, RE_GRADE, RE_RECORD_ROW, RE_TABLE_ROW,
+                                        count_tokens, has_tabular_content, is_mostly_table)
 
 # ---------------------------------------------------------------------------
 # Shared vocabulary
@@ -71,9 +71,6 @@ OMISSION_ACCEPTED = {"Figura", "Algoritmo"}
 # why four separate tables ended up inside a single chunk.
 RE_TABLE_CAPTION = re.compile(
     r"^(?:#{1,6}\s+|\*\*)\s*(?P<caption>(?:TABLA|Tabla)\s*\d+[.:]?[^\n*]*)", re.MULTILINE)
-# Wide matrices are serialised as one record per entity-row instead of an unreadable 19-column
-# Markdown table, so "this table has data" must accept both shapes.
-RE_RECORD_ROW = re.compile(r"^\s*[-*]\s+\S.*?:\s+\S", re.MULTILINE)
 
 # An emphasis run closed and immediately reopened. Well-formed Markdown never contains this; the
 # PDF converter produced it whenever it met a span drawn out of flow, and the damage is not
@@ -156,25 +153,30 @@ def body_of(chunk: dict) -> str:
     return text
 
 
-def has_tabular_content(text: str) -> bool:
-    """True if the text carries table data in either supported shape (Markdown rows, or the
-    one-record-per-row form wide matrices are serialised into)."""
-    return (any(RE_TABLE_ROW.match(line) for line in text.splitlines())
-            or bool(RE_RECORD_ROW.search(text)))
-
-
 def _fold(text: str) -> str:
     """Lowercased and accent-folded, so `función` and `funcion` are one token."""
     decomposed = unicodedata.normalize("NFKD", (text or "").lower())
     return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
-def _paragraphs(md: str) -> list[str]:
-    """Source paragraphs worth tracking for coverage: prose, not headings or short fragments."""
+def _coverage_units(md: str) -> list[str]:
+    """The pieces of a source that must each survive into some chunk.
+
+    Prose is tracked as PARAGRAPHS, but a table or a run of records is tracked ROW BY ROW. The
+    chunker splits those by row — repeating the header — precisely so a 7 500-token matrix does
+    not land in one chunk, so demanding that the whole block appear verbatim somewhere would
+    report the fix as a loss. Rows are the right unit: it is a row going missing that loses a
+    drug interaction."""
     out = []
     for block in re.split(r"\n\s*\n", md):
         block = block.strip()
-        if block and not block.startswith("#") and len(block) >= COVERAGE_MIN_PARAGRAPH:
+        if not block or block.startswith("#"):
+            continue
+        lines = block.splitlines()
+        if any(RE_TABLE_ROW.match(l) for l in lines) or sum(
+                1 for l in lines if RE_RECORD_ROW.match(l)) >= 2:
+            out.extend(l.strip() for l in lines if len(l.strip()) >= COVERAGE_MIN_PARAGRAPH)
+        elif len(block) >= COVERAGE_MIN_PARAGRAPH:
             out.append(block)
     return out
 
@@ -185,9 +187,9 @@ def _paragraphs(md: str) -> list[str]:
 def g01_size_budget(chunks: list[dict]) -> Gate:
     findings = [
         Finding(c.get("chunk_id", "?"),
-                f"{count_tokens(c.get('text', ''))} tokens > {MAX_TOKENS} "
+                f"{count_tokens(indexed_text(c))} tokens > {MAX_TOKENS} "
                 f"({c.get('source_file')} · {c.get('heading')})")
-        for c in chunks if count_tokens(c.get("text", "")) > MAX_TOKENS
+        for c in chunks if count_tokens(indexed_text(c)) > MAX_TOKENS
     ]
     return _gate("G1", f"No chunk exceeds {MAX_TOKENS} tokens", findings)
 
@@ -235,12 +237,20 @@ def g10_content_type_matches_body(chunks: list[dict]) -> Gate:
                  findings)
 
 
+def indexed_text(chunk: dict) -> str:
+    """What actually gets embedded and BM25-indexed: the breadcrumb-prefixed form when the chunk
+    has one, the citable text otherwise. The size budget is about THIS string — it exists
+    because of the embedder's input limit and the reranker's scoring window, neither of which
+    ever sees the citable text on its own."""
+    return chunk.get("text_for_retrieval") or chunk.get("text", "")
+
+
 def g11_declared_token_count(chunks: list[dict]) -> Gate:
     findings = [
         Finding(c.get("chunk_id", "?"),
                 f"n_tokens={c.get('n_tokens')} but the tokenizer says "
-                f"{count_tokens(c.get('text', ''))}")
-        for c in chunks if c.get("n_tokens") != count_tokens(c.get("text", ""))
+                f"{count_tokens(indexed_text(c))}")
+        for c in chunks if c.get("n_tokens") != count_tokens(indexed_text(c))
     ]
     return _gate("G11", "n_tokens is the real tokenizer count, not an estimate", findings)
 
@@ -336,14 +346,14 @@ def g08_coverage(chunks: list[dict], sources: list[Source]) -> Gate:
         name = src.name
         haystack = "\n".join(_norm(c.get("text", "")) for c in chunks
                              if c.get("source_file") == name)
-        paragraphs = _paragraphs(src.markdown)
-        missing = [p for p in paragraphs if _norm(p) not in haystack]
-        if not paragraphs:
+        units = _coverage_units(src.markdown)
+        if not units:
             continue
-        covered = 1 - len(missing) / len(paragraphs)
+        missing = [u for u in units if _norm(u) not in haystack]
+        covered = 1 - len(missing) / len(units)
         if covered < MIN_COVERAGE:
             findings.append(Finding(
-                name, f"{covered:.1%} of paragraphs reached the chunks (min {MIN_COVERAGE:.1%}); "
+                name, f"{covered:.1%} of the source reached the chunks (min {MIN_COVERAGE:.1%}); "
                       f"{len(missing)} lost, e.g. {_norm(missing[0])[:70]!r}"))
     return _gate("G8", f"At least {MIN_COVERAGE:.1%} of each source reaches the chunks", findings)
 

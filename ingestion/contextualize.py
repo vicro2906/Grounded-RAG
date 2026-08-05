@@ -183,7 +183,10 @@ def main():
         ctx = contextualize_one(client, args.model, chunk, neigh)
         enriched = dict(chunk)
         enriched["context"] = ctx
-        enriched["text_for_retrieval"] = f"{ctx}\n\n{chunk['text']}"
+        # Prepend to whatever the chunker already designated as the retrieval form, rather than
+        # rebuilding it from `text`. The chunker puts the section breadcrumb there; rebuilding
+        # would silently drop it and undo the context this step exists to add.
+        enriched["text_for_retrieval"] = f"{ctx}\n\n{chunk.get('text_for_retrieval') or chunk['text']}"
         return enriched
 
     n_ok = 0

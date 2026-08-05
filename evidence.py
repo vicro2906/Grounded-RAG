@@ -77,17 +77,24 @@ def _grades_in(text: str) -> list:
 # ─────────────────────────────────────────── split a block into recommendations
 _ITEM_SPLIT = re.compile(r"(?:^|\n)\s*(?:\d+[.\-]|•|-)\s+", re.MULTILINE)
 
-def _strip_breadcrumb(text: str) -> str:
-    """Remove the leading breadcrumb 'A > B > C' that each chunk starts with."""
-    parts = text.split("\n\n", 1)
-    if parts and " > " in parts[0] and len(parts[0]) < 300:
-        return parts[1] if len(parts) > 1 else ""
-    return text
+def citable_text(chunk: dict) -> str:
+    """The chunk's own words — what may be quoted back to the doctor.
+
+    From the v2 corpus this is simply `text`: the breadcrumb lives in `text_for_retrieval`,
+    which is embedded but never cited. A v1 chunk has no such field and carries its
+    `A > B > C` path inside `text`, so it still needs stripping. The branch keys on the SCHEMA
+    rather than sniffing for « > », which would eventually mangle a v2 chunk whose first
+    paragraph happens to contain one; it disappears when v1 does."""
+    text = chunk.get("text", "")
+    if chunk.get("text_for_retrieval"):
+        return text
+    head, sep, rest = text.partition("\n\n")
+    return rest if sep and " > " in head and len(head) < 300 else text
 
 def split_items(chunk: dict) -> list:
     """[{'text': sentence, 'grades': [...]}], one per recommendation. Chunks that are
     not a list collapse to a single item."""
-    body = _strip_breadcrumb(chunk.get("text", ""))
+    body = citable_text(chunk)
     pieces = [p.strip() for p in _ITEM_SPLIT.split(body) if p.strip()]
     if len(pieces) <= 1:
         body = body.strip()
@@ -207,16 +214,12 @@ _GENERIC = {"recomendaciones", "recomendaciones:", "recommendations"}
 _NUM_PREFIX = re.compile(r"^\s*(\d+(?:\.\d+)*)\.?\s+(.*)$")
 
 def _breadcrumb_parts(chunk: dict) -> list:
-    """Return the section path. Prefers section_path from the payload; otherwise
-    reconstructs it from the breadcrumb 'A > B > C' that starts the chunk text
-    (present in 100% of the blocks)."""
-    path = chunk.get("section_path") or []
-    if path:
-        return [re.sub(r"\s+", " ", p).strip() for p in path]
-    head = (chunk.get("text", "").split("\n\n", 1)[0]).strip()
-    if " > " in head and len(head) < 300:
-        return [re.sub(r"\s+", " ", p).strip() for p in head.split(" > ")]
-    return []
+    """The section path, from `section_path` — the payload field that carries it.
+
+    It used to fall back to parsing the breadcrumb out of the chunk text. That fallback is gone
+    with the text it parsed: `section_path` is present on every chunk of every generation, so
+    the fallback only ever answered when the real field was missing, which never happened."""
+    return [re.sub(r"\s+", " ", p).strip() for p in (chunk.get("section_path") or [])]
 
 def _split_num(part: str):
     """'3.1. FACTORES...' -> ('3.1', 'FACTORES...'); without number -> (None, part)."""

@@ -380,11 +380,21 @@ def expand_ligatures(text: str) -> str:
     return text
 
 
+# A heading is a LABEL, not a sentence. Without a cap, a paragraph that opens with a keyword
+# («RECOMENDACIONES Los hijos de madres que…») is promoted whole, and then it is inherited by
+# every chunk beneath it as breadcrumb: measured, one such heading contributed 1 228 tokens of
+# breadcrumb to chunks whose entire budget is 900. The longest genuine heading in this corpus is
+# a table caption at ~120 characters.
+MAX_HEADING_CHARS = 160
+
+
 def heading_level(line: str) -> int | None:
     """The heading level of a line, or None if it is body text.
 
     Numbering decides it — `1.` -> H2, `1.2.` -> H3 — because that is the hierarchy the document
     itself declares, and it is the contract the chunker parses back out."""
+    if len(line) > MAX_HEADING_CHARS:
+        return None
     match = RE_NUMBERED.match(line)
     if match:
         return min(6, 1 + len(match.group(1).split(".")))

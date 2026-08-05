@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pydantic import BaseModel
 
 import corpus
+from evidence import citable_text
 from rag import (rerank, rephrase, chat_model, REPHRASE_MODEL, _ABBREV_LIST, _get_reranker,
                  _get_bm25)
 
@@ -92,7 +93,11 @@ def _evidence_digest(pool: dict, max_chars: int = 200) -> str:
     lines = []
     for p in pool.values():
         head = (p.get("heading") or "").strip()
-        body = (p.get("text") or "").split("\n\n", 1)[-1].strip().replace("\n", " ")
+        # `citable_text`, not `split("\n\n")[-1]`: that used to drop the breadcrumb, but on a
+        # chunk whose text no longer carries one it drops the FIRST PARAGRAPH instead, so the
+        # reflect step would judge sufficiency on less evidence than was retrieved — a silent
+        # regression, which is the kind this repo goes out of its way to avoid.
+        body = citable_text(p).strip().replace("\n", " ")
         lines.append(f"- {head}: {body[:max_chars]}")
     return "\n".join(lines)
 
